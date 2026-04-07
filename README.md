@@ -1,14 +1,159 @@
 # Ariadne Protocol
 
-A cognitive persistence protocol for multi-agent systems.
+**A cognitive persistence protocol for multi-agent AI systems.**
 
-Bring your own cognitive architecture. Ariadne handles the persistence,
-integrity verification, and coordination of agent state transitions.
+Bring your own cognitive architecture. Ariadne handles the persistence, integrity verification, and coordination of agent state transitions.
+
+---
+
+## What It Is
+
+Multi-agent AI systems have a memory problem. Agents reason across long episodes of work — architecture decisions, debugging sessions, collaborative exchanges — but the record of that reasoning is either lost between sessions or stored in ways that can't be verified, audited, or reliably retrieved.
+
+Ariadne is a protocol for solving that problem. It defines:
+
+- A **hash-chained state tree** that provides cryptographic proof that the cognitive record hasn't been tampered with
+- A **governance rule set** (G-1 through G-9) that any conforming implementation must enforce
+- A **Write Intent Log (WIL)** that coordinates multi-store writes and guarantees recoverability
+- A **Crystallization protocol** that captures point-in-time integrity snapshots as first-class state transitions
+- A **Consultation record** that treats cross-agent exchanges as first-class protocol nodes, not implementation details
+
+The protocol is **agnostic to cognitive architecture**. A system using BDI, ReAct, chain-of-thought, SOAR, or any other reasoning model can implement Ariadne without inheriting assumptions about how agents think. Ariadne records *that* agents reasoned and *what* resulted — not *how* they reasoned.
+
+---
+
+## What It Is Not
+
+Ariadne is not a vector database, a RAG system, or a session memory layer. It is a **verifiable cognitive record protocol** — closer in design philosophy to a distributed ledger than to a retrieval system. The integrity guarantees come from the hash chain and the Merkle tree, not from the storage backend.
+
+---
+
+## Structure
+
+```
+ariadne/
+├── core/                    # The protocol — zero database dependencies
+│   ├── schema.py            # Episodes, Segments, Signals, governance G-1–G-9
+│   ├── merkle.py            # Adaptive Merkle tree
+│   ├── crystallization.py   # Delta state machine and verification logic
+│   ├── wil.py               # Write Intent Log state machine
+│   └── contracts.py         # Conformance benchmark framework
+└── adapters/
+    ├── base.py              # AriadneAdapter abstract interface (ASI)
+    └── neo4j/               # Reference implementation
+        ├── writer.py
+        ├── queries.py
+        ├── crystallization.py
+        └── wil.py
+```
+
+The dependency is strictly one-directional: adapters import the protocol core; the protocol core has no database dependencies.
+
+---
+
+## Core Concepts
+
+### Episode
+
+A bounded unit of agent work. Episodes have a formal lifecycle:
+
+```
+CREATED → ACTIVE → CLOSING → CLOSING_PENDING_SEAL → SEALED → ARCHIVED
+                 ↘ CRYSTALLIZATION_PENDING → CRYSTALLIZED ↗
+```
+
+### Segment
+
+An ordered, immutable content unit within an episode. Each segment carries a `content_hash` (SHA3-256 of its content) and a `content_ref` (pointer to the full content in durable storage). The hash chain is over the pointers and hashes — not the content itself. Content scales independently of the integrity layer.
+
+### Spine
+
+The ordered hash chain of segments within an episode. The Merkle root of the spine is the episode's integrity fingerprint. The spine is the proof; the blobs are the payload.
+
+### Crystallization
+
+A state transition *in* the episode chain — not a receipt *about* it. Each crystallization produces a `CrystallizationDeltaNode` structurally analogous to a blockchain block header. Crystallizations are immutable after creation. Corrections flow forward through successor episodes; the original record is never amended.
+
+### Write Intent Log (WIL)
+
+A three-phase coordination protocol for multi-store writes. Writes proceed in strict durability order: durable content store → authoritative structural store → ephemeral coordinator → semantic search index. An interrupted write at any phase is recoverable. All writes are idempotent.
+
+### Consultation
+
+A cross-agent exchange recorded as a first-class protocol node, not an application-level convention. Consultations form their own hash chain of `ExchangeEntry` nodes. The branch point is recorded before any exchange occurs (G-8). Resolution requires at least one entry (G-9).
+
+---
+
+## Implementing an Adapter
+
+Any database can serve as an Ariadne backend by implementing the `AriadneAdapter` interface:
+
+```python
+from ariadne.adapters.base import AriadneAdapter
+
+class MyDatabaseAdapter(AriadneAdapter):
+    # Implement the ASI methods
+    ...
+```
+
+A conforming adapter must:
+
+1. Enforce governance rules G-1 through G-9
+2. Preserve hash chain integrity — never modify `content_hash`, `spine_hash`, or `episode_root_hash` after creation
+3. Respect write ordering invariants across stores
+4. Support idempotent writes for WIL recovery
+5. Fail loudly on errors — never silently swallow writes
+
+The Neo4j adapter in `ariadne/adapters/neo4j/` is the reference implementation. See `SPEC.md` for the full conformance requirements.
+
+---
+
+## Conformance Testing
+
+The `ariadne.core.contracts` module provides a three-layer conformance framework:
+
+| Layer | Verifies |
+|-------|----------|
+| **Structural** | Hash chain integrity, governance rule enforcement, Merkle root consistency |
+| **Contextual** | Segment ordering, signal placement, consultation hash chains |
+| **Experiential** | End-to-end episode lifecycle: create → populate → seal → verify → archive |
+
+A conforming adapter must pass all structural layer checks.
+
+---
+
+## Installation
+
+```bash
+pip install ariadne-protocol        # once published to PyPI
+```
+
+For local development against the reference implementation:
+
+```toml
+# pyproject.toml
+[tool.poetry.dependencies]
+ariadne-protocol = {path = "../ariadne-protocol"}
+```
+
+---
 
 ## Status
 
-Alpha — extracted from the Ignis AI Organization System by Scorched Earth Labs.
+**Alpha.** The protocol core and Neo4j reference adapter are extracted and stable. Active development continues on branching, forking, merging, and agent tool-call retrieval interfaces. The protocol specification is in `SPEC.md`.
+
+Not recommended for production use outside of the Ignis OS environment until the first stable release.
+
+---
 
 ## License
 
 Apache-2.0
+
+The Apache license was chosen deliberately: it includes a patent grant clause, which matters for a protocol with novel cryptographic data structures at its core.
+
+---
+
+## Developed By
+
+[Scorched Earth Labs](https://scorchedearthlabs.com)
