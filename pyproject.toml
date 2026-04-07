@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ariadne-protocol"
+version = "0.1.0"
+description = "A cognitive persistence protocol for multi-agent systems"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.11"
+authors = [
+    { name = "Scorched Earth Labs", email = "dev@scorchedearthlabs.com" },
+]
+keywords = ["ai", "agents", "persistence", "protocol", "cognitive", "memory"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+neo4j = [
+    "neo4j>=5.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.urls]
+Homepage = "https://github.com/scorchedearthlabs/ariadne-protocol"
+Documentation = "https://github.com/scorchedearthlabs/ariadne-protocol/blob/main/SPEC.md"
+Repository = "https://github.com/scorchedearthlabs/ariadne-protocol"
+
+[tool.setuptools.packages.find]
+include = ["ariadne*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
