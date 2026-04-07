@@ -37,9 +37,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/scorchedearthlabs/ariadne-protocol"
-Documentation = "https://github.com/scorchedearthlabs/ariadne-protocol/blob/main/SPEC.md"
-Repository = "https://github.com/scorchedearthlabs/ariadne-protocol"
+Homepage = "https://github.com/scorched-earth-labs/ariadne-protocol"
+Documentation = "https://github.com/scorched-earth-labs/ariadne-protocol/blob/main/SPEC.md"
+Repository = "https://github.com/scorched-earth-labs/ariadne-protocol"
 
 [tool.setuptools.packages.find]
 include = ["ariadne*"]
