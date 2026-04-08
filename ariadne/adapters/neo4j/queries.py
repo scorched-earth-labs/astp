@@ -468,3 +468,167 @@ async def get_closure_record(
             return dict(record["closure"]) if record else None
 
     return await asyncio.to_thread(_query)
+
+
+# ── Agent Retrieval Queries ──────────────────────────────────────────────────
+
+
+async def get_segment_by_id(
+    driver,
+    episode_id: str,
+    segment_id: str,
+) -> Optional[dict[str, Any]]:
+    """
+    Retrieve a single segment by ID, scoped to episode_id.
+    Episode scoping is enforced in the Cypher query — never relaxed.
+    """
+    if not ARIADNE_ENABLED:
+        return None
+
+    def _query():
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $episode_id})
+                      -[:CONTAINS]->
+                      (s:AriadneSegment {segment_id: $segment_id})
+                RETURN s {
+                    .segment_id,
+                    .episode_id,
+                    .sequence_index,
+                    .segment_type,
+                    .author,
+                    .authored_at,
+                    .content_ref,
+                    .content_text,
+                    .retention_tier
+                } AS segment
+            """, {"episode_id": episode_id, "segment_id": segment_id})
+            record = result.single()
+            return dict(record["segment"]) if record else None
+
+    return await asyncio.to_thread(_query)
+
+
+async def get_segment_range(
+    driver,
+    episode_id: str,
+    from_index: int,
+    to_index: int,
+    segment_types: Optional[list[str]] = None,
+    authors: Optional[list[str]] = None,
+) -> list[dict[str, Any]]:
+    """
+    Retrieve segments between from_index and to_index (inclusive).
+    Optional filters: segment_types, authors.
+    Returns ordered by sequence_index ASC.
+    """
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        with driver.session() as session:
+            params: dict[str, Any] = {
+                "episode_id": episode_id,
+                "from_index": from_index,
+                "to_index": to_index,
+            }
+            type_clause = ""
+            if segment_types:
+                type_clause = "AND s.segment_type IN $segment_types"
+                params["segment_types"] = segment_types
+
+            author_clause = ""
+            if authors:
+                author_clause = "AND s.author IN $authors"
+                params["authors"] = authors
+
+            result = session.run(f"""
+                MATCH (e:AriadneEpisode {{episode_id: $episode_id}})
+                      -[:CONTAINS]->
+                      (s:AriadneSegment)
+                WHERE s.sequence_index >= $from_index
+                  AND s.sequence_index <= $to_index
+                  {type_clause}
+                  {author_clause}
+                RETURN s {{
+                    .segment_id,
+                    .episode_id,
+                    .sequence_index,
+                    .segment_type,
+                    .author,
+                    .authored_at,
+                    .content_ref,
+                    .content_text,
+                    .retention_tier
+                }} AS segment
+                ORDER BY s.sequence_index ASC
+            """, params)
+            return [dict(record["segment"]) for record in result]
+
+    return await asyncio.to_thread(_query)
+
+
+async def get_episode_spine(
+    driver,
+    episode_id: str,
+    limit: int = 20,
+    before_index: Optional[int] = None,
+    segment_types: Optional[list[str]] = None,
+    retention_tier: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """
+    Retrieve the most recent N segments from the Episode spine.
+    before_index scopes the query to segments before a given position.
+    Returns ordered by sequence_index ASC.
+    """
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        with driver.session() as session:
+            params: dict[str, Any] = {
+                "episode_id": episode_id,
+                "limit": limit,
+            }
+            before_clause = ""
+            if before_index is not None:
+                before_clause = "AND s.sequence_index < $before_index"
+                params["before_index"] = before_index
+
+            type_clause = ""
+            if segment_types:
+                type_clause = "AND s.segment_type IN $segment_types"
+                params["segment_types"] = segment_types
+
+            tier_clause = ""
+            if retention_tier:
+                tier_clause = "AND s.retention_tier = $retention_tier"
+                params["retention_tier"] = retention_tier
+
+            # DESC for LIMIT efficiency, reversed to ASC for agent consumption
+            result = session.run(f"""
+                MATCH (e:AriadneEpisode {{episode_id: $episode_id}})
+                      -[:CONTAINS]->
+                      (s:AriadneSegment)
+                WHERE 1=1
+                  {before_clause}
+                  {type_clause}
+                  {tier_clause}
+                RETURN s {{
+                    .segment_id,
+                    .episode_id,
+                    .sequence_index,
+                    .segment_type,
+                    .author,
+                    .authored_at,
+                    .content_ref,
+                    .content_text,
+                    .retention_tier
+                }} AS segment
+                ORDER BY s.sequence_index DESC
+                LIMIT $limit
+            """, params)
+            rows = [dict(record["segment"]) for record in result]
+            return list(reversed(rows))
+
+    return await asyncio.to_thread(_query)

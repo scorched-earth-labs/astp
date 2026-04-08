@@ -386,7 +386,33 @@ Schema version is recorded on:
 - Crystallization delta nodes (via `CrystallizationContent.schema_version`)
 - The schema version seed node in the database
 
-## 10. Conformance Testing
+## 10. Agent-Directed Retrieval
+
+Ariadne defines a read-path interface that is the complement of the WIL write-path. Where WIL governs how state is written into the Episode, the agent retrieval interface governs how agents pull content back out.
+
+Agent-directed retrieval replaces prompt injection as the mechanism for providing agents with Episode context. Rather than pushing pre-truncated history into the prompt before an agent evaluates the turn, agents issue tool calls to retrieve exactly what the current turn requires.
+
+### 10.1 Retrieval Interface
+
+A conforming adapter MUST implement three retrieval operations:
+
+**get_segment_by_id** — retrieve a single segment by ID, scoped to episode. Episode scoping MUST be enforced: a segment query against episode A must never return a segment belonging to episode B.
+
+**get_segment_range** — retrieve a contiguous range of segments by sequence_index (inclusive). Supports optional filtering by segment_type and author. Returns ordered by sequence_index ASC.
+
+**get_episode_spine** — retrieve the most recent N segments. Supports before_index scoping (return segments before a given spine position), optional segment_type filter, and optional retention_tier filter. Returns ordered by sequence_index ASC.
+
+### 10.2 Return Contract
+
+All retrieval operations return segment records containing: segment_id, episode_id, sequence_index, segment_type, author, authored_at, content_ref, content_text, retention_tier.
+
+`content_text` MUST be returned verbatim — no truncation, summarization, or modification. The retrieval layer is not permitted to make decisions about what content is relevant. That determination belongs to the agent.
+
+### 10.3 Episode Scoping
+
+All retrieval operations are scoped to a single episode_id. Cross-episode retrieval is not part of the core retrieval interface. Adapters MUST enforce episode scoping at the query level, not in application code.
+
+## 11. Conformance Testing
 
 The `ariadne.core.contracts` module provides a three-layer coherence measurement framework for verifying adapter conformance:
 
@@ -405,7 +431,7 @@ To verify a new adapter implementation:
 3. Run lifecycle checks: episode transitions follow the status lifecycle without state corruption
 4. Run WIL recovery checks: interrupted writes are correctly identified and idempotently resumable
 
-## 11. References
+## 12. References
 
 The following references are internal Scorched Earth Labs design documents that informed the protocol design. The protocol specification in this document is self-contained; these references provide historical context for architectural decisions.
 

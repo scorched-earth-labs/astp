@@ -186,6 +186,71 @@ class AriadneAdapter(ABC):
         """Get full episode detail including segment/signal counts."""
         ...
 
+    # ── Agent Retrieval Operations ───────────────────────────────────────────
+    # These methods expose Episode segment content to agents via tool calls.
+    # Agent-directed retrieval is a protocol-level capability: any conforming
+    # adapter must support it. This is the read-path complement to the WIL
+    # write-path — write ordering on the way in, agent-directed retrieval
+    # on the way out.
+
+    @abstractmethod
+    async def get_segment_by_id(
+        self,
+        episode_id: UUID,
+        segment_id: UUID,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a single segment by ID with full content.
+        Returns None if the segment does not exist or does not belong to
+        the specified episode (episode scoping is a security requirement —
+        never return segments across episode boundaries without explicit
+        cross-episode authorization).
+        """
+        ...
+
+    @abstractmethod
+    async def get_segment_range(
+        self,
+        episode_id: UUID,
+        from_index: int,
+        to_index: int,
+        segment_types: Optional[List[str]] = None,
+        authors: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve a contiguous range of segments by sequence_index (inclusive).
+        Primary tool for collaborative mode — agent wants turns N through M.
+
+        segment_types: optional filter e.g. ["CONVERSATION", "COLLABORATION"]
+        authors: optional filter by agent_id or "user"
+
+        Returns ordered by sequence_index ASC.
+        """
+        ...
+
+    @abstractmethod
+    async def get_episode_spine(
+        self,
+        episode_id: UUID,
+        limit: int = 20,
+        before_index: Optional[int] = None,
+        segment_types: Optional[List[str]] = None,
+        retention_tier: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve the most recent N segments from the Episode spine.
+
+        before_index: if provided, retrieves N segments before this spine
+        position. Use the agent's current sequence_index to get prior
+        context without knowing exact turn numbers.
+
+        segment_types: optional filter by type
+        retention_tier: optional filter — "PERSISTENT" or "EPHEMERAL"
+
+        Returns ordered by sequence_index ASC.
+        """
+        ...
+
     # ── Edge Operations ──────────────────────────────────────────────────────
 
     @abstractmethod
