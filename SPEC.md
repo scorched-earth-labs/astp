@@ -1,448 +1,368 @@
-# Ariadne Protocol Specification
+# Ariadne State Tree Protocol Specification
 
-**Version:** 0.1.0-draft
-**Status:** Working Draft
+**Version:** 2.0.0-draft
+**Status:** Working Draft — Phase 1 Implemented
 **Authors:** Scorched Earth Labs
-**Date:** 2026-04-07
+**Date:** 2026-04-09
+**Supersedes:** SPEC-v1.md (0.1.0-draft)
 
 ## 1. Abstract
 
 Ariadne is a cognitive persistence protocol for multi-agent AI systems. It provides a standardized, verifiable record of agent state transitions — what agents did, what state resulted, and cryptographic proof that the record hasn't been tampered with.
 
-The protocol is agnostic to cognitive architecture. A system using BDI, ReAct, chain-of-thought, SOAR, or any other reasoning model can implement Ariadne without inheriting assumptions about how agents think. Ariadne records *that* agents reasoned and *what* resulted — not *how* they reasoned.
+The protocol is agnostic to both cognitive architecture and node type. A system using BDI, ReAct, chain-of-thought, SOAR, or any other reasoning model can implement Ariadne without inheriting assumptions about how agents think. Ariadne records *that* agents reasoned and *what* resulted — not *how* they reasoned.
 
-The core contribution is a hash-chained state tree with governance rules that guarantee auditability, integrity, and coordination across distributed writes. The protocol defines *what* invariants must hold; adapters define *how* to enforce them in specific databases.
+**v2 core change:** The protocol primitive is `CognitiveNode`, not `Episode`. Episodes are the first *parameterization* of the protocol, not a precondition of it. Future node types (signals, agents, artifacts) slot into the same framework with zero protocol-layer changes.
 
 ## 2. Terminology
 
 | Term | Definition |
 |------|-----------|
-| **Episode** | A bounded unit of agent work. Contains segments, signals, and metadata. Has a lifecycle: CREATED → ACTIVE → SEALED → ARCHIVED. |
-| **Segment** | An ordered, immutable content unit within an episode. Types: CONVERSATION, REASONING, ARTIFACT, ANNOTATION, CONSULTATION, COLLABORATION. |
-| **Signal** | An external event that influences an episode. Classified by retention (EPHEMERAL/PERSISTENT/STRUCTURAL) and causal role (causal/contextual/observational/ephemeral). |
-| **Seal** | A cryptographic commitment that freezes an episode. Contains the spine hash, signal manifest hash, and episode root hash. |
-| **Spine** | The ordered hash chain of segments and SPINE-placed signals within an episode. The Merkle root of the spine is the episode's integrity fingerprint. |
-| **Crystallization** | A protocol-level state transition that captures a point-in-time integrity snapshot of the episode chain. Immutable once written. |
+| **CognitiveNode** | The universal protocol primitive. All cognitive state is represented as CognitiveNodes with type-specific payloads. |
+| **NodePayload** | Abstract interface for node-type-specific data. The protocol calls `validate()` and `to_content_hash_input()` — never inspects internals. |
+| **Episode** | A bounded unit of agent work. The Phase 1 node type. Implemented as `CognitiveNode` with `node_type="episode"` and `EpisodePayload`. |
+| **Segment** | An ordered, immutable content unit within an episode. |
+| **Spine** | The ordered hash chain of leaf hashes within a cognitive node tree. The Merkle root of the spine is the node's integrity fingerprint. |
+| **Seal** | A cryptographic commitment that freezes a cognitive node. |
+| **Crystallization** | A protocol-level state transition that captures a point-in-time integrity snapshot. Immutable once written. |
 | **WIL** | Write Intent Log. A coordination protocol for multi-store writes that guarantees ordering and recoverability. |
-| **Adapter** | A database-specific implementation of the persistence operations. The protocol defines the contract; the adapter fulfills it. |
-| **ASI** | Adapter Service Interface. The abstract contract that any conforming adapter must implement. |
-| **Governance Rule** | A protocol invariant (G-1 through G-9) that any conforming implementation must enforce. Violations are structural errors, not application errors. |
+| **Dual Index** | The separation of `sequence_index` (immutable temporal position, in hash) from `tree_leaf_index` (mutable structural position, NOT in hash). The epistemological core of v2. |
+| **Adapter** | A database-specific implementation of persistence operations. |
+| **ASI** | Adapter Service Interface. The abstract contract any conforming adapter must implement. |
+| **Governance Rule** | A protocol invariant that any conforming implementation must enforce. |
+| **Namespace Firewall** | The inviolable rule that the protocol layer (`ariadne.protocol.*`) never imports from node-type layers (`ariadne.nodes.*`). |
 
-## 3. Data Model
+## 3. Architecture
 
-### 3.1 Episode
-
-The root container for a unit of agent work.
+### 3.1 The Three-Layer Model
 
 ```
-EpisodeNode {
-  episode_id:              UUID        (unique, immutable after creation)
-  schema_version:          string      (protocol version, e.g. "1.1.0")
-  agent_id:                string      (FK to agent identity)
-  opened_at:               datetime    (UTC)
-  sealed_at:               datetime?   (null until sealed)
-  archived_at:             datetime?   (null until archived)
-  episode_status:          EpisodeStatus
-  crystallization_status:  CrystallizationStatus?
-  participants:            string[]    (agent_ids involved)
-  spine_hash:              string?     (Merkle root; null until sealed)
-  spine_fingerprint:       string?     (Adaptive Merkle fingerprint)
-  spine_depth:             int?        (Merkle tree depth)
-  signal_manifest_hash:    string?     (null until sealed)
-  episode_root_hash:       string?     (null until sealed)
-  parent_episode_id:       UUID?       (for branched episodes)
-  workspace_id:            string?     (links to external workspace)
-  title:                   string?     (human-readable)
-  context_note:            string?     (cognitive anchor)
-  episode_mode:            string      ("directed" | "collaborative")
+PROTOCOL LAYER — Node-Generic (ariadne.protocol.*)
+  CognitiveNode, CognitiveEdge, NodePayload ABC
+  Position-binding leaf hash, Merkle tree, delta records, audit chain
+  Governance rules, verification, version vectors
+  → No Episode symbols. No episode_id. No session_bounds.
+
+INSTANTIATION LAYER — Node Type Registry
+  NodeTypeDefinition, open enum registration
+  "episode" ← Phase 1    "signal" ← Phase 2    "agent" ← Phase 2
+
+NODE TYPE LAYER — Type-Specific Extensions (ariadne.nodes.*)
+  EpisodePayload implements NodePayload
+  Episode lifecycle state machine
+  → Dependency: Node Type Layer → Protocol Layer only. Never reverse.
+```
+
+### 3.2 The Namespace Firewall
+
+The protocol layer MUST NOT import from any node-type layer. This boundary is enforced by automated testing (AST scan of all protocol-layer imports). Violations are CI failures, not warnings.
+
+### 3.3 The Dual-Index Invariant
+
+| Index | Type | Mutability | Meaning | In Hash Preimage |
+|-------|------|-----------|---------|-----------------|
+| `sequence_index` | `int` | **Immutable** | Nth cognitive event in this context | Yes |
+| `tree_leaf_index` | `int` | Mutable | Current physical position in Merkle tree | **No** |
+
+This separation enables tree rebalancing without breaking integrity. Changing `sequence_index` is equivalent to rewriting history — it is a protocol violation. Changing `tree_leaf_index` is a structural optimization with no integrity impact.
+
+## 4. Data Model
+
+### 4.1 CognitiveNode
+
+The universal protocol primitive.
+
+```
+CognitiveNode {
+  node_id:          UUID         (unique, immutable)
+  node_type:        string       (open enum, validated via registry)
+  schema_version:   string       ("2.0.0")
+  sequence_index:   int          (IMMUTABLE — cognitive timeline position)
+  tree_leaf_index:  int          (mutable — physical Merkle position)
+  content_hash:     string       (SHA3-256 of payload)
+  authored_by:      string       (agent identity)
+  created_at:       datetime     (UTC)
+  sealed_at:        datetime?    (null = unsealed)
+  parent_node_id:   UUID?        (graph position anchor, IMMUTABLE)
+  payload:          dict         (serialized NodePayload)
+  leaf_hash:        string?      (computed once at creation, cached)
 }
 ```
 
-**Episode Status Lifecycle:**
+### 4.2 CognitiveEdge
+
+A typed, directed edge between cognitive nodes.
 
 ```
-CREATED → ACTIVE → CLOSING → CLOSING_PENDING_SEAL → SEALED → ARCHIVED
-                 ↘ CRYSTALLIZATION_PENDING → CRYSTALLIZED ↗
-```
-
-### 3.2 Segment
-
-An ordered, immutable content unit within an episode.
-
-```
-SegmentNode {
-  segment_id:      UUID
-  episode_id:      UUID        (FK to episode)
-  segment_type:    SegmentType (CONVERSATION|REASONING|ARTIFACT|ANNOTATION|CONSULTATION|COLLABORATION)
-  sequence_index:  int         (immutable after creation; defines spine order)
-  content_hash:    string      (SHA3-256 of serialized content)
-  content_ref:     string      (storage pointer URI)
-  content_text:    string?     (durable content on node)
-  authored_at:     datetime    (UTC)
-  author:          string      (agent_id)
-  retention_tier:  RetentionTier (PERSISTENT|EPHEMERAL)
+CognitiveEdge {
+  edge_id:          UUID
+  edge_type:        string
+  source_node_id:   UUID
+  target_node_id:   UUID
+  source_type:      string
+  target_type:      string
+  weight:           float
+  created_at:       datetime
 }
 ```
 
-**Retention semantics:** PERSISTENT segments are included in the spine hash. EPHEMERAL segments are excluded — they exist for operational context but are not part of the cryptographic record.
+### 4.3 NodePayload Interface
 
-**Content storage model:** Segments have two content fields that serve distinct purposes:
+Protocol code interacts with payloads through three methods only:
 
-- `content_ref` (required): A storage pointer URI that identifies where the full serialized content is stored. The blob at this URI is the source of truth for `content_hash` computation. A conforming implementation MUST be able to resolve a `content_ref` to retrieve the original content independently of the graph node.
-- `content_text` (optional): A durable copy of the content stored directly on the graph node. When present, this enables graph-local reads without a blob store round-trip. When both are present, `content_hash` is always computed from the blob at `content_ref`, not from `content_text`. Adapters MAY populate `content_text` for query convenience but MUST NOT rely on it as the canonical content source.
+- `validate() -> None` — check type-specific invariants
+- `to_content_hash_input() -> bytes` — deterministic byte representation
+- `to_dict() -> dict` — serialization for storage
 
-The `content_ref` URI scheme is implementation-defined. The protocol requires only that the URI is resolvable by the adapter that created it and that the content at the URI produces the same `content_hash` recorded on the segment.
+The protocol MUST NOT inspect payload fields directly.
 
-### 3.3 Signal
+### 4.4 Episode (Phase 1 Node Type)
 
-An external event that influences an episode.
+`EpisodePayload` implements `NodePayload` with fields: title, context_note, episode_type, episode_mode, workspace_id, participants, segment_count, signal_reads.
 
-```
-SignalNode {
-  signal_id:              UUID
-  episode_id:             UUID
-  signal_type:            SignalType    (EPHEMERAL|PERSISTENT|STRUCTURAL)
-  signal_class:           SignalClass   (causal|contextual|observational|ephemeral)
-  signal_source:          string
-  received_at:            datetime
-  signal_status:          SignalStatus  (RECEIVED|VALIDATED|COMMITTED|ATTESTED|EXCLUDED)
-  content_hash:           string
-  content_ref:            string?       (null for EPHEMERAL)
-  placement:              SignalPlacement (SPINE|BRANCH_LEAF|EXCLUDED_MANIFEST)
-  placement_rationale:    string?       (REQUIRED if EXCLUDED_MANIFEST)
-  influenced_segments:    string[]      (segment UUIDs)
-  persistence_confirmed:  bool
-}
-```
+Episode lifecycle states: ACTIVE, REBALANCING, SEALING, SEALED, SEALING_FAILED, REBALANCE_FAILED, ARCHIVED, EXPIRED.
 
-**Dual taxonomy:** Signals are classified on two independent axes:
-- **Type** (retention): How long the signal persists
-- **Class** (causal role): How the signal influences the episode
+## 5. Hash Chain
 
-### 3.4 Seal
+### 5.1 Hash Algorithm
 
-A cryptographic commitment that freezes an episode.
+All hashing uses **SHA3-256** (Keccak). No exceptions. This is a protocol-level commitment: changing the hash algorithm requires a major version bump.
+
+### 5.2 Position-Binding Leaf Hash
+
+The leaf hash preimage binds identity, type, position, content, temporal state, and graph position into a single commitment:
 
 ```
-SealNode {
-  seal_id:                       UUID
-  episode_id:                    UUID
-  sealed_at:                     datetime
-  sealed_by:                     string (agent_id)
-  spine_hash:                    string (SHA3-256 Merkle root)
-  signal_manifest_hash:          string
-  exclusion_hash:                string
-  episode_root_hash:             string (H(spine || manifest || exclusion))
-  write_intent_id:               UUID   (WIL entry that coordinated this seal)
-  seal_status:                   SealStatus (PENDING|COMMITTED|VERIFIED|DISPUTED)
-}
+leaf_hash = SHA3-256(
+  node_id                              (16 bytes, UUID)
+  len(node_type).to_bytes(4, "big")    (4 bytes, length prefix)
+  node_type                            (variable, UTF-8)
+  len(schema_version).to_bytes(4, "big")  (4 bytes, length prefix)
+  schema_version                       (variable, UTF-8)
+  sequence_index.to_bytes(8, "big")    (8 bytes, big-endian)
+  content_hash                         (32 bytes, hex-decoded)
+  sealed_at_ms.to_bytes(8, "big")      (8 bytes, Unix ms or 0)
+  parent_node_id                       (16 bytes, UUID or 16 zero bytes)
+)
 ```
 
-### 3.5 Consultation
+**Design rationale:**
+- **Length prefixing** on variable fields prevents collision attacks (e.g., `("ep","2.0")` vs `("e","p2.0")`)
+- **Unix milliseconds** for `sealed_at` avoids timezone/format non-determinism of ISO strings
+- **`node_type` in preimage** makes type confusion cryptographically detectable
+- **`tree_leaf_index` excluded** — the dual-index invariant requires it
 
-A cross-agent exchange recorded as a first-class protocol node.
+The leaf hash is computed once at node creation and never recomputed.
 
-```
-ConsultationNode {
-  consultation_id:         UUID
-  episode_id:              UUID        (initiating agent's episode)
-  consultation_type:       ConsultationType (advisory|delegated|collaborative|escalation)
-  initiating_agent:        string
-  consulting_agent:        string
-  initiated_at:            datetime
-  resolved_at:             datetime?
-  initiating_context_hash: string
-  consultation_prompt:     string      (stored directly)
-  consultation_prompt_hash: string
-  resolution_hash:         string?
-  consultation_node_hash:  string?     (H(initiation || resolution))
-}
-```
-
-Consultations form a hash chain of ExchangeEntry nodes:
-
-```
-ExchangeEntry {
-  entry_id:          UUID
-  consultation_id:   UUID
-  sequence:          int
-  speaker:           string
-  role:              ExchangeRole (initiator|consultant|participant)
-  content:           string
-  content_hash:      string
-  previous_hash:     string     ("GENESIS" for entry 0)
-}
-```
-
-### 3.6 Document, Codicil, Amendment
-
-**DocumentNode:** Verifiable attachment with content hash integrity.
-
-**CodicilNode:** Bounded addendum to a CLOSED episode. Appended, never integrated into the sealed record.
-
-**AmendmentLink:** Links a new episode to a sealed source. The original remains sealed; the new episode inherits context.
-
-## 4. Hash Chain
-
-### 4.1 Hash Algorithm
-
-All hashing uses **SHA3-256** (Keccak). This is a protocol-level commitment: changing the hash algorithm requires a schema version bump.
-
-### 4.2 Domain Separation
+### 5.3 Domain Separation
 
 To prevent second-preimage attacks across tree levels:
-- Leaf nodes: `SHA3-256(b"LEAF:" + content)`
+- Leaf level: `SHA3-256(b"LEAF:" + leaf_hash)`
 - Internal nodes: `SHA3-256(b"NODE:" + left + right)`
 
-### 4.3 Spine Hash (Merkle Root)
+### 5.4 Merkle Tree
 
-The spine hash is the Merkle root over ordered segments and SPINE-placed signals:
+A binary Merkle tree over domain-separated leaf hashes. Supports:
+- Full construction from leaf set
+- Incremental append (O(log n))
+- Inclusion proof generation (P2 — position-binding)
+- Inclusion proof verification
 
-1. Collect segment content hashes, ordered by `sequence_index` ASC
-2. Collect SPINE signal content hashes, ordered by `received_at` ASC
-3. Construct a binary Merkle tree with domain-separated leaf and node hashing
-4. The root of this tree is the `spine_hash`
+The tree is node-type-agnostic — it operates on hash strings only.
 
-### 4.4 Adaptive Merkle Tree
+### 5.5 Type Isolation Property
 
-The protocol includes an adaptive Merkle tree that extends the standard static construction with:
+A CognitiveNode with `node_type="episode"` and one with `node_type="signal"` at the same `sequence_index` produce **different leaf hashes** because `node_type` is in the preimage.
 
-1. **Ordering function** — Leaves sorted by configurable criteria (chronological, importance) before tree construction
-2. **Selective recalculation** — O(log n) updates when data is appended or changed; only the affected branch path is recomputed
-3. **Compact fingerprint** — Leftmost branch array extracted as a fixed-format hexadecimal string for efficient external verification
-4. **Threshold significance detection** — Comparing two fingerprints reveals the importance of changes: earlier differences indicate more significant structural changes
+## 6. Governance Rules
 
-The adaptive tree produces an identical root hash to the standard static construction but supports incremental operations and compact comparison.
-
-### 4.5 Episode Root Hash
-
-```
-episode_root_hash = SHA3-256(
-  b"NODE:" + spine_hash + signal_manifest_hash + exclusion_hash
-)
-```
-
-This three-component root captures the complete integrity state of a sealed episode.
-
-### 4.6 Consultation Hash Chain
-
-Exchange entries form a hash chain: each entry's `previous_hash` references the prior entry's `content_hash`. Entry 0 uses `"GENESIS"` as its `previous_hash`.
-
-```
-consultation_node_hash = SHA3-256(
-  b"NODE:" + initiation_hash + resolution_hash
-)
-```
-
-## 5. Governance Rules
-
-These invariants MUST be enforced by any conforming implementation. Violations are structural errors that indicate protocol non-conformance.
+These invariants MUST be enforced by any conforming implementation.
 
 ### G-1: Write Guard
 
-No segment or signal may be written to an episode in SEALING, SEALED, or ARCHIVED status.
+No modifications to sealed nodes. A node with non-null `sealed_at` is frozen.
 
-### G-2: Crystallization Lock Guard
+### G-2: Reparenting Prohibition
 
-No segment or signal may be written to an episode in CRYSTALLIZATION_PENDING status. The episode is frozen for integrity verification during this window. Writes are rejected until crystallization completes (transitions to CRYSTALLIZED) or is rolled back (reverts to ACTIVE).
+`parent_node_id` is immutable after creation. Reparenting is a governance violation, not a valid operation. A node's parentage is a fact about its origin.
 
-### G-3: Crystallization Immutability
+**Correction path:** Create a new node with correct parentage. Issue a deprecation record on the original. The original's hash and position remain permanently in the audit trail.
 
-Crystallization delta nodes are immutable after creation. No field on a `CrystallizationDeltaNode` may be modified after it is persisted. Erroneous crystallizations are corrected via successor episodes, not in-place amendment. The original record is preserved in the historical chain.
+### G-3: Sequence Monotonicity
 
-### G-4: Signal Classification Constraints
+New `sequence_index` values must be strictly greater than the current maximum. Non-monotonic sequence indices indicate either a bug or an insertion attack.
 
-The dual taxonomy (type x class) has composition rules that prevent semantically incoherent combinations:
+### G-4: Logical Clock Monotonicity
 
-- STRUCTURAL signals MUST have `signal_class=causal` (structural signals are by definition causal)
-- EPHEMERAL/causal signals MUST use BRANCH_LEAF placement, not SPINE (ephemeral causal influence is recorded but not included in the integrity chain)
+Logical clock values must be strictly monotonically increasing across audit records. A decreasing clock indicates backdating — either tampering or out-of-order insertion.
 
-### G-5: Exclusion Rationale
+### G-5: Node Type Registration
 
-`placement_rationale` is REQUIRED when a signal's placement is EXCLUDED_MANIFEST. The protocol demands an auditable reason for every exclusion.
+`node_type` must be registered in the `NodeTypeRegistry` before a node can be created. Unregistered types are rejected.
 
-### G-6: Hash Chain Integrity
+### G-6: Namespace Firewall
 
-Once a `content_hash`, `spine_hash`, or `episode_root_hash` is persisted, it MUST NOT be modified. These hashes are cryptographic commitments. If the underlying content changes (which itself may be a governance violation), the hash must not be retroactively updated. Integrity verification relies on the immutability of these fields.
+The protocol layer (`ariadne.protocol.*`) MUST NOT import from any node-type layer (`ariadne.nodes.*`). This is enforced by automated testing.
 
-### G-7: Causal Edge Requirement
+### G-7 through G-9: Signal Governance (inherited from v1)
 
-Signals with `signal_class=causal` REQUIRE a TRIGGERED edge to at least one segment. Causal signals without demonstrated influence are a protocol violation.
+- **G-7:** Causal signals require a TRIGGERED edge to at least one segment
+- **G-8:** Exchange entries require a prior initiation_hash on the consultation node
+- **G-9:** Consultation resolution requires at least one exchange entry
 
-### G-8: Initiation Before Exchange
+### G-10: Structural Delta Content Invariant
 
-Exchange entries may not exist without a prior `initiation_hash` on the consultation node. The branch point must be recorded before any exchange occurs.
+A structural delta (rebalancing) that sets `sequence_indices_unchanged: false` is an integrity violation. Rebalancing must never alter logical ordering.
 
-### G-9: Resolution Requires Entries
+## 7. Delta Records
 
-A consultation cannot be resolved (have a `resolution_hash`) without at least one exchange entry. Empty resolutions are meaningless and prohibited.
+Every state transition is recorded as a delta.
 
-## 6. Crystallization Protocol
+### 7.1 Content Delta
 
-Crystallization is a state transition IN the episode chain, not a receipt ABOUT it. Each crystallization produces a `CrystallizationDeltaNode` — structurally analogous to a blockchain block header.
-
-### 6.1 Version Vector
-
-Three-layer versioning tracks episode evolution:
-
-| Layer | Increments on | Purpose |
-|-------|--------------|---------|
-| `content_version` | APPEND, MODIFY, BRANCH, MERGE | Content changes |
-| `lifecycle_version` | CRYSTALLIZATION, ARCHIVE, EXPIRY | Lifecycle transitions |
-| `chain_version` | All deltas | Spine position |
-
-Crystallization increments `lifecycle_version` and `chain_version` but NOT `content_version` — episode content is unchanged by crystallization.
-
-### 6.2 Delta Construction
-
+Records content mutations (segment appends, updates):
 ```
-content_hash = SHA3-256(canonical_json(CrystallizationContent))
-node_hash    = SHA3-256(b"LEAF:" + content_hash + predecessor_hash)
+ContentDelta {
+  delta_id, node_id, segment_id,
+  sequence_index,                    (for verification)
+  previous_content_hash, new_content_hash,
+  pre_root, post_root,              (the CAS condition and result)
+  wall_clock, logical_clock, author
+}
 ```
 
-The `predecessor_hash` is a causal link (what came before). The `sealed_chain_root` is an integrity assertion (what the chain looks like). In re-crystallization scenarios these diverge; that divergence is meaningful audit data.
+### 7.2 Structural Delta
 
-### 6.3 Two-Phase Verification
+Records structural mutations (rebalancing):
+```
+StructuralDelta {
+  delta_id, node_id, delta_type,
+  sequence_indices_unchanged: bool,  (INVARIANT — must be true)
+  pre_rebalance_root, post_rebalance_root,
+  wall_clock, logical_clock, author
+}
+```
 
-**Phase 1:** Verify `node_hash` consistency — recompute from `content_hash` and `predecessor_hash` and compare to stored `node_hash`.
+## 8. Tamper-Evident Audit Chain
 
-**Phase 2:** Verify `sealed_chain_root` — reconstruct the Merkle root from current segment and signal hashes and compare to the stored root.
+The audit trail is a first-class data structure. Each `AuditRecord` includes `prev_audit_hash` — a chain link that makes the trail tamper-evident independently of the delta chain.
 
-Both phases must pass for the crystallization to be verified.
+```
+AuditRecord {
+  record_id, node_id, delta_id, delta_type,
+  actor, actor_role,
+  wall_clock, logical_clock,
+  pre_state_hash, post_state_hash,
+  delta_hash,
+  prev_audit_hash,                   ("GENESIS" for first record)
+  reason
+}
+```
 
-### 6.4 Ordering Constraint
+Tampering with any record breaks the chain at that point, detectable by any verifier replaying from genesis.
 
-A new crystallization delta's `chain_position` must be strictly greater than any prior delta. New content must exist since the last crystallization — re-crystallizing without new content is a governance error.
+## 9. Verification
 
-## 7. Write Intent Log (WIL)
+### 9.1 The Five-Test Gate
 
-The WIL is a coordination protocol for multi-store writes. It guarantees ordering, recoverability, and the provisional state invariant.
+Any conforming implementation MUST detect all five classes of tampering:
 
-### 7.1 Three Storage Invariants
+| # | Attack | Detection Mechanism |
+|---|--------|-------------------|
+| 1 | Content tampering | `content_hash` changes → `leaf_hash` mismatch → root mismatch |
+| 2 | Sequence index modification | `sequence_index` in leaf hash preimage → `leaf_hash` changes |
+| 3 | Segment insertion/deletion | Leaf count changes → root mismatch; position gaps detected |
+| 4 | Audit chain tampering | `prev_audit_hash` chain breaks at tampered record |
+| 5 | Backdated wall_clock | Logical clock monotonicity violation |
 
-1. **The ephemeral coordinator is not a persistent store.** The WIL coordinator (e.g., Redis in the reference implementation) manages in-flight write state but is not durable. Loss of coordinator state is recoverable from the authoritative store.
-2. **Write ordering is a formal invariant.** Writes proceed in strict durability order: durable content store → authoritative structural store → ephemeral coordinator → semantic search index. This ordering guarantees that the most durable store is always written first. Degradation of lower-priority stores (e.g., semantic search) is always recoverable from higher-priority stores. In the reference implementation: Blob → Neo4j → Redis → QDrant.
-3. **Provisional state never enters persistent storage.** Data in the provisional window may only exist in the ephemeral coordinator. It must be crystallized before writing to any durable store.
+A verifier catching only test 1 is a *content* integrity verifier. Tests 2-5 are required for *temporal* integrity. All five must pass.
 
-### 7.2 Three-Phase Write Protocol
+### 9.2 Inclusion Proof (P2)
 
-**Phase 1 — INTENT_DECLARED:** Create a WIL entry with `completed_at=null`. This declares the write intent before any mutation occurs.
+A position-binding Merkle inclusion proof proves a node exists at a specific position:
 
-**Phase 2 — WRITE_EXECUTION:** Execute writes in mandatory order, recording each store completion. If a write fails mid-sequence, the WIL entry records the last completed store for recovery.
+```
+InclusionProof {
+  sequence_index,           (the position claim)
+  leaf_hash,                (content commitment — not content)
+  merkle_path: Hash[],      (sibling hashes to root)
+  path_directions: str[],   (left/right for each sibling)
+  spine_root                (root being proven against)
+}
+```
 
-**Phase 3 — COMPLETION:** Mark the WIL entry complete and graduate it from the ephemeral coordinator (Redis) to the durable store (Neo4j). Delete the ephemeral entry.
-
-### 7.3 Recovery
-
-On startup and periodically, scan for WIL entries with `completed_at=null`. These represent interrupted writes. The `last_completed_store` field indicates where to resume. All writes are idempotent — re-execution is safe.
-
-### 7.4 Ephemeral Coordinator TTL Policy
-
-Every key written to the ephemeral coordinator MUST carry an explicit TTL. Keys without a TTL policy entry are a governance violation. This prevents coordinator state from accumulating unboundedly and ensures that interrupted writes are eventually visible to recovery scanners.
-
-The reference implementation uses Redis with the following key patterns and TTLs:
-
-| Pattern | TTL | Rationale |
-|---------|-----|-----------|
-| `ariadne::episode::{id}` | 4 hours | Session lifetime max |
-| `ariadne::branch::{id}` | 2 hours | Branch lifetime max |
-| `ariadne::merkle::{id}` | 15 minutes | Renewed on verification |
-| `ariadne::manifest::{id}` | Provisional window | Configurable (default 4h) |
-| `ariadne::wil::{id}` | 24 hours | Before graduation to durable store |
-| `ariadne::consultation::{id}` | 4 hours | Same as episode |
-
-Alternative coordinator implementations MUST define equivalent TTL policies appropriate to their storage mechanism.
-
-## 8. Adapter Requirements
-
-A conforming adapter MUST:
-
-1. Implement the `AriadneAdapter` interface (see `ariadne/adapters/base.py`)
-2. Enforce all governance rules (G-1 through G-9, classification constraints, lock guards)
-3. Preserve hash chain integrity — never modify `content_hash`, `spine_hash`, or `episode_root_hash` after creation
-4. Respect write ordering invariants when spanning multiple stores
-5. Support idempotent writes for WIL recovery
-6. Fail loudly on errors — never silently swallow writes
-
-A conforming adapter SHOULD:
-
-1. Provide schema initialization (constraints, indexes) appropriate to the database
-2. Support both async and sync operation modes
-3. Log when operations are skipped due to feature flags
-
-A conforming adapter MAY:
-
-1. Implement additional query operations beyond the ASI minimum
-2. Add database-specific optimizations (e.g., batch operations, connection pooling)
-3. Support additional storage backends for the WIL coordinator role (not just Redis)
-
-## 9. Schema Version
-
-The current schema version is `1.1.0`. The hash algorithm (SHA3-256) is locked for the current schema version. Changing the hash algorithm requires a schema version bump.
-
-Schema version is recorded on:
-- Episode nodes (`schema_version` field)
-- Consultation nodes (`schema_version` field)
-- Crystallization delta nodes (via `CrystallizationContent.schema_version`)
-- The schema version seed node in the database
+Verifier recomputes domain-separated leaf hash, walks the Merkle path, confirms it reaches `spine_root`. Segment content is never revealed.
 
 ## 10. Agent-Directed Retrieval
 
-Ariadne defines a read-path interface that is the complement of the WIL write-path. Where WIL governs how state is written into the Episode, the agent retrieval interface governs how agents pull content back out.
-
-Agent-directed retrieval replaces prompt injection as the mechanism for providing agents with Episode context. Rather than pushing pre-truncated history into the prompt before an agent evaluates the turn, agents issue tool calls to retrieve exactly what the current turn requires.
-
-### 10.1 Retrieval Interface
-
 A conforming adapter MUST implement three retrieval operations:
 
-**get_segment_by_id** — retrieve a single segment by ID, scoped to episode. Episode scoping MUST be enforced: a segment query against episode A must never return a segment belonging to episode B.
+**get_segment_by_id** — single segment by ID, episode-scoped. Episode scoping MUST be enforced at the query level.
 
-**get_segment_range** — retrieve a contiguous range of segments by sequence_index (inclusive). Supports optional filtering by segment_type and author. Returns ordered by sequence_index ASC.
+**get_segment_range** — contiguous range by sequence_index (inclusive). Supports filtering by segment_type and author. Returns ordered by sequence_index ASC.
 
-**get_episode_spine** — retrieve the most recent N segments. Supports before_index scoping (return segments before a given spine position), optional segment_type filter, and optional retention_tier filter. Returns ordered by sequence_index ASC.
+**get_episode_spine** — most recent N segments. Supports before_index scoping, segment_type filter, retention_tier filter. Returns ordered by sequence_index ASC.
 
-### 10.2 Return Contract
+`content_text` MUST be returned verbatim — no truncation, summarization, or modification. The retrieval layer does not decide what content is relevant.
 
-All retrieval operations return segment records containing: segment_id, episode_id, sequence_index, segment_type, author, authored_at, content_ref, content_text, retention_tier.
+## 11. Write Intent Log (WIL)
 
-`content_text` MUST be returned verbatim — no truncation, summarization, or modification. The retrieval layer is not permitted to make decisions about what content is relevant. That determination belongs to the agent.
+### 11.1 Three Storage Invariants
 
-### 10.3 Episode Scoping
+1. **The ephemeral coordinator is not a persistent store.** Loss of coordinator state is recoverable from the authoritative store.
+2. **Write ordering is a formal invariant.** Durable content store → authoritative structural store → ephemeral coordinator → semantic search index.
+3. **Provisional state never enters persistent storage.**
 
-All retrieval operations are scoped to a single episode_id. Cross-episode retrieval is not part of the core retrieval interface. Adapters MUST enforce episode scoping at the query level, not in application code.
+### 11.2 Three-Phase Write Protocol
 
-## 11. Conformance Testing
+**Phase 1 — INTENT_DECLARED:** Create WIL entry with `completed_at=null`.
+**Phase 2 — WRITE_EXECUTION:** Execute writes in mandatory order, recording each store completion.
+**Phase 3 — COMPLETION:** Mark complete, graduate from ephemeral coordinator to durable store.
 
-The `ariadne.core.contracts` module provides a three-layer coherence measurement framework for verifying adapter conformance:
+### 11.3 Ephemeral Coordinator TTL Policy
 
-| Layer | What it verifies |
-|-------|-----------------|
-| **Structural** | Hash chain integrity, governance rule enforcement, Merkle root consistency |
-| **Contextual** | Segment ordering, signal placement, consultation hash chains |
-| **Experiential** | End-to-end episode lifecycle (create → populate → seal → verify → archive) |
+Every coordinator key MUST carry an explicit TTL. Keys without a TTL policy entry are a governance violation. Alternative coordinator implementations MUST define equivalent TTL policies.
 
-A conforming adapter MUST pass all structural layer checks. Contextual and experiential layers provide additional confidence but are not strict conformance requirements.
+## 12. Adapter Requirements
 
-To verify a new adapter implementation:
+A conforming adapter MUST:
 
-1. Run structural checks: governance rules G-1 through G-9 produce correct errors on violation
-2. Run hash integrity checks: `spine_hash` and `episode_root_hash` match reconstructed values
-3. Run lifecycle checks: episode transitions follow the status lifecycle without state corruption
-4. Run WIL recovery checks: interrupted writes are correctly identified and idempotently resumable
+1. Implement the `AriadneAdapter` interface
+2. Enforce all governance rules
+3. Preserve hash chain integrity — never modify leaf_hash, spine_root, or content_hash after creation
+4. Enforce the dual-index invariant: `tree_leaf_index` never in any hash preimage
+5. Respect write ordering invariants across stores
+6. Support idempotent writes for WIL recovery
+7. Fail loudly on errors — never silently swallow writes
 
-## 12. References
+## 13. Conformance Testing
 
-The following references are internal Scorched Earth Labs design documents that informed the protocol design. The protocol specification in this document is self-contained; these references provide historical context for architectural decisions.
+The `ariadne.protocol.verification` module provides the `DeltaVerifier` — the five-test gate that any conforming implementation must pass.
+
+| Layer | Verifies |
+|-------|----------|
+| **Structural** | Hash chain integrity, leaf hash correctness, Merkle root consistency |
+| **Temporal** | Sequence monotonicity, logical clock monotonicity, position-binding |
+| **Audit** | Tamper-evident chain integrity, delta record consistency |
+
+## 14. Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 0.1.0-draft | 2026-04-07 | Initial extraction. Episode-centric. See SPEC-v1.md. |
+| 2.0.0-draft | 2026-04-09 | CognitiveNode foundation. Dual-index. Position-binding leaf hash. Five-test gate. Namespace firewall. |
+
+## 15. References
+
+Internal Scorched Earth Labs design documents that informed the protocol:
 
 | Reference | Decision |
 |-----------|----------|
-| CLO-CONSOLIDATED-1.1 | Phase 1 architecture synthesis — episode/segment schema, hash chain design |
+| v2 Synthesis | Position-binding, dual-index, delta records, proof system P1-P13 |
+| Node-Generic Architecture (Revised) | CognitiveNode as primitive, namespace firewall, reparenting prohibition |
+| CLO-CONSOLIDATED-1.1 | Phase 1 architecture synthesis |
 | OQ-D01 | Write ordering and provisional state invariants |
-| OQ-D02 | Crystallization as state transition (not receipt) |
-| CLO-03 S3.1 | Dual taxonomy composition rules for signals |
-| CLO-06 S6 | Write Intent Log three-phase protocol |
-| CLO-08 S8.3 | Redis TTL policy for ephemeral coordinator keys |
+| OQ-D02 | Crystallization as state transition |
 
 ---
 
