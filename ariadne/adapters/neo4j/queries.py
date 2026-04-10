@@ -473,14 +473,16 @@ async def get_closure_record(
 # ── Agent Retrieval Queries ──────────────────────────────────────────────────
 
 
-async def get_segment_by_id(
+async def get_spine_snapshot_index(
     driver,
     episode_id: str,
-    segment_id: str,
-) -> Optional[dict[str, Any]]:
+) -> Optional[int]:
     """
-    Retrieve a single segment by ID, scoped to episode_id.
-    Episode scoping is enforced in the Cypher query — never relaxed.
+    Get the current max sequence_index for an episode.
+    Used to capture a spine snapshot — all segments at or below
+    this index are guaranteed stable (segments are append-only).
+
+    Returns None if no segments exist or ARIADNE_ENABLED is false.
     """
     if not ARIADNE_ENABLED:
         return None
@@ -489,9 +491,45 @@ async def get_segment_by_id(
         with driver.session() as session:
             result = session.run("""
                 MATCH (e:AriadneEpisode {episode_id: $episode_id})
+                      -[:CONTAINS]->(s:AriadneSegment)
+                RETURN max(s.sequence_index) AS max_index
+            """, {"episode_id": episode_id})
+            record = result.single()
+            return record["max_index"] if record and record["max_index"] is not None else None
+
+    return await asyncio.to_thread(_query)
+
+
+async def get_segment_by_id(
+    driver,
+    episode_id: str,
+    segment_id: str,
+    max_sequence_index: Optional[int] = None,
+) -> Optional[dict[str, Any]]:
+    """
+    Retrieve a single segment by ID, scoped to episode_id.
+    Episode scoping is enforced in the Cypher query — never relaxed.
+
+    max_sequence_index: if provided, rejects segments above this index
+    (snapshot isolation — only return segments visible at snapshot time).
+    """
+    if not ARIADNE_ENABLED:
+        return None
+
+    def _query():
+        with driver.session() as session:
+            params = {"episode_id": episode_id, "segment_id": segment_id}
+            snapshot_clause = ""
+            if max_sequence_index is not None:
+                snapshot_clause = "WHERE s.sequence_index <= $max_index"
+                params["max_index"] = max_sequence_index
+
+            result = session.run(f"""
+                MATCH (e:AriadneEpisode {{episode_id: $episode_id}})
                       -[:CONTAINS]->
-                      (s:AriadneSegment {segment_id: $segment_id})
-                RETURN s {
+                      (s:AriadneSegment {{segment_id: $segment_id}})
+                {snapshot_clause}
+                RETURN s {{
                     .segment_id,
                     .episode_id,
                     .sequence_index,
@@ -501,8 +539,8 @@ async def get_segment_by_id(
                     .content_ref,
                     .content_text,
                     .retention_tier
-                } AS segment
-            """, {"episode_id": episode_id, "segment_id": segment_id})
+                }} AS segment
+            """, params)
             record = result.single()
             return dict(record["segment"]) if record else None
 
@@ -516,21 +554,28 @@ async def get_segment_range(
     to_index: int,
     segment_types: Optional[list[str]] = None,
     authors: Optional[list[str]] = None,
+    max_sequence_index: Optional[int] = None,
 ) -> list[dict[str, Any]]:
     """
     Retrieve segments between from_index and to_index (inclusive).
     Optional filters: segment_types, authors.
+    max_sequence_index: snapshot isolation cap (only return segments at or below).
     Returns ordered by sequence_index ASC.
     """
     if not ARIADNE_ENABLED:
         return []
+
+    # Snapshot isolation: cap to_index at snapshot boundary
+    effective_to = to_index
+    if max_sequence_index is not None:
+        effective_to = min(to_index, max_sequence_index)
 
     def _query():
         with driver.session() as session:
             params: dict[str, Any] = {
                 "episode_id": episode_id,
                 "from_index": from_index,
-                "to_index": to_index,
+                "to_index": effective_to,
             }
             type_clause = ""
             if segment_types:
@@ -575,10 +620,12 @@ async def get_episode_spine(
     before_index: Optional[int] = None,
     segment_types: Optional[list[str]] = None,
     retention_tier: Optional[str] = None,
+    max_sequence_index: Optional[int] = None,
 ) -> list[dict[str, Any]]:
     """
     Retrieve the most recent N segments from the Episode spine.
     before_index scopes the query to segments before a given position.
+    max_sequence_index: snapshot isolation cap (only return segments at or below).
     Returns ordered by sequence_index ASC.
     """
     if not ARIADNE_ENABLED:
@@ -591,9 +638,15 @@ async def get_episode_spine(
                 "limit": limit,
             }
             before_clause = ""
-            if before_index is not None:
+            # Snapshot isolation: use the tighter of before_index and max_sequence_index
+            effective_before = before_index
+            if max_sequence_index is not None:
+                snapshot_before = max_sequence_index + 1  # inclusive → exclusive
+                if effective_before is None or snapshot_before < effective_before:
+                    effective_before = snapshot_before
+            if effective_before is not None:
                 before_clause = "AND s.sequence_index < $before_index"
-                params["before_index"] = before_index
+                params["before_index"] = effective_before
 
             type_clause = ""
             if segment_types:
