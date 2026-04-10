@@ -1,9 +1,9 @@
 # Ariadne State Tree Protocol Specification
 
-**Version:** 2.0.0-draft
-**Status:** Working Draft — Phase 1 Implemented
+**Version:** 2.1.0-draft
+**Status:** Working Draft — Phase 1 Implemented, Coordination Protocol Added
 **Authors:** Scorched Earth Labs
-**Date:** 2026-04-09
+**Date:** 2026-04-10
 **Supersedes:** SPEC-v1.md (0.1.0-draft)
 
 ## 1. Abstract
@@ -305,25 +305,78 @@ A conforming adapter MUST implement three retrieval operations:
 
 `content_text` MUST be returned verbatim — no truncation, summarization, or modification. The retrieval layer does not decide what content is relevant.
 
-## 11. Write Intent Log (WIL)
+### 10.4 Snapshot Isolation
 
-### 11.1 Three Storage Invariants
+All retrieval operations within a single agent turn MUST read against a consistent spine snapshot, not live database state. This prevents parallel branches from observing divergent Episode content due to concurrent writes by other agents.
+
+**Snapshot capture:** At the start of each agent turn, the system queries the current `max(sequence_index)` for the active Episode and pins all retrieval to that boundary. Segments written after the snapshot are invisible to that turn's retrieval calls.
+
+**Snapshot lifecycle:**
+1. Turn begins → capture `max_sequence_index` from the authoritative store
+2. All retrieval tool calls within the turn pass `max_sequence_index` to the query layer
+3. Query layer filters: only segments at or below the snapshot index are returned
+4. Turn ends → snapshot is cleared; next turn captures a fresh snapshot
+
+**Parallel branch guarantee:** If multiple agents or specialists execute in parallel (e.g., fan-out patterns), and all share the same snapshot boundary, they are guaranteed to reason from identical Episode context. Divergence between branches is task-driven, not memory-driven.
+
+A conforming adapter MUST support `max_sequence_index` as an optional parameter on all three retrieval operations (`get_segment_by_id`, `get_segment_range`, `get_episode_spine`). When provided, results MUST be filtered to segments at or below that index.
+
+**Snapshot capture function:** A conforming adapter MUST implement `get_spine_snapshot_index(episode_id) -> Optional[int]` which returns the current maximum `sequence_index` for an Episode, or None if no segments exist.
+
+### 10.5 Tail Write Advisory
+
+When an agent is actively writing segments to the Episode spine, other agents capturing snapshots during that write window may observe a partially-committed state. The tail write advisory is a coordination signal that protects snapshot capture.
+
+**Protocol:**
+1. Before writing segments to the authoritative store, the writing agent sets a tail write advisory for the Episode
+2. Any agent capturing a spine snapshot checks the advisory; if active, the snapshot index is reduced by one (excluding the in-progress tail)
+3. After the write completes (success or failure), the advisory is cleared
+
+**Scope:** The advisory is a soft coordination signal, not a hard lock. It does not prevent writes or reads — it adjusts snapshot boundaries to avoid phantom reads of uncommitted segments.
+
+**Implementation note:** The advisory is in-process state (not persisted to the ephemeral coordinator) when all agents run in the same process. Distributed deployments require the advisory to be stored in the ephemeral coordinator (e.g., Redis) with a short TTL as a safety bound.
+
+### 10.6 HITL Re-Validation Gate
+
+Write operations that require human-in-the-loop (HITL) approval introduce a temporal gap between when the action is requested and when it is executed. During this gap, the Episode spine may advance, making the approval context stale.
+
+**Protocol:**
+1. When a write capability requests HITL approval, the current `spine_snapshot_index` is stored in the approval request context
+2. When the approved action is executed, the system queries the current `max(sequence_index)` for the Episode
+3. If the spine has advanced beyond the stored snapshot index, the execution is rejected with a `stale_approval` error
+4. The requesting agent must re-evaluate the action against current Episode state and re-request if still appropriate
+
+**Rationale:** A stale approval is worse than a rejected one. An action approved based on Episode state at index 42 may be semantically incorrect at index 47 — five new segments may have introduced context that contradicts the action's premise. The re-validation gate surfaces this conflict rather than silently executing.
+
+**Failure mode:** If the re-validation check itself fails (e.g., database unavailable), the system SHOULD log a warning and proceed with execution. The re-validation gate is a safety mechanism, not a hard blocker — availability takes precedence over stale-detection in degraded conditions.
+
+## 11. Retrieval Side-Effect Contract
+
+Retrieval operations MUST NOT modify the Episode spine. Retrieval is a read-only operation — no segment creation, no hash updates, no state transitions.
+
+If an implementation adds access logging (e.g., `last_retrieved_at`, `retrieval_count` on segments), these fields MUST be stored as **side-channel data** explicitly excluded from `content_hash` and `leaf_hash` computation. A retrieval that updates an access counter must not invalidate the Merkle tree.
+
+**The invariant:** A retrieval tool call, followed by a full Merkle verification, MUST produce the same result as the verification without the retrieval. Retrieval is observationally transparent to the integrity layer.
+
+## 12. Write Intent Log (WIL)
+
+### 12.1 Three Storage Invariants
 
 1. **The ephemeral coordinator is not a persistent store.** Loss of coordinator state is recoverable from the authoritative store.
 2. **Write ordering is a formal invariant.** Durable content store → authoritative structural store → ephemeral coordinator → semantic search index.
 3. **Provisional state never enters persistent storage.**
 
-### 11.2 Three-Phase Write Protocol
+### 12.2 Three-Phase Write Protocol
 
 **Phase 1 — INTENT_DECLARED:** Create WIL entry with `completed_at=null`.
 **Phase 2 — WRITE_EXECUTION:** Execute writes in mandatory order, recording each store completion.
 **Phase 3 — COMPLETION:** Mark complete, graduate from ephemeral coordinator to durable store.
 
-### 11.3 Ephemeral Coordinator TTL Policy
+### 12.3 Ephemeral Coordinator TTL Policy
 
 Every coordinator key MUST carry an explicit TTL. Keys without a TTL policy entry are a governance violation. Alternative coordinator implementations MUST define equivalent TTL policies.
 
-## 12. Adapter Requirements
+## 13. Adapter Requirements
 
 A conforming adapter MUST:
 
@@ -335,7 +388,7 @@ A conforming adapter MUST:
 6. Support idempotent writes for WIL recovery
 7. Fail loudly on errors — never silently swallow writes
 
-## 13. Conformance Testing
+## 14. Conformance Testing
 
 The `ariadne.protocol.verification` module provides the `DeltaVerifier` — the five-test gate that any conforming implementation must pass.
 
@@ -345,14 +398,15 @@ The `ariadne.protocol.verification` module provides the `DeltaVerifier` — the 
 | **Temporal** | Sequence monotonicity, logical clock monotonicity, position-binding |
 | **Audit** | Tamper-evident chain integrity, delta record consistency |
 
-## 14. Version History
+## 15. Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
 | 0.1.0-draft | 2026-04-07 | Initial extraction. Episode-centric. See SPEC-v1.md. |
 | 2.0.0-draft | 2026-04-09 | CognitiveNode foundation. Dual-index. Position-binding leaf hash. Five-test gate. Namespace firewall. |
+| 2.1.0-draft | 2026-04-10 | Retrieval coordination protocol: snapshot isolation (10.4), tail write advisory (10.5), HITL re-validation gate (10.6), side-effect contract (11). |
 
-## 15. References
+## 16. References
 
 Internal Scorched Earth Labs design documents that informed the protocol:
 
