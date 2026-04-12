@@ -377,13 +377,15 @@ Verifier recomputes domain-separated leaf hash, walks the Merkle path, confirms 
 
 ## 10. Agent-Directed Retrieval
 
-A conforming adapter MUST implement three retrieval operations:
+> **Node-Type Scope Note:** The retrieval operations defined below are the Episode-parameterized retrieval contract — the Phase 1 instantiation for `node_type="episode"`. Future node types (signals, agents, artifacts) will define their own retrieval contracts appropriate to their structure and access patterns. The protocol-level invariants — snapshot isolation (10.4), tail write advisory (10.5), HITL re-validation (10.6), and the side-effect contract (Section 11) — apply to ALL node-type retrieval contracts, not just Episode retrieval.
 
-**get_segment_by_id** — single segment by ID, episode-scoped. Episode scoping MUST be enforced at the query level.
+A conforming adapter implementing Episode retrieval MUST provide three operations:
+
+**get_segment_by_id** — single segment by ID, node-scoped. Node scoping MUST be enforced at the query level — a query against node A must never return content belonging to node B.
 
 **get_segment_range** — contiguous range by sequence_index (inclusive). Supports filtering by segment_type and author. Returns ordered by sequence_index ASC.
 
-**get_episode_spine** — most recent N segments. Supports before_index scoping, segment_type filter, retention_tier filter. Returns ordered by sequence_index ASC.
+**get_episode_spine** — most recent N segments from an Episode's spine. Supports before_index scoping, segment_type filter, retention_tier filter. Returns ordered by sequence_index ASC.
 
 `content_text` MUST be returned verbatim — no truncation, summarization, or modification. The retrieval layer does not decide what content is relevant.
 
@@ -447,7 +449,7 @@ Every retrieval tool call SHOULD produce a `RetrievalAuditRecord` — a side-cha
 ```
 RetrievalAuditRecord {
   record_id:       UUID
-  episode_id:      string
+  node_id:         string       (the CognitiveNode being read from)
   actor:           string       (agent_id performing the retrieval)
   tool_name:       string       (which retrieval tool was called)
   parameters:      dict         (from_index, to_index, limit, filters, etc.)
@@ -458,9 +460,9 @@ RetrievalAuditRecord {
 }
 ```
 
-Retrieval audit records are stored on separate nodes (not on segment nodes), linked to episodes via dedicated edges. They are NOT included in any hash computation. A conforming adapter SHOULD persist retrieval audit records but MUST NOT fail a retrieval if audit persistence fails — retrieval availability takes precedence over audit completeness.
+Retrieval audit records are stored on separate nodes (not on segment nodes), linked to the source CognitiveNode via dedicated edges. They are NOT included in any hash computation. A conforming adapter SHOULD persist retrieval audit records but MUST NOT fail a retrieval if audit persistence fails — retrieval availability takes precedence over audit completeness.
 
-Retrieval audit records enable post-hoc analysis: which agents read what content, at what point in the Episode, and whether their snapshot was current or stale. This is the read-path complement to the WIL's write-path observability.
+Retrieval audit records enable post-hoc analysis: which agents read what content, at what point in the node's spine, and whether their snapshot was current or stale. This is the read-path complement to the WIL's write-path observability.
 
 ## 12. Write Intent Log (WIL)
 
@@ -734,13 +736,66 @@ This is the concrete expression of the cross-architecture interoperability guara
 
 ## 17. Conformance Testing
 
-The `ariadne.protocol.verification` module provides the `DeltaVerifier` — the five-test gate that any conforming implementation must pass. Phase 3 adds witness and chain verification to the conformance surface.
+The `ariadne.protocol.verification` module provides the `DeltaVerifier` — the five-test gate that any conforming implementation must pass.
+
+### 17.1 Phase 1-2 Conformance (Five-Test Gate)
 
 | Layer | Verifies |
 |-------|----------|
 | **Structural** | Hash chain integrity, leaf hash correctness, Merkle root consistency |
 | **Temporal** | Sequence monotonicity, logical clock monotonicity, position-binding |
 | **Audit** | Tamper-evident chain integrity, delta record consistency |
+
+The five specific test cases are defined in Section 9.1. A conforming implementation MUST detect all five tampering classes.
+
+### 17.2 Phase 3 Conformance Test Vectors
+
+Phase 3 adds the following prescriptive test vectors. Implementors claiming Phase 3 conformance MUST pass all of them:
+
+**Key Derivation Tests:**
+
+| # | Test | Expected |
+|---|------|----------|
+| K1 | Derive Node Key with `node_type="episode"` and again with `node_type="signal"` using same `node_id` | Keys MUST differ (G-16) |
+| K2 | Derive Seal Key with two different `spine_root` values for same node | Keys MUST differ |
+| K3 | Attempt to create `NodeKeyRecord` with `key_version` less than existing | MUST reject (G-15) |
+
+**Witness Verification Tests:**
+
+| # | Test | Expected |
+|---|------|----------|
+| W1 | Create `WitnessRecord` with correct `commitment_hash` | Verification passes |
+| W2 | Create `WitnessRecord` with tampered `commitment_hash` | Verification MUST fail (G-12) |
+| W3 | Set `min_counter_signatures=2`, attempt seal with 1 valid witness | MUST reject (G-11) |
+| W4 | Set `min_counter_signatures=2`, attempt seal with 2 witnesses but same `witness_id` | MUST reject (G-11 requires distinct IDs) |
+
+**Transparency Log Tests:**
+
+| # | Test | Expected |
+|---|------|----------|
+| T1 | Submit `AnchorCommitment` at crystallization | Receipt returned with valid `commitment_hash` |
+| T2 | Verify receipt against `AnchorCommitment` | Passes |
+| T3 | Tamper with `AnchorCommitment` after receipt | Verification MUST fail (`commitment_hash` mismatch) |
+
+**Chain Proof Tests:**
+
+| # | Test | Expected |
+|---|------|----------|
+| C1 | Build 3-link `ProofChain` with valid links and parentage | `chain_root` verification passes |
+| C2 | Tamper with one link's `spine_root` without updating `chain_root` | Verification MUST fail (G-13) |
+| C3 | Reorder links in chain (break causal order) | Verification MUST fail (causality check) |
+| C4 | Cross-architecture chain: two implementations, valid links | Verification passes using only protocol-surface primitives |
+
+### 17.3 Cross-Architecture Interoperability Test
+
+The definitive conformance test for two implementations claiming interoperability:
+
+1. Implementation A creates a `CognitiveNode`, appends segments, seals, and generates an `InclusionProof`
+2. Implementation B receives only the proof and the `spine_root` (no payload, no internal state)
+3. Implementation B verifies the proof using protocol-surface primitives
+4. Result: proof MUST verify. If it does not, at least one implementation is non-conforming.
+
+This test should be run bidirectionally (A→B and B→A).
 
 ## 18. Version History
 
