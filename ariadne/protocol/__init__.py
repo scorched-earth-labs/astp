@@ -23,6 +23,23 @@ from ariadne.protocol.delta import ContentDelta, StructuralDelta, DeltaRecord
 from ariadne.protocol.audit import AuditRecord, AuditChain, compute_audit_hash
 from ariadne.protocol.retrieval_audit import RetrievalAuditRecord, compute_retrieval_audit_hash
 from ariadne.protocol.rebalance import RebalanceEventNode, create_rebalance_event
+from ariadne.protocol.keys import (
+    derive_workspace_key, derive_node_key, derive_seal_key,
+    NodeKeyRecord, enforce_key_version_monotonicity,
+    compute_public_key_fingerprint,
+)
+from ariadne.protocol.anchor import (
+    AnchorCommitment, AnchorReceipt, TransparencyLogAdapter,
+    build_anchor_commitment,
+)
+from ariadne.protocol.witness import (
+    WitnessRole, WitnessRecord, compute_witness_commitment,
+    verify_witness_commitment, enforce_witness_threshold,
+)
+from ariadne.protocol.chain_proof import (
+    ProofLink, ProofChain, ChainVerificationResult,
+    compute_chain_root, build_proof_chain, verify_proof_chain,
+)
 from ariadne.protocol.verification import DeltaVerifier, VerificationResult
 from ariadne.protocol.version_vector import VersionVector
 from ariadne.protocol.governance import (
