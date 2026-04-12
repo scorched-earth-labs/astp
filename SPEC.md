@@ -1,9 +1,9 @@
 # Ariadne State Tree Protocol Specification
 
-**Version:** 2.1.0-draft
-**Status:** Working Draft — Phase 1 Implemented, Coordination Protocol Added
+**Version:** 2.2.0-draft
+**Status:** Working Draft — Phase 1-2 Implemented
 **Authors:** Scorched Earth Labs
-**Date:** 2026-04-10
+**Date:** 2026-04-12
 **Supersedes:** SPEC-v1.md (0.1.0-draft)
 
 ## 1. Abstract
@@ -121,6 +121,14 @@ The protocol MUST NOT inspect payload fields directly.
 `EpisodePayload` implements `NodePayload` with fields: title, context_note, episode_type, episode_mode, workspace_id, participants, segment_count, signal_reads.
 
 Episode lifecycle states: ACTIVE, REBALANCING, SEALING, SEALED, SEALING_FAILED, REBALANCE_FAILED, ARCHIVED, EXPIRED.
+
+### 4.5 Segment Metadata: signal_versions_read
+
+Every segment carries an optional `signal_versions_read` field: a list of signal IDs that were visible in the Episode when the segment was written. This enables post-hoc stale-read detection — if a REASONING segment was written while referencing a signal that had already been superseded, the version mismatch is auditable after the fact.
+
+`signal_versions_read` is **side-channel metadata**. It is NOT included in `content_hash` computation. The content hash covers only the segment's actual content; the signal version snapshot is recorded for audit purposes but does not affect integrity verification.
+
+A conforming adapter SHOULD populate `signal_versions_read` at segment write time by querying current signal state for the Episode. Adapters MAY leave it empty if signal tracking is not supported.
 
 ## 5. Hash Chain
 
@@ -358,6 +366,28 @@ If an implementation adds access logging (e.g., `last_retrieved_at`, `retrieval_
 
 **The invariant:** A retrieval tool call, followed by a full Merkle verification, MUST produce the same result as the verification without the retrieval. Retrieval is observationally transparent to the integrity layer.
 
+### 11.1 Retrieval Audit Records
+
+Every retrieval tool call SHOULD produce a `RetrievalAuditRecord` — a side-channel record capturing what an agent read, when, and through which snapshot boundary.
+
+```
+RetrievalAuditRecord {
+  record_id:       UUID
+  episode_id:      string
+  actor:           string       (agent_id performing the retrieval)
+  tool_name:       string       (which retrieval tool was called)
+  parameters:      dict         (from_index, to_index, limit, filters, etc.)
+  segment_count:   int          (number of segments returned)
+  segment_ids:     list[string] (UUIDs of returned segments)
+  snapshot_index:  int?         (spine snapshot boundary at retrieval time)
+  wall_clock:      datetime
+}
+```
+
+Retrieval audit records are stored on separate nodes (not on segment nodes), linked to episodes via dedicated edges. They are NOT included in any hash computation. A conforming adapter SHOULD persist retrieval audit records but MUST NOT fail a retrieval if audit persistence fails — retrieval availability takes precedence over audit completeness.
+
+Retrieval audit records enable post-hoc analysis: which agents read what content, at what point in the Episode, and whether their snapshot was current or stale. This is the read-path complement to the WIL's write-path observability.
+
 ## 12. Write Intent Log (WIL)
 
 ### 12.1 Three Storage Invariants
@@ -376,7 +406,51 @@ If an implementation adds access logging (e.g., `last_retrieved_at`, `retrieval_
 
 Every coordinator key MUST carry an explicit TTL. Keys without a TTL policy entry are a governance violation. Alternative coordinator implementations MUST define equivalent TTL policies.
 
-## 13. Adapter Requirements
+## 13. Spine Tip Cache
+
+Segment append and snapshot capture both need to know the current `max(sequence_index)` for an Episode. Without caching, every such operation requires a database traversal.
+
+A conforming implementation SHOULD maintain a cached spine tip per Episode in the ephemeral coordinator (e.g., Redis). The cache lifecycle:
+
+1. **Invalidate** before any segment write begins (ensures no stale reads during the write window)
+2. **Update** after segment write commits (sets cache to the new max sequence_index)
+3. **Read** during snapshot capture — cache hit avoids database traversal
+4. **TTL** as safety bound — cached entries expire if not refreshed (handles crashed writes that never reach the update step)
+
+**The spine tip cache is a performance optimization, not a source of truth.** The authoritative max_sequence_index is always in the structural store (e.g., Neo4j). If the cache is empty, unavailable, or suspected of being stale, the system falls back to querying the structural store directly.
+
+A conforming adapter MUST implement `get_spine_snapshot_index()` which returns the authoritative max_sequence_index from the structural store. The cache layer sits above this function and is implementation-defined.
+
+## 14. Rebalance Events
+
+Tree rebalancing modifies `tree_leaf_index` values without changing content. Without an audit trail, a legitimate rebalance is indistinguishable from tampering. The `RebalanceEventNode` is the forensic record that proves a rebalance was legitimate.
+
+### 14.1 Root-Preservation Invariant
+
+A correct rebalance MUST NOT change the spine root hash. The root is computed from leaf hashes, and leaf hashes are computed from `sequence_index` (immutable) and `content_hash` (unchanged by rebalancing). Therefore, `pre_rebalance_root` MUST equal `post_rebalance_root`.
+
+A `RebalanceEventNode` where these values differ indicates the rebalance modified content — this is a governance violation and MUST be rejected at creation time.
+
+### 14.2 Rebalance Event Record
+
+```
+RebalanceEventNode {
+  event_id:              UUID
+  node_id:               UUID         (the CognitiveNode being rebalanced)
+  rebalance_generation:  int          (increments on each rebalance)
+  triggered_by:          string       ("SIZE_THRESHOLD" | "MANUAL" | "SEAL_OPTIMIZATION")
+  pre_rebalance_root:    string       (spine root before — MUST equal post)
+  post_rebalance_root:   string       (spine root after — MUST equal pre)
+  leaf_index_delta:      dict?        (optional: {segment_id: {old: N, new: M}})
+  affected_leaf_count:   int
+  executed_at:           datetime
+  executor_id:           string
+}
+```
+
+A conforming adapter MUST persist rebalance events and link them to the rebalanced node. The `rebalance_generation` counter enables detection of stale `tree_leaf_index` values — any `tree_leaf_index` from a prior generation may be incorrect.
+
+## 15. Adapter Requirements
 
 A conforming adapter MUST:
 
@@ -387,8 +461,10 @@ A conforming adapter MUST:
 5. Respect write ordering invariants across stores
 6. Support idempotent writes for WIL recovery
 7. Fail loudly on errors — never silently swallow writes
+8. Implement `get_spine_snapshot_index()` for authoritative spine tip queries
+9. Persist rebalance events with root-preservation invariant enforcement
 
-## 14. Conformance Testing
+## 16. Conformance Testing
 
 The `ariadne.protocol.verification` module provides the `DeltaVerifier` — the five-test gate that any conforming implementation must pass.
 
@@ -398,15 +474,16 @@ The `ariadne.protocol.verification` module provides the `DeltaVerifier` — the 
 | **Temporal** | Sequence monotonicity, logical clock monotonicity, position-binding |
 | **Audit** | Tamper-evident chain integrity, delta record consistency |
 
-## 15. Version History
+## 17. Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
 | 0.1.0-draft | 2026-04-07 | Initial extraction. Episode-centric. See SPEC-v1.md. |
 | 2.0.0-draft | 2026-04-09 | CognitiveNode foundation. Dual-index. Position-binding leaf hash. Five-test gate. Namespace firewall. |
 | 2.1.0-draft | 2026-04-10 | Retrieval coordination protocol: snapshot isolation (10.4), tail write advisory (10.5), HITL re-validation gate (10.6), side-effect contract (11). |
+| 2.2.0-draft | 2026-04-12 | Phase 2 observability: signal_versions_read (4.5), retrieval audit records (11.1), spine tip cache (13), rebalance events (14). |
 
-## 16. References
+## 18. References
 
 Internal Scorched Earth Labs design documents that informed the protocol:
 
