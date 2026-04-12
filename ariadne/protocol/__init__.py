@@ -22,6 +22,7 @@ from ariadne.protocol.merkle import MerkleTree, InclusionProof
 from ariadne.protocol.delta import ContentDelta, StructuralDelta, DeltaRecord
 from ariadne.protocol.audit import AuditRecord, AuditChain, compute_audit_hash
 from ariadne.protocol.retrieval_audit import RetrievalAuditRecord, compute_retrieval_audit_hash
+from ariadne.protocol.rebalance import RebalanceEventNode, create_rebalance_event
 from ariadne.protocol.verification import DeltaVerifier, VerificationResult
 from ariadne.protocol.version_vector import VersionVector
 from ariadne.protocol.governance import (
