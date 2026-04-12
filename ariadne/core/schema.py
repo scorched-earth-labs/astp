@@ -162,6 +162,10 @@ class SegmentNode(BaseModel):
     authored_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     author: str  # agent_id
     retention_tier: RetentionTier = RetentionTier.PERSISTENT  # PERSISTENT | EPHEMERAL
+    # Stale-read audit: signal IDs visible when this segment was written.
+    # Enables post-hoc detection of reasoning based on outdated signal state.
+    # NOT included in content_hash computation (side-channel metadata).
+    signal_versions_read: list[str] = Field(default_factory=list)
 
 
 class SignalNode(BaseModel):
