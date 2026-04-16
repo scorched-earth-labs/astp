@@ -599,7 +599,8 @@ def write_hitl_event_invocation_sync(driver, hitl_event) -> None:
                 MERGE (e)-[:HITL_GATE {
                     gate_type: $gate_type,
                     invoked_at: $invoked_at,
-                    blocking: $blocking
+                    blocking: $blocking,
+                    dependency: $dependency
                 }]->(h)
             """, {
                 "episode_id": str(hitl_event.episode_id),
@@ -609,6 +610,7 @@ def write_hitl_event_invocation_sync(driver, hitl_event) -> None:
                     if hasattr(hitl_event.invoked_at, 'isoformat')
                     else str(hitl_event.invoked_at),
                 "blocking": blocking,
+                "dependency": "BLOCKS" if blocking else "FOLLOWS",
             })
 
         logger.info(

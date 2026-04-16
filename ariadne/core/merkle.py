@@ -479,9 +479,10 @@ def compute_adaptive_spine_hash(
     spine_signal_hashes: List[str],
     episode_id: Optional[str] = None,
     ordering: OrderingCriteria = OrderingCriteria.CHRONOLOGICAL,
+    hitl_node_hashes: Optional[List[str]] = None,
 ) -> Tuple[str, 'AdaptiveMerkleTree']:
     """
-    Build an adaptive Merkle tree from segment and signal hashes.
+    Build an adaptive Merkle tree from segment, signal, and HITL node hashes.
 
     Drop-in compatible with compute_spine_hash() but returns both the
     root hash AND the tree instance (for fingerprint extraction, incremental
@@ -492,6 +493,7 @@ def compute_adaptive_spine_hash(
         spine_signal_hashes: SPINE-placed signal hashes
         episode_id: Optional unique identifier (becomes first leaf per patent)
         ordering: Ordering criteria for leaves
+        hitl_node_hashes: Resolved HITL event node_hashes (causal anchors)
 
     Returns:
         (root_hash, tree_instance)
@@ -515,6 +517,17 @@ def compute_adaptive_spine_hash(
             sequence_index=len(segment_content_hashes) + i,
             importance=0,
             metadata={"type": "signal"},
+        ))
+
+    # Add HITL node hashes as causal anchor leaves (high importance)
+    # Human decisions are spine anchors — they carry the authorization
+    # chain for all subsequent segments.
+    for i, h in enumerate(hitl_node_hashes or []):
+        leaves.append(LeafEntry(
+            content_hash=h,
+            sequence_index=len(segment_content_hashes) + len(spine_signal_hashes) + i,
+            importance=2,  # High importance — causal anchor
+            metadata={"type": "hitl_anchor"},
         ))
 
     if not leaves:

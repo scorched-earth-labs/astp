@@ -39,6 +39,7 @@ class CrystallizationStatus(str, Enum):
     PROVISIONAL = "provisional"
     CRYSTALLIZED = "crystallized"
     CRYSTALLIZED_WITH_EXCLUSIONS = "crystallized_with_exclusions"
+    CONDITIONALLY_VALID = "conditionally_valid"  # Segments under unresolved advisory HITL gate
 
 
 class SegmentType(str, Enum):
@@ -193,6 +194,10 @@ class SegmentNode(BaseModel):
     # Enables post-hoc detection of reasoning based on outdated signal state.
     # NOT included in content_hash computation (side-channel metadata).
     signal_versions_read: list[str] = Field(default_factory=list)
+    # HITL advisory gate: if set, this segment was written while a REVIEW_ADVISORY
+    # HITL gate was pending. The segment is CONDITIONALLY_VALID until the gate resolves.
+    # NOT included in content_hash computation (governance metadata).
+    pending_hitl_ref: Optional[str] = None  # hitl_event_id of the unresolved advisory gate
 
 
 class SignalNode(BaseModel):
