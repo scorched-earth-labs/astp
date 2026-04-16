@@ -115,9 +115,35 @@ class ExchangeRole(str, Enum):
     PARTICIPANT = "participant"    # Additional participant in a collaboration round
 
 
+class HITLGateType(str, Enum):
+    """Classification of HITL gate that triggered human review."""
+    APPROVAL_REQUIRED = "approval_required"          # Blocking — must approve to continue
+    REVIEW_ADVISORY = "review_advisory"              # Non-blocking — episode continues
+    ESCALATION = "escalation"                        # Triggered by agent uncertainty/risk
+    COMPLIANCE_CHECKPOINT = "compliance_checkpoint"  # Policy-mandated review
+    MODIFICATION_REQUEST = "modification_request"    # Agent requests human to edit artifact
+
+
+class HITLDecision(str, Enum):
+    """Human decision on a HITL gate."""
+    APPROVED = "approved"      # Proceed as presented
+    REJECTED = "rejected"      # Halt or rollback
+    MODIFIED = "modified"      # Approved with changes
+    DEFERRED = "deferred"      # Postponed — remains pending
+    ESCALATED = "escalated"    # Forwarded to additional human principal
+
+
+class HITLNodeStatus(str, Enum):
+    """Two-phase lifecycle status of a HITL event node."""
+    INVOKED = "invoked"        # Phase 1 — gate raised, awaiting human decision
+    RESOLVED = "resolved"      # Phase 2 — human decision recorded
+    TIMED_OUT = "timed_out"    # Resolution window expired — treated as rejection
+    ESCALATED = "escalated"    # Forwarded, awaiting higher-authority resolution
+
+
 # ── Node Models ───────────────────────────────────────────────────────────────
 
-ARIADNE_SCHEMA_VERSION = "1.1.0"
+ARIADNE_SCHEMA_VERSION = "1.2.0"
 
 
 class EpisodeNode(BaseModel):
@@ -497,4 +523,107 @@ def enforce_G9_resolution_requires_entries(
     if resolution_hash is not None and len(exchange_entries) == 0:
         raise AriadneGovernanceError(
             "G-9 violation: resolution_hash is set but exchange_entries is empty."
+        )
+
+
+# ── HITL Event Node (Protocol Amendment v1.2.0) ─────────────────────────────
+
+
+class HITLEventNode(BaseModel):
+    """First-class HITL event in the Ariadne State Tree.
+
+    Represents a two-phase human-in-the-loop decision:
+      Phase 1 (INVOKED): Gate raised, context captured, awaiting human decision.
+      Phase 2 (RESOLVED): Human decision recorded with identity and rationale.
+
+    HITL events are integrity-bearing nodes that participate in the episode
+    graph as causal anchors — any segment produced after an approved HITL
+    gate carries the human decision in its hash ancestry.
+    """
+    # Identity
+    hitl_event_id: UUID = Field(default_factory=uuid4)
+    episode_id: UUID
+    hitl_request_id: str            # FK to HITLRequest.id in operational store
+    schema_version: str = ARIADNE_SCHEMA_VERSION
+
+    # Gate classification
+    gate_type: HITLGateType
+    status: HITLNodeStatus = HITLNodeStatus.INVOKED
+    requesting_agent: str
+
+    # Phase 1 — Invocation (immutable after creation)
+    invoked_at: datetime
+    timeout_at: Optional[datetime] = None
+    spine_snapshot_index: Optional[int] = None  # Spine state when HITL was invoked
+
+    # Phase 2 — Resolution (written on resolution)
+    resolved_at: Optional[datetime] = None
+    decision: Optional[HITLDecision] = None
+    resolved_by: Optional[str] = None           # Human principal identifier
+    rationale: Optional[str] = None
+    pending_duration_ms: Optional[int] = None   # Computed on resolution
+
+    # Integrity
+    context_hash: str                           # SHA3-256 of context at invocation
+    resolution_hash: Optional[str] = None       # SHA3-256 of resolution payload
+    node_hash: Optional[str] = None             # H(context_hash || resolution_hash)
+
+
+# ── HITL Hash Functions ──────────────────────────────────────────────────────
+
+
+def compute_hitl_context_hash(
+    hitl_request_id: str,
+    episode_id: str,
+    gate_type: str,
+    requesting_agent: str,
+    invoked_at: str,
+    context_json: str = "",
+) -> str:
+    """Hash of the HITL invocation context — immutable after creation."""
+    preimage = (
+        f"{hitl_request_id}:{episode_id}:{gate_type}:"
+        f"{requesting_agent}:{invoked_at}:{context_json}"
+    )
+    return sha3_256(b"HITL_CTX:" + preimage.encode())
+
+
+def compute_hitl_resolution_hash(
+    hitl_event_id: str,
+    decision: str,
+    resolved_by: str,
+    resolved_at: str,
+    rationale: str = "",
+) -> str:
+    """Hash of the human decision — written on resolution."""
+    preimage = (
+        f"{hitl_event_id}:{decision}:{resolved_by}:"
+        f"{resolved_at}:{rationale}"
+    )
+    return sha3_256(b"HITL_RES:" + preimage.encode())
+
+
+def compute_hitl_node_hash(context_hash: str, resolution_hash: str) -> str:
+    """H(NODE: context_hash || resolution_hash) — the HITL event's spine-participatable hash.
+
+    Follows the same pattern as compute_consultation_node_hash.
+    """
+    return sha3_256(b"NODE:" + context_hash.encode() + resolution_hash.encode())
+
+
+# ── HITL Governance Rules ────────────────────────────────────────────────────
+
+
+def enforce_G10_hitl_invocation_before_resolution(
+    status: HITLNodeStatus, resolution_hash: Optional[str],
+) -> None:
+    """Rule G-10: Resolution hash may not exist on an INVOKED node.
+
+    The two-phase structure requires that resolution data is only written
+    during the INVOKED → RESOLVED/TIMED_OUT/ESCALATED transition.
+    """
+    if status == HITLNodeStatus.INVOKED and resolution_hash is not None:
+        raise AriadneGovernanceError(
+            "G-10 violation: resolution_hash is set but HITL event "
+            "is still in INVOKED status."
         )

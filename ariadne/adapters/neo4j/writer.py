@@ -63,6 +63,8 @@ SCHEMA_CONSTRAINTS = [
     "CREATE CONSTRAINT ariadne_codicil_id IF NOT EXISTS FOR (cod:AriadneCodicil) REQUIRE cod.codicil_id IS UNIQUE",
     "CREATE CONSTRAINT ariadne_closure_id IF NOT EXISTS FOR (cl:AriadneClosureRecord) REQUIRE cl.closure_id IS UNIQUE",
     "CREATE CONSTRAINT ariadne_amendment_id IF NOT EXISTS FOR (am:AriadneAmendment) REQUIRE am.amendment_id IS UNIQUE",
+    # HITL Event Nodes (Protocol Amendment v1.2.0)
+    "CREATE CONSTRAINT ariadne_hitl_event_id IF NOT EXISTS FOR (h:AriadneHITLEvent) REQUIRE h.hitl_event_id IS UNIQUE",
 ]
 
 SCHEMA_INDEXES = [
@@ -99,17 +101,22 @@ SCHEMA_INDEXES = [
     "CREATE INDEX ariadne_codicil_episode IF NOT EXISTS FOR (cod:AriadneCodicil) ON (cod.episode_id)",
     "CREATE INDEX ariadne_closure_episode IF NOT EXISTS FOR (cl:AriadneClosureRecord) ON (cl.episode_id)",
     "CREATE INDEX ariadne_amendment_source IF NOT EXISTS FOR (am:AriadneAmendment) ON (am.source_episode_id)",
+    # HITL Event indexes (Protocol Amendment v1.2.0)
+    "CREATE INDEX ariadne_hitl_episode IF NOT EXISTS FOR (h:AriadneHITLEvent) ON (h.episode_id)",
+    "CREATE INDEX ariadne_hitl_status IF NOT EXISTS FOR (h:AriadneHITLEvent) ON (h.status)",
+    "CREATE INDEX ariadne_hitl_gate_type IF NOT EXISTS FOR (h:AriadneHITLEvent) ON (h.gate_type)",
+    "CREATE INDEX ariadne_hitl_request_id IF NOT EXISTS FOR (h:AriadneHITLEvent) ON (h.hitl_request_id)",
 ]
 
 SCHEMA_VERSION_SEED = """
-MERGE (sv:AriadneSchemaVersion {version: "1.1.0"})
+MERGE (sv:AriadneSchemaVersion {version: "1.2.0"})
 ON CREATE SET
   sv.seeded_at            = datetime(),
   sv.hash_algorithm       = "SHA3-256",
-  sv.domain_separation    = "LEAF: prefix for leaves; NODE: prefix for internal nodes",
+  sv.domain_separation    = "LEAF: prefix for leaves; NODE: prefix for internal nodes; HITL_CTX: for HITL context; HITL_RES: for HITL resolution",
   sv.episode_root_formula = "H(NODE: spine_hash || signal_manifest_hash || exclusion_hash)",
   sv.status               = "ACTIVE",
-  sv.notes                = "Phase 2 initial schema. SHA3-256 locked for Phase 2. Algorithm upgrade requires schema version bump."
+  sv.notes                = "v1.2.0: HITLEventNode as first-class Ariadne node type with two-phase lifecycle, HITL_GATE edges, and governance rule G-10."
 """
 
 
@@ -524,3 +531,151 @@ def write_document_node_sync(driver, document: DocumentNode) -> None:
 
     except Exception as e:
         logger.warning(f"Ariadne: Failed to write document node: {e}")
+
+
+# ── HITL Event Writer (Protocol Amendment v1.2.0) ────────────────────────────
+
+
+def write_hitl_event_invocation_sync(driver, hitl_event) -> None:
+    """Write Phase 1 of a HITL event — the invocation record.
+
+    Creates an AriadneHITLEvent node in INVOKED status and a HITL_GATE
+    edge from the episode. The node is immutable after this write until
+    the INVOKED → RESOLVED transition.
+
+    Sync variant — called from HITLService.request_intervention() which
+    runs in the server's sync context.
+    """
+    if not _ariadne_guard():
+        return
+
+    try:
+        from ariadne.core.schema import ARIADNE_SCHEMA_VERSION
+
+        with driver.session() as session:
+            # Create HITLEventNode
+            session.run("""
+                MERGE (h:AriadneHITLEvent {hitl_event_id: $hitl_event_id})
+                ON CREATE SET
+                  h.episode_id            = $episode_id,
+                  h.hitl_request_id       = $hitl_request_id,
+                  h.gate_type             = $gate_type,
+                  h.status                = $status,
+                  h.requesting_agent      = $requesting_agent,
+                  h.invoked_at            = $invoked_at,
+                  h.timeout_at            = $timeout_at,
+                  h.spine_snapshot_index  = $spine_snapshot_index,
+                  h.context_hash          = $context_hash,
+                  h.schema_version        = $schema_version
+            """, {
+                "hitl_event_id": str(hitl_event.hitl_event_id),
+                "episode_id": str(hitl_event.episode_id),
+                "hitl_request_id": hitl_event.hitl_request_id,
+                "gate_type": hitl_event.gate_type.value,
+                "status": hitl_event.status.value,
+                "requesting_agent": hitl_event.requesting_agent,
+                "invoked_at": hitl_event.invoked_at.isoformat()
+                    if hasattr(hitl_event.invoked_at, 'isoformat')
+                    else str(hitl_event.invoked_at),
+                "timeout_at": hitl_event.timeout_at.isoformat()
+                    if hitl_event.timeout_at and hasattr(hitl_event.timeout_at, 'isoformat')
+                    else None,
+                "spine_snapshot_index": hitl_event.spine_snapshot_index,
+                "context_hash": hitl_event.context_hash,
+                "schema_version": ARIADNE_SCHEMA_VERSION,
+            })
+
+            # HITL_GATE edge: Episode -> HITLEvent
+            blocking = hitl_event.gate_type.value in (
+                "approval_required", "compliance_checkpoint"
+            )
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $episode_id})
+                MATCH (h:AriadneHITLEvent {hitl_event_id: $hitl_event_id})
+                MERGE (e)-[:HITL_GATE {
+                    gate_type: $gate_type,
+                    invoked_at: $invoked_at,
+                    blocking: $blocking
+                }]->(h)
+            """, {
+                "episode_id": str(hitl_event.episode_id),
+                "hitl_event_id": str(hitl_event.hitl_event_id),
+                "gate_type": hitl_event.gate_type.value,
+                "invoked_at": hitl_event.invoked_at.isoformat()
+                    if hasattr(hitl_event.invoked_at, 'isoformat')
+                    else str(hitl_event.invoked_at),
+                "blocking": blocking,
+            })
+
+        logger.info(
+            f"Ariadne: HITL invocation recorded {str(hitl_event.hitl_event_id)[:8]}... "
+            f"[{hitl_event.requesting_agent} → {hitl_event.gate_type.value}] "
+            f"(episode={str(hitl_event.episode_id)[:8]}...)"
+        )
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write HITL invocation: {e}")
+
+
+def write_hitl_event_resolution_sync(
+    driver,
+    hitl_event_id: str,
+    decision: str,
+    resolved_by: str,
+    resolved_at: str,
+    rationale: str,
+    resolution_hash: str,
+    node_hash: str,
+    pending_duration_ms: int = None,
+) -> None:
+    """Write Phase 2 of a HITL event — the resolution record.
+
+    Updates an existing AriadneHITLEvent node from INVOKED to RESOLVED
+    (or TIMED_OUT/ESCALATED). This is the one permitted mutation on an
+    otherwise immutable node — enforced by G-10 governance.
+
+    Sync variant — called from resolve_hitl_request in server.py.
+    """
+    if not _ariadne_guard():
+        return
+
+    try:
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (h:AriadneHITLEvent {hitl_event_id: $hitl_event_id})
+                WHERE h.status = 'invoked'
+                SET h.status              = $status,
+                    h.decision            = $decision,
+                    h.resolved_by         = $resolved_by,
+                    h.resolved_at         = $resolved_at,
+                    h.rationale           = $rationale,
+                    h.resolution_hash     = $resolution_hash,
+                    h.node_hash           = $node_hash,
+                    h.pending_duration_ms = $pending_duration_ms
+                RETURN h.hitl_event_id AS updated
+            """, {
+                "hitl_event_id": hitl_event_id,
+                "status": "resolved" if decision != "timed_out" else "timed_out",
+                "decision": decision,
+                "resolved_by": resolved_by,
+                "resolved_at": resolved_at,
+                "rationale": rationale or "",
+                "resolution_hash": resolution_hash,
+                "node_hash": node_hash,
+                "pending_duration_ms": pending_duration_ms,
+            })
+
+            record = result.single()
+            if record:
+                logger.info(
+                    f"Ariadne: HITL resolution recorded {hitl_event_id[:8]}... "
+                    f"[decision={decision}, by={resolved_by}]"
+                )
+            else:
+                logger.warning(
+                    f"Ariadne: HITL event {hitl_event_id[:8]}... not found "
+                    f"or not in INVOKED status — resolution not recorded"
+                )
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write HITL resolution: {e}")
