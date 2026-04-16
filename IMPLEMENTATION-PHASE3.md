@@ -693,5 +693,55 @@ Conformance declarations are per-version. A declaration against v2.3.0-draft doe
 
 ---
 
-*Ariadne Protocol Phase 3 Implementation Guide is maintained by Scorched Earth Labs.*
-*Guide version: 1.0.0 | Applies to SPEC.md: v2.3.0-draft | Conformance Vectors: v1.0.0*
+## Appendix C: Phase 4 — HITL Event Integration
+
+**Added:** v2.4.0-draft (2026-04-16)
+
+Phase 4 adds Human-in-the-Loop (HITL) events as first-class nodes in the Ariadne State Tree. HITL events record human oversight decisions with cryptographic attestation and Merkle spine participation.
+
+### C.1 Implementation Sequence
+
+Phase 4 builds on Phase 3 infrastructure. Implement in this order:
+
+1. **Schema types** — Add `HITLEventNode`, `HITLGateType`, `HITLDecision`, `HITLNodeStatus` enums and model. Add hash functions: `compute_hitl_context_hash`, `compute_hitl_resolution_hash`, `compute_hitl_node_hash` with domain-separated prefixes (`HITL_CTX:`, `HITL_RES:`).
+
+2. **Storage layer** — Add `AriadneHITLEvent` constraint and indexes. Implement `write_hitl_event_invocation_sync` (creates INVOKED node + HITL_GATE edge) and `write_hitl_event_resolution_sync` (updates INVOKED → RESOLVED with MATCH + SET).
+
+3. **Crystallization guard** — Add `PENDING_HITL` to `EpisodeStatus`. Extend `enforce_crystallization_lock_guard` to reject `PENDING_HITL`. Modify `acquire_crystallization_lock` to query for pending HITL events before acquiring.
+
+4. **Episode status transitions** — On blocking gate invocation (APPROVAL_REQUIRED, COMPLIANCE_CHECKPOINT), transition episode to `PENDING_HITL`. On resolution, if no remaining pending gates, transition back to `ACTIVE`.
+
+5. **Cryptographic attestation** — Sign `context_hash` with the agent's Ed25519 key at invocation. Sign `resolution_hash` with the human's Ed25519 key at resolution. Both use the Phase 3 HKDF key hierarchy with `entity_type` parameter ("agent" or "user").
+
+6. **Spine participation** — On HITL resolution, include `node_hash` as a causal anchor leaf (importance=2) in `compute_adaptive_spine_hash`. Invalidate spine tip cache.
+
+7. **Advisory gates** — For `REVIEW_ADVISORY` gates, tag segments written during the pending interval with `pending_hitl_ref`. These segments are `CONDITIONALLY_VALID` until the gate resolves. Advisory gates do NOT block crystallization or set `PENDING_HITL`.
+
+### C.2 Key Design Constraints
+
+- **Two-phase lifecycle:** HITL events are the only node type that permits post-creation mutation (INVOKED → RESOLVED). This exception is narrow and enforced by G-17.
+- **Fail-open recording:** The operational HITL path (approve/reject decisions) MUST NOT be blocked by Ariadne recording failures. All recording hooks are wrapped in fail-open exception handling.
+- **Timeout as event:** `TIMED_OUT` is a recorded terminal status with the same structural weight as `REJECTED`. System timeouts are recorded with `resolved_by: "system_timeout"` and no human signature.
+- **Gate type mapping:** Map operational HITL types to protocol gate types: `MUST → APPROVAL_REQUIRED`, `SHOULD/CAN → REVIEW_ADVISORY`, `INFORMED → not recorded`.
+
+### C.3 Governance Rules
+
+- **G-17:** Resolution hash prohibited on INVOKED status nodes (enforces two-phase lifecycle).
+- **G-18:** Episodes with pending blocking HITL events cannot acquire crystallization locks.
+
+### C.4 Conformance Checkpoint
+
+A Phase 4 conforming implementation MUST:
+
+1. Create `AriadneHITLEvent` nodes with correct two-phase lifecycle
+2. Compute `context_hash`, `resolution_hash`, `node_hash` with correct domain-separated prefixes
+3. Enforce G-17 (no resolution on INVOKED nodes)
+4. Enforce G-18 (crystallization blocked by pending blocking HITL)
+5. Include resolved HITL `node_hash` in spine computation as importance=2 leaves
+6. Sign invocation with agent key and resolution with human key (using Phase 3 HKDF hierarchy)
+7. Tag segments written during advisory gates with `pending_hitl_ref`
+
+---
+
+*Ariadne Protocol Implementation Guide is maintained by Scorched Earth Labs.*
+*Guide version: 1.1.0 | Applies to SPEC.md: v2.4.0-draft | Conformance Vectors: v1.0.0*

@@ -626,17 +626,17 @@ def compute_hitl_node_hash(context_hash: str, resolution_hash: str) -> str:
 # ── HITL Governance Rules ────────────────────────────────────────────────────
 
 
-def enforce_G10_hitl_invocation_before_resolution(
+def enforce_G17_hitl_invocation_before_resolution(
     status: HITLNodeStatus, resolution_hash: Optional[str],
 ) -> None:
-    """Rule G-10: Resolution hash may not exist on an INVOKED node.
+    """Rule G-17: Resolution hash may not exist on an INVOKED node.
 
     The two-phase structure requires that resolution data is only written
     during the INVOKED → RESOLVED/TIMED_OUT/ESCALATED transition.
     """
     if status == HITLNodeStatus.INVOKED and resolution_hash is not None:
         raise AriadneGovernanceError(
-            "G-10 violation: resolution_hash is set but HITL event "
+            "G-17 violation: resolution_hash is set but HITL event "
             "is still in INVOKED status."
         )
 

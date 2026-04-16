@@ -1,9 +1,9 @@
 # Ariadne State Tree Protocol Specification
 
-**Version:** 2.3.0-draft
-**Status:** Working Draft — Phase 1-2 Implemented, Phase 3 Specified
+**Version:** 2.4.0-draft
+**Status:** Working Draft — Phase 1-3 Implemented, Phase 4 (HITL) Implemented
 **Authors:** Scorched Earth Labs
-**Date:** 2026-04-12
+**Date:** 2026-04-16
 **Supersedes:** SPEC-v1.md (0.1.0-draft)
 
 ## 1. Abstract
@@ -27,6 +27,9 @@ The protocol is agnostic to both cognitive architecture and node type. A system 
 | **Crystallization** | A protocol-level state transition that captures a point-in-time integrity snapshot. Immutable once written. |
 | **WIL** | Write Intent Log. A coordination protocol for multi-store writes that guarantees ordering and recoverability. |
 | **Dual Index** | The separation of `sequence_index` (immutable temporal position, in hash) from `tree_leaf_index` (mutable structural position, NOT in hash). The epistemological core of v2. |
+| **HITLEventNode** | A first-class node representing a human-in-the-loop decision gate. Two-phase lifecycle: INVOKED (gate raised) → RESOLVED/TIMED_OUT (decision recorded). Participates in the Merkle spine as a causal anchor. |
+| **HITL Gate** | An edge from an Episode to an HITLEventNode. Typed as BLOCKS (approval required) or FOLLOWS (advisory review). |
+| **Causal Anchor** | A Merkle spine leaf whose hash ancestry carries the authorization chain for subsequent segments. HITL nodes are causal anchors — post-approval segments cryptographically depend on the human decision. |
 | **Adapter** | A database-specific implementation of persistence operations. |
 | **ASI** | Adapter Service Interface. The abstract contract any conforming adapter must implement. |
 | **Governance Rule** | A protocol invariant that any conforming implementation must enforce. |
@@ -180,6 +183,86 @@ Every segment carries an optional `signal_versions_read` field: a list of signal
 
 A conforming adapter SHOULD populate `signal_versions_read` at segment write time by querying current signal state for the Episode. Adapters MAY leave it empty if signal tracking is not supported.
 
+### 4.6 HITLEventNode (Phase 4 — Human-in-the-Loop)
+
+A first-class node type representing a human oversight decision within an episode. HITL events have a two-phase temporal structure — the gate is raised (INVOKED), a pending interval occurs, and the human resolves (RESOLVED/TIMED_OUT/ESCALATED).
+
+```
+HITLEventNode {
+  hitl_event_id:          UUID         (unique, immutable)
+  episode_id:             UUID
+  hitl_request_id:        string       (FK to operational HITL store)
+  schema_version:         string
+
+  // Gate classification
+  gate_type:              HITLGateType (APPROVAL_REQUIRED | REVIEW_ADVISORY | ESCALATION |
+                                        COMPLIANCE_CHECKPOINT | MODIFICATION_REQUEST)
+  status:                 HITLNodeStatus (INVOKED | RESOLVED | TIMED_OUT | ESCALATED)
+  requesting_agent:       string
+
+  // Phase 1 — Invocation (immutable after creation)
+  invoked_at:             datetime (ms precision)
+  timeout_at:             datetime?
+  spine_snapshot_index:   int?         (spine state when gate was raised)
+
+  // Phase 2 — Resolution (written on resolution)
+  resolved_at:            datetime?
+  decision:               HITLDecision (APPROVED | REJECTED | MODIFIED | DEFERRED | ESCALATED)
+  resolved_by:            string?      (human principal identifier)
+  rationale:              string?
+  pending_duration_ms:    int?         (computed: resolved_at - invoked_at)
+
+  // Integrity
+  context_hash:           string       (SHA3-256 of invocation context)
+  resolution_hash:        string?      (SHA3-256 of resolution payload)
+  node_hash:              string?      (H(NODE: context_hash || resolution_hash))
+
+  // Cryptographic attestation
+  invocation_signature:   string?      (Ed25519 sig over context_hash, hex-encoded)
+  invocation_key_fingerprint: string?  (SHA3-256 of agent public key)
+  resolution_signature:   string?      (Ed25519 sig over resolution_hash, hex-encoded)
+  resolution_key_fingerprint: string?  (SHA3-256 of human public key)
+}
+```
+
+**Hash computation:**
+
+- `context_hash = SHA3-256("HITL_CTX:" || request_id || episode_id || gate_type || agent || invoked_at || context_json)`
+- `resolution_hash = SHA3-256("HITL_RES:" || event_id || decision || resolved_by || resolved_at || rationale)`
+- `node_hash = SHA3-256("NODE:" || context_hash || resolution_hash)`
+
+Domain separation prefixes (`HITL_CTX:`, `HITL_RES:`) prevent cross-type hash confusion.
+
+**Two-layer signing model:**
+
+1. **Agent invocation signature:** `Sign(agent_private_key, bytes.fromhex(context_hash))` — proves the agent created the gate.
+2. **Human resolution signature:** `Sign(human_private_key, bytes.fromhex(resolution_hash))` — proves the human made the decision.
+
+Both use the HKDF key hierarchy (§16.2) with `entity_type` parameter distinguishing agent from user key derivation paths.
+
+**HITL_GATE edge:**
+
+A directed edge from Episode to HITLEventNode with properties:
+- `gate_type`: Classification of the HITL gate
+- `blocking`: Boolean — whether the gate blocks episode progression
+- `dependency`: `"BLOCKS"` (approval required) or `"FOLLOWS"` (advisory review)
+
+**Spine participation:**
+
+Resolved HITL `node_hash` values participate in the Merkle spine as causal anchor leaves with `importance=2` (high). The spine hash changes when a HITL event resolves — the human decision becomes part of the episode's integrity fingerprint.
+
+**Crystallization guard:**
+
+An episode in `PENDING_HITL` status (blocking HITL gate open) cannot be crystallized. `acquire_crystallization_lock()` queries for unresolved HITLEventNode nodes before acquiring the lock. This is a hard protocol invariant — an episode with an outstanding human decision is an open episode.
+
+**Advisory gates and CONDITIONALLY_VALID:**
+
+Segments written while a `REVIEW_ADVISORY` gate is pending are tagged with `pending_hitl_ref` (the HITLEventNode ID). These segments are `CONDITIONALLY_VALID` — included in the spine but with a governance caveat. The advisory gate does not block episode progression.
+
+**HITLEventNode is the only node type that permits post-creation mutation** — but only during the INVOKED → RESOLVED transition. All other transitions are immutable. This exception is enforced by G-17.
+
+**Timeout is a recorded event.** `TIMED_OUT` is a valid terminal status treated as implicit rejection. Orphaned pending decisions are not permitted — all HITL invocations must specify a timeout policy.
+
 ## 5. Hash Chain
 
 ### 5.1 Hash Algorithm
@@ -295,6 +378,14 @@ Transparency log anchoring MUST occur at crystallization. Anchoring at other tim
 ### G-16: Node Type in Key Derivation (Phase 3)
 
 The HKDF `info` string for node key derivation MUST include `node_type`. Keys derived without `node_type` in the context are non-conforming. This prevents cross-type key confusion.
+
+### G-17: HITL Invocation Before Resolution (Phase 4)
+
+`resolution_hash` MUST NOT be set on an HITLEventNode in `INVOKED` status. Resolution data may only be written during the `INVOKED → RESOLVED/TIMED_OUT/ESCALATED` transition. An HITLEventNode is the only node type that permits post-creation mutation, and this mutation is constrained to the single-phase transition.
+
+### G-18: HITL Crystallization Block (Phase 4)
+
+An episode with any HITLEventNode in `INVOKED` status (for blocking gate types: `APPROVAL_REQUIRED`, `COMPLIANCE_CHECKPOINT`) MUST NOT transition to `CRYSTALLIZATION_PENDING`. The crystallization lock acquisition MUST query for pending HITL events and refuse if any exist. Advisory gates (`REVIEW_ADVISORY`) do not block crystallization.
 
 ## 7. Delta Records
 
@@ -806,6 +897,7 @@ This test should be run bidirectionally (A→B and B→A).
 | 2.1.0-draft | 2026-04-10 | Retrieval coordination protocol: snapshot isolation (10.4), tail write advisory (10.5), HITL re-validation gate (10.6), side-effect contract (11). |
 | 2.2.0-draft | 2026-04-12 | Phase 2 observability: signal_versions_read (4.5), retrieval audit records (11.1), spine tip cache (13), rebalance events (14). |
 | 2.3.0-draft | 2026-04-12 | Phase 3 trust infrastructure: Protocol vs. Implementation Boundary (2.5), node key hierarchy (16.2), transparency log anchoring (16.3), witness signatures (16.4), cross-node chain proof (16.5), G-11 through G-16. |
+| 2.4.0-draft | 2026-04-16 | Phase 4 HITL: HITLEventNode first-class node type (4.6), two-phase lifecycle (INVOKED→RESOLVED), HITL_GATE edges (BLOCKS/FOLLOWS), Merkle spine participation as causal anchors, PENDING_HITL crystallization guard, two-layer Ed25519 signing (agent invocation + human resolution), CONDITIONALLY_VALID advisory gates, pending_hitl_ref segment tagging, G-17 (invocation before resolution), G-18 (crystallization block). Schema version 1.2.0. |
 
 ## 19. References
 
