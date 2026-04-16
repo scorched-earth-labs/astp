@@ -569,6 +569,12 @@ class HITLEventNode(BaseModel):
     resolution_hash: Optional[str] = None       # SHA3-256 of resolution payload
     node_hash: Optional[str] = None             # H(context_hash || resolution_hash)
 
+    # Cryptographic attestation (Phase 3)
+    invocation_signature: Optional[str] = None          # Hex-encoded Ed25519 sig over context_hash
+    invocation_key_fingerprint: Optional[str] = None    # SHA3-256 of agent's public key
+    resolution_signature: Optional[str] = None          # Hex-encoded Ed25519 sig over resolution_hash
+    resolution_key_fingerprint: Optional[str] = None    # SHA3-256 of human's public key
+
 
 # ── HITL Hash Functions ──────────────────────────────────────────────────────
 
@@ -628,3 +634,65 @@ def enforce_G10_hitl_invocation_before_resolution(
             "G-10 violation: resolution_hash is set but HITL event "
             "is still in INVOKED status."
         )
+
+
+# ── HITL Signature Verification (Phase 3) ───────────────────────────────────
+
+
+def verify_hitl_invocation_signature(
+    hitl_event: HITLEventNode,
+    agent_public_key_bytes: bytes,
+) -> bool:
+    """Verify the agent's Ed25519 signature over the HITL invocation context_hash.
+
+    Proves the requesting agent actually created this HITL gate and did not
+    fabricate the invocation record after the fact.
+
+    Args:
+        hitl_event: The HITLEventNode with invocation_signature set
+        agent_public_key_bytes: Raw 32-byte Ed25519 public key of the agent
+
+    Returns:
+        True if signature is valid, False otherwise
+    """
+    if not hitl_event.invocation_signature or not hitl_event.context_hash:
+        return False
+
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        public_key = Ed25519PublicKey.from_public_bytes(agent_public_key_bytes)
+        signature_bytes = bytes.fromhex(hitl_event.invocation_signature)
+        # sign_commitment signs bytes.fromhex(hash) — raw hash bytes, not UTF-8 string
+        public_key.verify(signature_bytes, bytes.fromhex(hitl_event.context_hash))
+        return True
+    except Exception:
+        return False
+
+
+def verify_hitl_resolution_signature(
+    hitl_event: HITLEventNode,
+    human_public_key_bytes: bytes,
+) -> bool:
+    """Verify the human's Ed25519 signature over the HITL resolution_hash.
+
+    Proves a specific human principal made this decision and cannot repudiate it.
+
+    Args:
+        hitl_event: The HITLEventNode with resolution_signature set
+        human_public_key_bytes: Raw 32-byte Ed25519 public key of the human
+
+    Returns:
+        True if signature is valid, False otherwise
+    """
+    if not hitl_event.resolution_signature or not hitl_event.resolution_hash:
+        return False
+
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        public_key = Ed25519PublicKey.from_public_bytes(human_public_key_bytes)
+        signature_bytes = bytes.fromhex(hitl_event.resolution_signature)
+        # sign_commitment signs bytes.fromhex(hash) — raw hash bytes, not UTF-8 string
+        public_key.verify(signature_bytes, bytes.fromhex(hitl_event.resolution_hash))
+        return True
+    except Exception:
+        return False

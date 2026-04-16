@@ -566,6 +566,8 @@ def write_hitl_event_invocation_sync(driver, hitl_event) -> None:
                   h.timeout_at            = $timeout_at,
                   h.spine_snapshot_index  = $spine_snapshot_index,
                   h.context_hash          = $context_hash,
+                  h.invocation_signature  = $invocation_signature,
+                  h.invocation_key_fingerprint = $invocation_key_fingerprint,
                   h.schema_version        = $schema_version
             """, {
                 "hitl_event_id": str(hitl_event.hitl_event_id),
@@ -582,6 +584,8 @@ def write_hitl_event_invocation_sync(driver, hitl_event) -> None:
                     else None,
                 "spine_snapshot_index": hitl_event.spine_snapshot_index,
                 "context_hash": hitl_event.context_hash,
+                "invocation_signature": hitl_event.invocation_signature,
+                "invocation_key_fingerprint": hitl_event.invocation_key_fingerprint,
                 "schema_version": ARIADNE_SCHEMA_VERSION,
             })
 
@@ -627,6 +631,8 @@ def write_hitl_event_resolution_sync(
     resolution_hash: str,
     node_hash: str,
     pending_duration_ms: int = None,
+    resolution_signature: str = None,
+    resolution_key_fingerprint: str = None,
 ) -> None:
     """Write Phase 2 of a HITL event — the resolution record.
 
@@ -651,7 +657,9 @@ def write_hitl_event_resolution_sync(
                     h.rationale           = $rationale,
                     h.resolution_hash     = $resolution_hash,
                     h.node_hash           = $node_hash,
-                    h.pending_duration_ms = $pending_duration_ms
+                    h.pending_duration_ms = $pending_duration_ms,
+                    h.resolution_signature = $resolution_signature,
+                    h.resolution_key_fingerprint = $resolution_key_fingerprint
                 RETURN h.hitl_event_id AS updated
             """, {
                 "hitl_event_id": hitl_event_id,
@@ -663,6 +671,8 @@ def write_hitl_event_resolution_sync(
                 "resolution_hash": resolution_hash,
                 "node_hash": node_hash,
                 "pending_duration_ms": pending_duration_ms,
+                "resolution_signature": resolution_signature,
+                "resolution_key_fingerprint": resolution_key_fingerprint,
             })
 
             record = result.single()
