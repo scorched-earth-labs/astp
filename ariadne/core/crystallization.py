@@ -223,12 +223,23 @@ class CrystallizationLockError(AriadneGovernanceError):
 def enforce_crystallization_lock_guard(episode_status: str) -> None:
     """
     Called from create_segment_node() and create_signal_node().
-    Raises CrystallizationLockError if the episode is CRYSTALLIZATION_PENDING.
+    Raises CrystallizationLockError if the episode is CRYSTALLIZATION_PENDING
+    or PENDING_HITL (blocking HITL gate requires human decision before
+    the episode can advance).
+
+    Note: Only blocking HITL gates (APPROVAL_REQUIRED, COMPLIANCE_CHECKPOINT)
+    set PENDING_HITL. Advisory gates leave the episode ACTIVE.
     """
     if episode_status == "CRYSTALLIZATION_PENDING":
         raise CrystallizationLockError(
             "Write rejected: episode is in CRYSTALLIZATION_PENDING state. "
             "No further deltas may be appended until crystallization completes or is rolled back."
+        )
+    if episode_status == "PENDING_HITL":
+        raise CrystallizationLockError(
+            "Write rejected: episode is in PENDING_HITL state. "
+            "A blocking HITL gate is awaiting human decision. "
+            "Resolve the HITL request before appending further deltas."
         )
 
 

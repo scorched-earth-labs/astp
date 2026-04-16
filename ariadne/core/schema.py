@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 class EpisodeStatus(str, Enum):
     CREATED = "CREATED"
     ACTIVE = "ACTIVE"
+    PENDING_HITL = "PENDING_HITL"                # Blocking HITL gate open; crystallization blocked
     CLOSING = "CLOSING"                          # Closure initiated; final contributions permitted
     CLOSING_PENDING_SEAL = "CLOSING_PENDING_SEAL"  # All contributions in; grace period active
     CLOSED = "CLOSED"                            # Merkle root sealed; episode immutable

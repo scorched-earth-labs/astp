@@ -37,11 +37,28 @@ IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE = os.getenv(
 async def acquire_crystallization_lock(driver, episode_id: str) -> bool:
     """
     Sets episode_status to CRYSTALLIZATION_PENDING.
-    Returns True if lock acquired, False if episode not in ACTIVE state.
+    Returns True if lock acquired, False if episode not in ACTIVE state
+    or if pending HITL events exist.
     """
     if not ARIADNE_ENABLED:
         return False
     async with driver.session() as session:
+        # Check for pending HITL events before acquiring lock
+        hitl_check = await session.run("""
+            MATCH (e:AriadneEpisode {episode_id: $episode_id})-[:HITL_GATE]->(h:AriadneHITLEvent)
+            WHERE h.status = 'invoked'
+            RETURN count(h) AS pending_count
+        """, {"episode_id": episode_id})
+        hitl_record = await hitl_check.single()
+        pending_hitl = hitl_record["pending_count"] if hitl_record else 0
+
+        if pending_hitl > 0:
+            logger.warning(
+                f"Ariadne: Cannot acquire crystallization lock for episode {episode_id} "
+                f"-- {pending_hitl} pending HITL event(s) must be resolved first."
+            )
+            return False
+
         result = await session.run("""
             MATCH (e:AriadneEpisode {episode_id: $episode_id})
             WHERE e.episode_status = 'ACTIVE'
