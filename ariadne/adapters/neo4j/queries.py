@@ -685,3 +685,115 @@ async def get_episode_spine(
             return list(reversed(rows))
 
     return await asyncio.to_thread(_query)
+
+
+# ── Branch Queries (Phase 1) ────────────────────────────────────────────────
+
+
+async def list_active_branches(
+    driver,
+    episode_id: str,
+) -> list[dict[str, Any]]:
+    """List all active branches for an episode.
+
+    Active = BranchPointNode exists with no matching BranchTerminusNode.
+    """
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (bp:AriadneBranchPoint)
+                WHERE bp.episode_id = $episode_id OR bp.parent_episode_id = $episode_id
+                OPTIONAL MATCH (bp)-[:BRANCH_TERMINUS]->(bt:AriadneBranchTerminus)
+                WITH bp, bt
+                WHERE bt IS NULL
+                RETURN bp {.*} AS branch_point
+                ORDER BY bp.timestamp_utc DESC
+            """, {"episode_id": episode_id})
+            return [dict(record["branch_point"]) for record in result]
+
+    return await asyncio.to_thread(_query)
+
+
+async def get_branch_history(
+    driver,
+    branch_id: str,
+) -> list[dict[str, Any]]:
+    """Get audit records related to a specific branch."""
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        with driver.session() as session:
+            # Find audit records that reference this branch
+            result = session.run("""
+                MATCH (ar:AriadneAuditRecord)
+                WHERE ar.forward_delta CONTAINS $branch_id
+                   OR any(n IN ar.affected_nodes WHERE n CONTAINS $branch_id)
+                RETURN ar {.*} AS audit_record
+                ORDER BY ar.delta_sequence ASC
+            """, {"branch_id": branch_id})
+            return [dict(record["audit_record"]) for record in result]
+
+    return await asyncio.to_thread(_query)
+
+
+async def derive_branch_lifecycle_state(
+    driver,
+    branch_id: str,
+) -> str:
+    """Derive branch lifecycle state from the append-only log.
+
+    ACTIVE: BranchPointNode exists, no BranchTerminusNode
+    MERGED: BranchTerminusNode with terminus_type=merged
+    ABANDONED: BranchTerminusNode with terminus_type=abandoned
+    NOT_FOUND: No BranchPointNode exists
+    """
+    if not ARIADNE_ENABLED:
+        return "NOT_FOUND"
+
+    def _query():
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (bp:AriadneBranchPoint {branch_id: $branch_id})
+                OPTIONAL MATCH (bp)-[:BRANCH_TERMINUS]->(bt:AriadneBranchTerminus)
+                RETURN bp.branch_point_id AS bp_id,
+                       bt.terminus_type AS terminus_type
+            """, {"branch_id": branch_id})
+            record = result.single()
+
+            if not record or not record["bp_id"]:
+                return "NOT_FOUND"
+
+            terminus_type = record["terminus_type"]
+            if terminus_type == "merged":
+                return "MERGED"
+            elif terminus_type == "abandoned":
+                return "ABANDONED"
+            return "ACTIVE"
+
+    return await asyncio.to_thread(_query)
+
+
+async def get_audit_trail(
+    driver,
+    episode_id: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Get the full audit trail for an episode."""
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (ar:AriadneAuditRecord {episode_id: $episode_id})
+                RETURN ar {.*} AS audit_record
+                ORDER BY ar.delta_sequence ASC
+                LIMIT $limit
+            """, {"episode_id": episode_id, "limit": limit})
+            return [dict(record["audit_record"]) for record in result]
+
+    return await asyncio.to_thread(_query)

@@ -48,6 +48,9 @@ class WILOperation(str, Enum):
     COLLABORATION_COMMIT = "COLLABORATION_COMMIT"    # Multi-round collaboration
     EPISODE_CLOSE = "EPISODE_CLOSE"                  # Episode sealed (closure)
     CODICIL_APPEND = "CODICIL_APPEND"                # Codicil added to sealed episode
+    # Branch lifecycle (Phase 1)
+    BRANCH_CREATE = "BRANCH_CREATE"                  # Branch created from spine
+    BRANCH_ABANDON = "BRANCH_ABANDON"                # Branch terminated without merge
 
 
 class WILStatus(str, Enum):

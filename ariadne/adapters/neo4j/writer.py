@@ -65,6 +65,12 @@ SCHEMA_CONSTRAINTS = [
     "CREATE CONSTRAINT ariadne_amendment_id IF NOT EXISTS FOR (am:AriadneAmendment) REQUIRE am.amendment_id IS UNIQUE",
     # HITL Event Nodes (Protocol Amendment v1.2.0)
     "CREATE CONSTRAINT ariadne_hitl_event_id IF NOT EXISTS FOR (h:AriadneHITLEvent) REQUIRE h.hitl_event_id IS UNIQUE",
+    # Branch/Fork/Merge (Phase 1)
+    "CREATE CONSTRAINT ariadne_branch_point_id IF NOT EXISTS FOR (bp:AriadneBranchPoint) REQUIRE bp.branch_point_id IS UNIQUE",
+    "CREATE CONSTRAINT ariadne_branch_terminus_id IF NOT EXISTS FOR (bt:AriadneBranchTerminus) REQUIRE bt.terminus_id IS UNIQUE",
+    "CREATE CONSTRAINT ariadne_audit_record_id IF NOT EXISTS FOR (ar:AriadneAuditRecord) REQUIRE ar.audit_id IS UNIQUE",
+    "CREATE CONSTRAINT ariadne_intent_record_id IF NOT EXISTS FOR (ir:AriadneIntentRecord) REQUIRE ir.intent_id IS UNIQUE",
+    "CREATE CONSTRAINT ariadne_intent_idempotency IF NOT EXISTS FOR (ir:AriadneIntentRecord) REQUIRE ir.idempotency_key IS UNIQUE",
 ]
 
 SCHEMA_INDEXES = [
@@ -106,6 +112,14 @@ SCHEMA_INDEXES = [
     "CREATE INDEX ariadne_hitl_status IF NOT EXISTS FOR (h:AriadneHITLEvent) ON (h.status)",
     "CREATE INDEX ariadne_hitl_gate_type IF NOT EXISTS FOR (h:AriadneHITLEvent) ON (h.gate_type)",
     "CREATE INDEX ariadne_hitl_request_id IF NOT EXISTS FOR (h:AriadneHITLEvent) ON (h.hitl_request_id)",
+    # Branch/Fork/Merge indexes (Phase 1)
+    "CREATE INDEX ariadne_branch_point_episode IF NOT EXISTS FOR (bp:AriadneBranchPoint) ON (bp.episode_id)",
+    "CREATE INDEX ariadne_branch_point_branch_id IF NOT EXISTS FOR (bp:AriadneBranchPoint) ON (bp.branch_id)",
+    "CREATE INDEX ariadne_branch_terminus_branch IF NOT EXISTS FOR (bt:AriadneBranchTerminus) ON (bt.branch_id)",
+    "CREATE INDEX ariadne_audit_episode IF NOT EXISTS FOR (ar:AriadneAuditRecord) ON (ar.episode_id)",
+    "CREATE INDEX ariadne_audit_sequence IF NOT EXISTS FOR (ar:AriadneAuditRecord) ON (ar.delta_sequence)",
+    "CREATE INDEX ariadne_intent_status IF NOT EXISTS FOR (ir:AriadneIntentRecord) ON (ir.status)",
+    "CREATE INDEX ariadne_episode_parent IF NOT EXISTS FOR (e:AriadneEpisode) ON (e.parent_episode_id)",
 ]
 
 SCHEMA_VERSION_SEED = """
@@ -691,3 +705,328 @@ def write_hitl_event_resolution_sync(
 
     except Exception as e:
         logger.warning(f"Ariadne: Failed to write HITL resolution: {e}")
+
+
+# ── Branch/Fork/Merge Writer (Phase 1) ──────────────────────────────────────
+
+
+def write_branch_point_sync(driver, branch_point) -> None:
+    """Write a BranchPointNode + BRANCH_ORIGIN edge from episode."""
+    if not _ariadne_guard():
+        return
+
+    try:
+        from ariadne.core.schema import ARIADNE_SCHEMA_VERSION
+
+        with driver.session() as session:
+            session.run("""
+                MERGE (bp:AriadneBranchPoint {branch_point_id: $branch_point_id})
+                ON CREATE SET
+                  bp.episode_id             = $episode_id,
+                  bp.branch_id              = $branch_id,
+                  bp.branch_label           = $branch_label,
+                  bp.parent_episode_id      = $parent_episode_id,
+                  bp.source_segment_id      = $source_segment_id,
+                  bp.branch_type            = $branch_type,
+                  bp.branch_depth           = $branch_depth,
+                  bp.declaration_type       = $declaration_type,
+                  bp.trigger_context        = $trigger_context,
+                  bp.initiated_by           = $initiated_by,
+                  bp.spine_merkle_snapshot   = $spine_merkle_snapshot,
+                  bp.content_hash           = $content_hash,
+                  bp.parent_hash            = $parent_hash,
+                  bp.timestamp_utc          = $timestamp_utc,
+                  bp.schema_version         = $schema_version,
+                  bp.pre_declaration_merkle_root = $pre_declaration_merkle_root,
+                  bp.declared_retroactively_at   = $declared_retroactively_at,
+                  bp.declared_by            = $declared_by
+            """, {
+                "branch_point_id": str(branch_point.branch_point_id),
+                "episode_id": str(branch_point.episode_id),
+                "branch_id": str(branch_point.branch_id),
+                "branch_label": branch_point.branch_label,
+                "parent_episode_id": str(branch_point.parent_episode_id),
+                "source_segment_id": branch_point.source_segment_id,
+                "branch_type": branch_point.branch_type.value,
+                "branch_depth": branch_point.branch_depth,
+                "declaration_type": branch_point.declaration_type.value,
+                "trigger_context": branch_point.trigger_context.value,
+                "initiated_by": branch_point.initiated_by,
+                "spine_merkle_snapshot": branch_point.spine_merkle_snapshot,
+                "content_hash": branch_point.content_hash,
+                "parent_hash": branch_point.parent_hash,
+                "timestamp_utc": branch_point.timestamp_utc.isoformat(),
+                "schema_version": ARIADNE_SCHEMA_VERSION,
+                "pre_declaration_merkle_root": branch_point.pre_declaration_merkle_root,
+                "declared_retroactively_at": branch_point.declared_retroactively_at.isoformat() if branch_point.declared_retroactively_at else None,
+                "declared_by": branch_point.declared_by,
+            })
+
+            # BRANCH_ORIGIN edge: Episode -> BranchPoint
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $episode_id})
+                MATCH (bp:AriadneBranchPoint {branch_point_id: $branch_point_id})
+                MERGE (e)-[:BRANCH_ORIGIN {
+                    branch_id: $branch_id,
+                    branch_type: $branch_type,
+                    created_at: $timestamp_utc
+                }]->(bp)
+            """, {
+                "episode_id": str(branch_point.parent_episode_id),
+                "branch_point_id": str(branch_point.branch_point_id),
+                "branch_id": str(branch_point.branch_id),
+                "branch_type": branch_point.branch_type.value,
+                "timestamp_utc": branch_point.timestamp_utc.isoformat(),
+            })
+
+        logger.info(
+            f"Ariadne: BranchPoint {str(branch_point.branch_point_id)[:8]}... "
+            f"[{branch_point.initiated_by} → {branch_point.branch_type.value}] "
+            f"(episode={str(branch_point.episode_id)[:8]}...)"
+        )
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write BranchPoint: {e}")
+
+
+def write_branch_terminus_sync(driver, terminus) -> None:
+    """Write a BranchTerminusNode marking branch end."""
+    if not _ariadne_guard():
+        return
+
+    try:
+        with driver.session() as session:
+            session.run("""
+                MERGE (bt:AriadneBranchTerminus {terminus_id: $terminus_id})
+                ON CREATE SET
+                  bt.episode_id           = $episode_id,
+                  bt.branch_id            = $branch_id,
+                  bt.terminus_type         = $terminus_type,
+                  bt.branch_point_hash     = $branch_point_hash,
+                  bt.final_merkle_root     = $final_merkle_root,
+                  bt.duration_ms           = $duration_ms,
+                  bt.timestamp_utc         = $timestamp_utc,
+                  bt.schema_version        = $schema_version,
+                  bt.abandonment_reason    = $abandonment_reason,
+                  bt.merge_target_id       = $merge_target_id
+            """, {
+                "terminus_id": str(terminus.terminus_id),
+                "episode_id": str(terminus.episode_id),
+                "branch_id": str(terminus.branch_id),
+                "terminus_type": terminus.terminus_type.value,
+                "branch_point_hash": terminus.branch_point_hash,
+                "final_merkle_root": terminus.final_merkle_root,
+                "duration_ms": terminus.duration_ms,
+                "timestamp_utc": terminus.timestamp_utc.isoformat(),
+                "schema_version": terminus.schema_version,
+                "abandonment_reason": terminus.abandonment_reason,
+                "merge_target_id": terminus.merge_target_id,
+            })
+
+            # Link terminus to branch point
+            session.run("""
+                MATCH (bp:AriadneBranchPoint {branch_id: $branch_id})
+                MATCH (bt:AriadneBranchTerminus {terminus_id: $terminus_id})
+                MERGE (bp)-[:BRANCH_TERMINUS {
+                    terminus_type: $terminus_type,
+                    created_at: $timestamp_utc
+                }]->(bt)
+            """, {
+                "branch_id": str(terminus.branch_id),
+                "terminus_id": str(terminus.terminus_id),
+                "terminus_type": terminus.terminus_type.value,
+                "timestamp_utc": terminus.timestamp_utc.isoformat(),
+            })
+
+        logger.info(
+            f"Ariadne: BranchTerminus {str(terminus.terminus_id)[:8]}... "
+            f"[{terminus.terminus_type.value}] "
+            f"(branch={str(terminus.branch_id)[:8]}...)"
+        )
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write BranchTerminus: {e}")
+
+
+def write_audit_record_sync(driver, audit) -> None:
+    """Write an AuditRecord to the tamper-evident audit chain."""
+    if not _ariadne_guard():
+        return
+
+    try:
+        import json
+
+        with driver.session() as session:
+            session.run("""
+                MERGE (ar:AriadneAuditRecord {audit_id: $audit_id})
+                ON CREATE SET
+                  ar.delta_sequence       = $delta_sequence,
+                  ar.agent_id             = $agent_id,
+                  ar.session_id           = $session_id,
+                  ar.human_actor          = $human_actor,
+                  ar.wall_clock_time      = $wall_clock_time,
+                  ar.episode_time         = $episode_time,
+                  ar.delta_type           = $delta_type,
+                  ar.forward_delta        = $forward_delta,
+                  ar.reverse_delta        = $reverse_delta,
+                  ar.affected_nodes       = $affected_nodes,
+                  ar.trigger_context      = $trigger_context,
+                  ar.explicit_reason      = $explicit_reason,
+                  ar.prior_audit_hash     = $prior_audit_hash,
+                  ar.record_hash          = $record_hash,
+                  ar.caught_by            = $caught_by,
+                  ar.detection_window_open = $detection_window_open,
+                  ar.episode_id           = $episode_id,
+                  ar.schema_version       = $schema_version
+            """, {
+                "audit_id": str(audit.audit_id),
+                "delta_sequence": audit.delta_sequence,
+                "agent_id": audit.agent_id,
+                "session_id": audit.session_id,
+                "human_actor": audit.human_actor,
+                "wall_clock_time": audit.wall_clock_time.isoformat(),
+                "episode_time": audit.episode_time,
+                "delta_type": audit.delta_type.value,
+                "forward_delta": json.dumps(audit.forward_delta, default=str),
+                "reverse_delta": json.dumps(audit.reverse_delta, default=str),
+                "affected_nodes": audit.affected_nodes,
+                "trigger_context": audit.trigger_context.value,
+                "explicit_reason": audit.explicit_reason,
+                "prior_audit_hash": audit.prior_audit_hash,
+                "record_hash": audit.record_hash,
+                "caught_by": audit.caught_by,
+                "detection_window_open": audit.detection_window_open,
+                "episode_id": audit.episode_id,
+                "schema_version": audit.schema_version,
+            })
+
+            # Link to episode
+            if audit.episode_id:
+                session.run("""
+                    MATCH (e:AriadneEpisode {episode_id: $episode_id})
+                    MATCH (ar:AriadneAuditRecord {audit_id: $audit_id})
+                    MERGE (e)-[:AUDIT_TRAIL {delta_sequence: $delta_sequence}]->(ar)
+                """, {
+                    "episode_id": audit.episode_id,
+                    "audit_id": str(audit.audit_id),
+                    "delta_sequence": audit.delta_sequence,
+                })
+
+        logger.info(
+            f"Ariadne: AuditRecord #{audit.delta_sequence} "
+            f"[{audit.delta_type.value}] "
+            f"(episode={audit.episode_id[:8]}...)"
+        )
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write AuditRecord: {e}")
+
+
+def write_intent_record_sync(driver, intent) -> None:
+    """Write an IntentRecord for concurrent operation guard."""
+    if not _ariadne_guard():
+        return
+
+    try:
+        with driver.session() as session:
+            session.run("""
+                MERGE (ir:AriadneIntentRecord {intent_id: $intent_id})
+                ON CREATE SET
+                  ir.intent_type        = $intent_type,
+                  ir.idempotency_key    = $idempotency_key,
+                  ir.initiator_id       = $initiator_id,
+                  ir.status             = $status,
+                  ir.created_at         = $created_at,
+                  ir.completed_at       = $completed_at,
+                  ir.result_node_id     = $result_node_id
+            """, {
+                "intent_id": str(intent.intent_id),
+                "intent_type": intent.intent_type.value,
+                "idempotency_key": intent.idempotency_key,
+                "initiator_id": intent.initiator_id,
+                "status": intent.status.value,
+                "created_at": intent.created_at.isoformat(),
+                "completed_at": intent.completed_at.isoformat() if intent.completed_at else None,
+                "result_node_id": intent.result_node_id,
+            })
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write IntentRecord: {e}")
+
+
+def acquire_intent_sync(driver, idempotency_key: str, intent_type: str, initiator_id: str):
+    """Acquire an intent record atomically. Returns existing if COMPLETE (idempotent).
+
+    Returns: (IntentRecord dict, is_new: bool)
+    """
+    if not _ariadne_guard():
+        return None, False
+
+    try:
+        from uuid import uuid4
+        from datetime import datetime, timezone
+
+        with driver.session() as session:
+            # Check for existing
+            result = session.run("""
+                MATCH (ir:AriadneIntentRecord {idempotency_key: $key})
+                RETURN ir {.*} AS intent
+            """, {"key": idempotency_key})
+            record = result.single()
+
+            if record:
+                intent = dict(record["intent"])
+                if intent.get("status") == "COMPLETE":
+                    return intent, False  # Idempotent — return existing
+                if intent.get("status") == "PENDING":
+                    return intent, False  # Already in progress
+
+            # Create new intent
+            intent_id = str(uuid4())
+            now = datetime.now(timezone.utc).isoformat()
+            session.run("""
+                MERGE (ir:AriadneIntentRecord {idempotency_key: $key})
+                ON CREATE SET
+                  ir.intent_id      = $intent_id,
+                  ir.intent_type    = $intent_type,
+                  ir.initiator_id   = $initiator_id,
+                  ir.status         = 'PENDING',
+                  ir.created_at     = $created_at
+            """, {
+                "key": idempotency_key,
+                "intent_id": intent_id,
+                "intent_type": intent_type,
+                "initiator_id": initiator_id,
+                "created_at": now,
+            })
+
+            return {"intent_id": intent_id, "idempotency_key": idempotency_key, "status": "PENDING"}, True
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to acquire intent: {e}")
+        return None, False
+
+
+def complete_intent_sync(driver, idempotency_key: str, result_node_id: str) -> None:
+    """Mark an intent record as COMPLETE with the result node ID."""
+    if not _ariadne_guard():
+        return
+
+    try:
+        from datetime import datetime, timezone
+
+        with driver.session() as session:
+            session.run("""
+                MATCH (ir:AriadneIntentRecord {idempotency_key: $key})
+                WHERE ir.status = 'PENDING'
+                SET ir.status = 'COMPLETE',
+                    ir.completed_at = $completed_at,
+                    ir.result_node_id = $result_node_id
+            """, {
+                "key": idempotency_key,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "result_node_id": result_node_id,
+            })
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to complete intent: {e}")
