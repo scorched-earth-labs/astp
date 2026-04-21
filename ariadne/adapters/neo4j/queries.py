@@ -68,6 +68,42 @@ async def list_episodes_for_workspace(
     return await asyncio.to_thread(_query)
 
 
+async def list_episodes_for_user(
+    driver,
+    user_name: str,
+    status: Optional[str] = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List all episodes where the user is a participant, across every workspace.
+
+    This is the workspace-agnostic read path — episodes are surfaced by participation,
+    not by workspace membership. Optional status filter matches the workspace-scoped
+    variant's semantics.
+    """
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        with driver.session() as session:
+            where_clauses = ["$user_name IN e.participants"]
+            params: dict[str, Any] = {"user_name": user_name, "limit": limit}
+            if status:
+                where_clauses.append("e.episode_status = $status")
+                params["status"] = status
+
+            where_sql = " AND ".join(where_clauses)
+            result = session.run(f"""
+                MATCH (e:AriadneEpisode)
+                WHERE {where_sql}
+                RETURN e {{.*}} AS episode
+                ORDER BY e.opened_at DESC
+                LIMIT $limit
+            """, params)
+            return [record["episode"] for record in result]
+
+    return await asyncio.to_thread(_query)
+
+
 async def list_shared_episodes_for_user(
     driver,
     user_name: str,
