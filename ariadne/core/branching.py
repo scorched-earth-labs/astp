@@ -1213,3 +1213,294 @@ def check_soliloquy_return_obligation(
             "Return obligation violated: soliloquy is still ACTIVE at episode seal. "
             "Unconcluded soliloquies are audit violations — conclude or explicitly abandon."
         )
+
+
+
+
+# ============================================================================
+# Phase 4 — Prescriptive Enforcement
+# ============================================================================
+
+
+class DetectionState(str, Enum):
+    """Coherence-drift detection state.
+
+    States advance as drift persists; they revert when drift resolves.
+    MATERIALIZED is the threshold at which a branch should be declared.
+    """
+    NOMINAL = "NOMINAL"
+    WATCHING = "WATCHING"
+    CANDIDATE = "CANDIDATE"
+    MATERIALIZED = "MATERIALIZED"
+
+
+class IntentClass(str, Enum):
+    """The caller's classification of what this segment is doing."""
+    CONTINUE = "CONTINUE"       # Same thread as spine
+    EXPAND = "EXPAND"           # Widens scope but stays on thread
+    SHIFT = "SHIFT"             # Topic-adjacent but divergent
+    RESOLVE = "RESOLVE"         # Closes an open thread
+    INTRODUCE = "INTRODUCE"     # New topic — immediate branch candidate
+
+
+# ============================================================================
+# Phase 4 — Coherence Fingerprint
+# ============================================================================
+
+
+class CoherenceFingerprint(BaseModel):
+    """Per-segment coherence fingerprint, computed at write time.
+
+    Write-time computation is the critical invariant — retroactive
+    computation detects branches after they've formed, whereas write-time
+    fingerprinting enables detection AS the window opens.
+
+    topic_vector is caller-supplied; if unavailable the registry falls
+    back to objective_hash-only detection.
+    """
+    fingerprint_id: UUID = Field(default_factory=uuid4)
+    episode_id: str
+    segment_id: str
+    sequence_index: int = 0
+    topic_vector: List[float] = Field(default_factory=list)     # Caller-supplied embedding
+    intent_class: IntentClass = IntentClass.CONTINUE
+    objective_hash: str = ""                                    # Hash of current episode objective
+    drift_from_spine: float = 0.0                               # 0.0–1.0 cosine distance
+    consecutive_drift_count: int = 0                            # Persisted across turns
+    detection_state: DetectionState = DetectionState.NOMINAL
+    timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    schema_version: str = ARIADNE_SCHEMA_VERSION
+
+
+# ============================================================================
+# Phase 4 — Detection Thresholds (Tunable)
+# ============================================================================
+
+
+class DetectionThresholds(BaseModel):
+    """Detection-state transition thresholds.
+
+    Spec §7.2: initial values require empirical calibration.
+    Implement as per-episode-type tunable parameters.
+    """
+    watching_drift: float = 0.3
+    watching_consecutive_turns: int = 1
+    candidate_drift: float = 0.3
+    candidate_consecutive_turns: int = 3
+    materialized_drift: float = 0.5
+    materialized_consecutive_turns: int = 5
+    # Any objective-hash change forces IMMEDIATE CANDIDATE regardless of drift
+    objective_change_forces_candidate: bool = True
+
+
+DEFAULT_DETECTION_THRESHOLDS = DetectionThresholds()
+
+
+# ============================================================================
+# Phase 4 — Detection Result
+# ============================================================================
+
+
+class DetectionResult(BaseModel):
+    """Outcome of advance_detection_state()."""
+    episode_id: str
+    segment_id: str
+    prior_state: DetectionState
+    new_state: DetectionState
+    consecutive_drift_count: int
+    drift_from_spine: float
+    materialized_recommendation: Optional[Dict[str, Any]] = None
+    # Populated when new_state == MATERIALIZED — a recommendation to
+    # create_branch(declaration_type=RETROACTIVE) at the last nominal point.
+
+
+# ============================================================================
+# Phase 4 — Confirmation Cache
+# ============================================================================
+
+
+class ConfirmedAction(BaseModel):
+    """A user confirmation cached to prevent the confirmation loop."""
+    action_description: str
+    confirmed_by: str
+    confirmed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    valid_for_turns: int = 10
+    confirmed_at_turn: int
+
+
+class ConfirmationCache:
+    """In-memory TTL-by-turn cache of confirmed actions.
+
+    A confirmation is valid for N turns from when it was granted. After
+    expiry the cache discards the entry and the caller must re-ask.
+    """
+
+    def __init__(self):
+        self._entries: Dict[str, ConfirmedAction] = {}
+
+    def record(
+        self,
+        action_description: str,
+        confirmed_by: str,
+        current_turn: int,
+        valid_for_turns: int = 10,
+    ) -> ConfirmedAction:
+        key = self._key(action_description)
+        entry = ConfirmedAction(
+            action_description=action_description,
+            confirmed_by=confirmed_by,
+            confirmed_at_turn=current_turn,
+            valid_for_turns=valid_for_turns,
+        )
+        self._entries[key] = entry
+        return entry
+
+    def is_confirmed(self, action_description: str, current_turn: int) -> bool:
+        key = self._key(action_description)
+        entry = self._entries.get(key)
+        if entry is None:
+            return False
+        if current_turn - entry.confirmed_at_turn > entry.valid_for_turns:
+            # Expired — discard
+            del self._entries[key]
+            return False
+        return True
+
+    def get(self, action_description: str) -> Optional[ConfirmedAction]:
+        return self._entries.get(self._key(action_description))
+
+    def invalidate(self, action_description: str) -> None:
+        self._entries.pop(self._key(action_description), None)
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+    @staticmethod
+    def _key(action_description: str) -> str:
+        """Canonicalize action description for cache lookup."""
+        return sha3_256(b"CONFIRMATION:" + action_description.strip().lower().encode())
+
+
+# ============================================================================
+# Phase 4 — Hash Functions
+# ============================================================================
+
+
+def compute_fingerprint_hash(
+    fingerprint_id: str,
+    episode_id: str,
+    segment_id: str,
+    objective_hash: str,
+    intent_class: str,
+    timestamp: str,
+) -> str:
+    """Domain separation prefix: FINGERPRINT:"""
+    preimage = (
+        f"{fingerprint_id}:{episode_id}:{segment_id}:"
+        f"{objective_hash}:{intent_class}:{timestamp}"
+    )
+    return sha3_256(b"FINGERPRINT:" + preimage.encode())
+
+
+def compute_objective_hash(objective: str) -> str:
+    """Hash the current episode objective string for change detection.
+
+    Domain separation prefix: OBJECTIVE:
+    """
+    return sha3_256(b"OBJECTIVE:" + (objective or "").strip().encode())
+
+
+# ============================================================================
+# Phase 4 — State Machine
+# ============================================================================
+
+
+def advance_detection_state(
+    prior_state: DetectionState,
+    prior_consecutive_count: int,
+    drift_from_spine: float,
+    objective_changed: bool,
+    intent_class: IntentClass,
+    thresholds: DetectionThresholds = DEFAULT_DETECTION_THRESHOLDS,
+) -> tuple[DetectionState, int]:
+    """Advance the detection state given a new observation.
+
+    Returns (new_state, new_consecutive_drift_count).
+
+    State transitions:
+      - objective_changed => CANDIDATE (immediate, consecutive count preserved)
+      - intent_class == INTRODUCE => CANDIDATE (immediate)
+      - drift >= materialized_drift AND consecutive_count + 1 >= materialized_turns
+          => MATERIALIZED
+      - drift >= candidate_drift AND consecutive_count + 1 >= candidate_turns
+          => CANDIDATE
+      - drift >= watching_drift AND consecutive_count + 1 >= watching_turns
+          => WATCHING
+      - drift below watching_drift => reset consecutive to 0, state back to NOMINAL
+    """
+    # Immediate promotion by objective change
+    if objective_changed and thresholds.objective_change_forces_candidate:
+        return DetectionState.CANDIDATE, prior_consecutive_count + 1
+
+    # INTRODUCE intent is an immediate candidate
+    if intent_class == IntentClass.INTRODUCE:
+        return DetectionState.CANDIDATE, prior_consecutive_count + 1
+
+    # Drift resolved — reset state
+    if drift_from_spine < thresholds.watching_drift:
+        return DetectionState.NOMINAL, 0
+
+    # Drift present — increment consecutive count
+    new_count = prior_consecutive_count + 1
+
+    # Check thresholds in descending order of severity
+    if (drift_from_spine >= thresholds.materialized_drift
+            and new_count >= thresholds.materialized_consecutive_turns):
+        return DetectionState.MATERIALIZED, new_count
+
+    if (drift_from_spine >= thresholds.candidate_drift
+            and new_count >= thresholds.candidate_consecutive_turns):
+        return DetectionState.CANDIDATE, new_count
+
+    if (drift_from_spine >= thresholds.watching_drift
+            and new_count >= thresholds.watching_consecutive_turns):
+        return DetectionState.WATCHING, new_count
+
+    # Drift present but not yet at WATCHING threshold (shouldn't reach here
+    # given the watching check above — kept for clarity)
+    return DetectionState.NOMINAL, new_count
+
+
+def compute_materialized_recommendation(
+    episode_id: str,
+    segment_id: str,
+    last_nominal_segment_id: Optional[str],
+    drift_from_spine: float,
+) -> Dict[str, Any]:
+    """Build a retroactive-branch recommendation payload.
+
+    Returned when detection advances to MATERIALIZED. The caller can feed
+    this directly into create_branch(declaration_type=RETROACTIVE).
+    """
+    return {
+        "recommended_action": "CREATE_BRANCH_RETROACTIVE",
+        "source_episode_id": episode_id,
+        "source_segment_id": last_nominal_segment_id or segment_id,
+        "drift_from_spine": drift_from_spine,
+        "rationale": (
+            "Detection state advanced to MATERIALIZED. "
+            "Declare branch retroactively at the last nominal segment."
+        ),
+    }
+
+
+def enforce_write_time_fingerprint(fingerprint: Optional[CoherenceFingerprint]) -> None:
+    """Fingerprint must be present at write time — not retroactively.
+
+    Spec §7.1: retroactive fingerprinting defeats the detection window.
+    """
+    if fingerprint is None:
+        raise AriadneGovernanceError(
+            "Coherence fingerprint must be computed at segment write time. "
+            "Retroactive fingerprinting defeats the detection window."
+        )

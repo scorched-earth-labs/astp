@@ -80,6 +80,8 @@ SCHEMA_CONSTRAINTS = [
     "CREATE CONSTRAINT ariadne_aside_terminus_id IF NOT EXISTS FOR (at:AriadneAsideTerminus) REQUIRE at.aside_terminus_id IS UNIQUE",
     "CREATE CONSTRAINT ariadne_soliloquy_id IF NOT EXISTS FOR (sol:AriadneSoliloquy) REQUIRE sol.soliloquy_id IS UNIQUE",
     "CREATE CONSTRAINT ariadne_soliloquy_conclusion_id IF NOT EXISTS FOR (sc:AriadneSoliloquyConclusion) REQUIRE sc.conclusion_id IS UNIQUE",
+    # Phase 4 — Coherence Fingerprint Registry
+    "CREATE CONSTRAINT ariadne_fingerprint_id IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) REQUIRE fp.fingerprint_id IS UNIQUE",
 ]
 
 SCHEMA_INDEXES = [
@@ -141,6 +143,11 @@ SCHEMA_INDEXES = [
     "CREATE INDEX ariadne_soliloquy_episode IF NOT EXISTS FOR (sol:AriadneSoliloquy) ON (sol.parent_episode_id)",
     "CREATE INDEX ariadne_soliloquy_status IF NOT EXISTS FOR (sol:AriadneSoliloquy) ON (sol.soliloquy_status)",
     "CREATE INDEX ariadne_soliloquy_owner IF NOT EXISTS FOR (sol:AriadneSoliloquy) ON (sol.initiated_by_agent)",
+    # Phase 4 indexes
+    "CREATE INDEX ariadne_fingerprint_episode IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) ON (fp.episode_id)",
+    "CREATE INDEX ariadne_fingerprint_segment IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) ON (fp.segment_id)",
+    "CREATE INDEX ariadne_fingerprint_sequence IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) ON (fp.sequence_index)",
+    "CREATE INDEX ariadne_fingerprint_state IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) ON (fp.detection_state)",
 ]
 
 SCHEMA_VERSION_SEED = """
@@ -1649,4 +1656,116 @@ def load_soliloquy_sync(driver, soliloquy_id: str) -> Optional[dict]:
             }
     except Exception as e:
         logger.warning(f"Ariadne: load_soliloquy failed: {e}")
+        return None
+
+
+# ── Phase 4 — Coherence Fingerprint Registry ────────────────────────────────
+
+
+def write_coherence_fingerprint_sync(driver, fingerprint) -> None:
+    """Persist a CoherenceFingerprint (write-time, per segment).
+
+    topic_vector stored as a list of floats; the Neo4j driver handles
+    the list primitive. For high-dimensional vectors (128+), consider
+    an external vector store and store only a reference here.
+    """
+    if not _ariadne_guard():
+        return
+
+    try:
+        from ariadne.core.schema import ARIADNE_SCHEMA_VERSION
+
+        with driver.session() as session:
+            session.run("""
+                MERGE (fp:AriadneCoherenceFingerprint {fingerprint_id: $fingerprint_id})
+                ON CREATE SET
+                  fp.episode_id               = $episode_id,
+                  fp.segment_id               = $segment_id,
+                  fp.sequence_index           = $sequence_index,
+                  fp.topic_vector             = $topic_vector,
+                  fp.intent_class             = $intent_class,
+                  fp.objective_hash           = $objective_hash,
+                  fp.drift_from_spine         = $drift_from_spine,
+                  fp.consecutive_drift_count  = $consecutive_drift_count,
+                  fp.detection_state          = $detection_state,
+                  fp.timestamp_utc            = $timestamp_utc,
+                  fp.schema_version           = $schema_version
+            """, {
+                "fingerprint_id": str(fingerprint.fingerprint_id),
+                "episode_id": fingerprint.episode_id,
+                "segment_id": fingerprint.segment_id,
+                "sequence_index": fingerprint.sequence_index,
+                "topic_vector": fingerprint.topic_vector,
+                "intent_class": fingerprint.intent_class.value,
+                "objective_hash": fingerprint.objective_hash,
+                "drift_from_spine": fingerprint.drift_from_spine,
+                "consecutive_drift_count": fingerprint.consecutive_drift_count,
+                "detection_state": fingerprint.detection_state.value,
+                "timestamp_utc": fingerprint.timestamp_utc.isoformat(),
+                "schema_version": ARIADNE_SCHEMA_VERSION,
+            })
+            # FINGERPRINTS edge: Episode -> Fingerprint
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $episode_id})
+                MATCH (fp:AriadneCoherenceFingerprint {fingerprint_id: $fingerprint_id})
+                MERGE (e)-[:FINGERPRINTS {sequence_index: $sequence_index}]->(fp)
+            """, {
+                "episode_id": fingerprint.episode_id,
+                "fingerprint_id": str(fingerprint.fingerprint_id),
+                "sequence_index": fingerprint.sequence_index,
+            })
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write CoherenceFingerprint: {e}")
+
+
+def query_recent_fingerprints_sync(
+    driver, episode_id: str, limit: int = 10,
+) -> List[dict]:
+    """Return the N most recent fingerprints for an episode, newest first."""
+    if not _ariadne_guard():
+        return []
+
+    try:
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (fp:AriadneCoherenceFingerprint {episode_id: $episode_id})
+                RETURN fp {.*} AS fingerprint
+                ORDER BY fp.sequence_index DESC
+                LIMIT $limit
+            """, {"episode_id": episode_id, "limit": limit})
+            return [dict(r["fingerprint"]) for r in result]
+    except Exception as e:
+        logger.warning(f"Ariadne: query_recent_fingerprints failed: {e}")
+        return []
+
+
+def get_last_fingerprint_sync(driver, episode_id: str) -> Optional[dict]:
+    """Return the most recent fingerprint for an episode, or None."""
+    rows = query_recent_fingerprints_sync(driver, episode_id, limit=1)
+    return rows[0] if rows else None
+
+
+def get_last_nominal_segment_sync(driver, episode_id: str) -> Optional[str]:
+    """Return segment_id of the most recent fingerprint in NOMINAL state.
+
+    Used to anchor a RETROACTIVE branch declaration at the last point
+    before drift began.
+    """
+    if not _ariadne_guard():
+        return None
+
+    try:
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (fp:AriadneCoherenceFingerprint {episode_id: $episode_id})
+                WHERE fp.detection_state = 'NOMINAL'
+                RETURN fp.segment_id AS segment_id
+                ORDER BY fp.sequence_index DESC
+                LIMIT 1
+            """, {"episode_id": episode_id})
+            record = result.single()
+            return record["segment_id"] if record else None
+    except Exception as e:
+        logger.warning(f"Ariadne: get_last_nominal_segment failed: {e}")
         return None
