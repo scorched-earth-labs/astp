@@ -1324,6 +1324,625 @@ def _write_merge_failure_audit(
     except Exception as e:
         logger.warning(f"Failed to write merge failure audit: {e}")
 
+
+# ============================================================================
+# Phase 3 — Aside Operations (human-initiated side channel)
+# ============================================================================
+
+
+def create_aside(
+    driver,
+    parent_episode_id: str,
+    parent_segment_id: str,
+    aside_label: str,
+    initiated_by_human: str,
+    target_agent_id: str,
+    return_obligation: bool = True,
+    content_refs: Optional[list] = None,
+    caught_by: str = "HUMAN",
+):
+    """Open an aside: human-initiated side channel with a target agent.
+
+    Writes AsideSegment + ASIDE_OPENED delta + AuditRecord. Invariant:
+    asides are ALWAYS human-initiated — agent-initiated internal branches
+    are soliloquies, not asides.
+
+    Returns:
+        AsideResult on success, None on failure
+    """
+    from ariadne.core.branching import (
+        AsideSegmentNode,
+        AuditRecord,
+        CognitiveDeltaType,
+        TriggerType,
+        compute_aside_hash,
+        compute_audit_record_hash,
+        enforce_aside_human_initiated,
+        enforce_aside_target_agent,
+        AsideResult,
+    )
+    from ariadne.adapters.neo4j.writer import (
+        write_aside_sync,
+        write_audit_record_sync,
+    )
+
+    try:
+        # STEP 1: Validate preconditions
+        enforce_aside_human_initiated(initiated_by_human)
+        enforce_aside_target_agent(target_agent_id)
+        if not aside_label or not aside_label.strip():
+            raise AriadneGovernanceError("Aside requires a non-empty label")
+
+        # Verify parent episode is ACTIVE
+        with driver.session() as session:
+            ep_check = session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $eid})
+                RETURN e.episode_status AS status
+            """, {"eid": parent_episode_id})
+            ep_record = ep_check.single()
+            if not ep_record:
+                logger.error(f"Parent episode {parent_episode_id} not found")
+                return None
+            if ep_record["status"] not in ("ACTIVE", "PENDING_HITL"):
+                logger.error(
+                    f"Parent episode not in ACTIVE state: {ep_record['status']}"
+                )
+                return None
+
+        # STEP 2: Create AsideSegmentNode
+        aside = AsideSegmentNode(
+            parent_episode_id=parent_episode_id,
+            parent_segment_id=parent_segment_id,
+            aside_label=aside_label,
+            initiated_by_human=initiated_by_human,
+            target_agent_id=target_agent_id,
+            return_obligation=return_obligation,
+            content_refs=content_refs or [],
+        )
+        aside.content_hash = compute_aside_hash(
+            str(aside.aside_id),
+            str(aside.parent_episode_id),
+            aside.parent_segment_id,
+            aside.initiated_by_human,
+            aside.target_agent_id,
+            aside.timestamp_utc.isoformat(),
+            aside.parent_hash,
+        )
+
+        # STEP 3: Write AsideSegmentNode
+        write_aside_sync(driver, aside)
+
+        # STEP 4: Write ASIDE_OPENED AuditRecord
+        forward_delta = {
+            "parent_episode_id": parent_episode_id,
+            "parent_segment_id": parent_segment_id,
+            "aside_id": str(aside.aside_id),
+            "aside_label": aside_label,
+            "initiated_by_human": initiated_by_human,
+            "target_agent_id": target_agent_id,
+            "return_obligation": return_obligation,
+        }
+        reverse_delta = {"delete_aside_id": str(aside.aside_id)}
+
+        delta_sequence = _get_next_delta_sequence(driver, parent_episode_id)
+        prior_audit_hash = _get_prior_audit_hash(driver, parent_episode_id)
+
+        audit = AuditRecord(
+            delta_sequence=delta_sequence,
+            agent_id=target_agent_id,
+            human_actor=initiated_by_human,
+            session_id=f"aside-{aside.aside_id}",
+            delta_type=CognitiveDeltaType.ASIDE_OPENED,
+            forward_delta=forward_delta,
+            reverse_delta=reverse_delta,
+            affected_nodes=[str(aside.aside_id)],
+            trigger_context=TriggerType.HUMAN_EXPLICIT,
+            explicit_reason=aside_label,
+            prior_audit_hash=prior_audit_hash,
+            caught_by=caught_by,
+            episode_id=parent_episode_id,
+        )
+        audit.record_hash = compute_audit_record_hash(
+            str(audit.audit_id),
+            audit.delta_sequence,
+            audit.delta_type.value,
+            audit.agent_id,
+            audit.wall_clock_time.isoformat(),
+            json.dumps(forward_delta, default=str),
+            prior_audit_hash,
+        )
+        write_audit_record_sync(driver, audit)
+
+        _write_branch_wil(driver, parent_episode_id, str(aside.aside_id), "ASIDE_OPEN")
+
+        logger.info(
+            f"Aside opened: {str(aside.aside_id)[:8]}... "
+            f"[human={initiated_by_human} → agent={target_agent_id}] "
+            f"episode={parent_episode_id[:8]}..."
+        )
+
+        return AsideResult(
+            aside_id=str(aside.aside_id),
+            parent_episode_id=parent_episode_id,
+            parent_segment_id=parent_segment_id,
+            target_agent_id=target_agent_id,
+            delta_id=str(audit.audit_id),
+            audit_record_id=str(audit.audit_id),
+        )
+
+    except AriadneGovernanceError:
+        raise
+    except Exception as e:
+        logger.error(f"create_aside failed: {e}", exc_info=True)
+        return None
+
+
+def close_aside(
+    driver,
+    aside_id: str,
+    close_reason: str,
+    notification_targets: Optional[list] = None,
+    additional_content_refs: Optional[list] = None,
+    initiator: str = "system",
+):
+    """Close an aside: runs reference scan, writes terminus + audit.
+
+    Asymmetric merge: other agents are notified of the aside's existence,
+    but its internal content is retrieval-accessible only — it is NOT
+    injected into their working state.
+
+    Returns:
+        AsideCloseResult on success, None on failure
+    """
+    from ariadne.core.branching import (
+        AsideTerminusNode,
+        AsideTerminationStatus,
+        AuditRecord,
+        CognitiveDeltaType,
+        TriggerType,
+        compute_audit_record_hash,
+        enforce_aside_close_reason,
+        AsideCloseResult,
+    )
+    from ariadne.core.schema import sha3_256
+    from ariadne.adapters.neo4j.writer import (
+        load_aside_sync,
+        scan_aside_external_references_sync,
+        write_aside_terminus_sync,
+        write_audit_record_sync,
+    )
+
+    try:
+        # STEP 1: Validate preconditions
+        enforce_aside_close_reason(close_reason)
+
+        loaded = load_aside_sync(driver, aside_id)
+        if not loaded:
+            logger.error(f"Aside {aside_id} not found")
+            return None
+        if loaded["is_closed"]:
+            logger.error(f"Aside {aside_id} already closed")
+            return None
+
+        aside_data = loaded["aside"]
+        parent_episode_id = aside_data.get("parent_episode_id", "")
+        content_refs = list(aside_data.get("content_refs") or [])
+        if additional_content_refs:
+            content_refs = list({*content_refs, *additional_content_refs})
+
+        # STEP 2: Reference scan — any external segments pointing inside?
+        external_refs = scan_aside_external_references_sync(
+            driver, aside_id, content_refs,
+        )
+        reference_scan_passed = len(external_refs) == 0
+
+        # STEP 3: Compute final content hash over the aside's closed state
+        final_content_hash = sha3_256(
+            b"ASIDE_FINAL:" +
+            f"{aside_id}:{','.join(sorted(content_refs))}:{close_reason}".encode()
+        )
+
+        # STEP 4: Duration
+        created_at_str = aside_data.get("timestamp_utc", "")
+        duration_ms = _compute_branch_duration_ms(created_at_str)
+
+        # STEP 5: Write AsideTerminusNode
+        terminus = AsideTerminusNode(
+            aside_id=aside_id,
+            parent_episode_id=parent_episode_id,
+            close_reason=close_reason,
+            final_content_hash=final_content_hash,
+            reference_scan_passed=reference_scan_passed,
+            external_references_found=external_refs,
+            notification_targets=notification_targets or [],
+            duration_ms=duration_ms,
+            termination_status=AsideTerminationStatus.CLOSED,
+        )
+        write_aside_terminus_sync(driver, terminus)
+
+        # STEP 6: Write ASIDE_CLOSED AuditRecord
+        forward_delta = {
+            "aside_id": aside_id,
+            "close_reason": close_reason,
+            "final_content_hash": final_content_hash,
+            "reference_scan_passed": reference_scan_passed,
+            "external_references_found": external_refs,
+            "notification_targets": notification_targets or [],
+        }
+        reverse_delta = {"restore_aside_to_open": aside_id}
+
+        delta_sequence = _get_next_delta_sequence(driver, parent_episode_id)
+        prior_audit_hash = _get_prior_audit_hash(driver, parent_episode_id)
+
+        audit = AuditRecord(
+            delta_sequence=delta_sequence,
+            agent_id=aside_data.get("target_agent_id", initiator),
+            human_actor=aside_data.get("initiated_by_human"),
+            session_id=f"aside-close-{aside_id}",
+            delta_type=CognitiveDeltaType.ASIDE_CLOSED,
+            forward_delta=forward_delta,
+            reverse_delta=reverse_delta,
+            affected_nodes=[aside_id, str(terminus.aside_terminus_id)],
+            trigger_context=TriggerType.HUMAN_EXPLICIT,
+            explicit_reason=close_reason,
+            prior_audit_hash=prior_audit_hash,
+            episode_id=parent_episode_id,
+        )
+        audit.record_hash = compute_audit_record_hash(
+            str(audit.audit_id),
+            audit.delta_sequence,
+            audit.delta_type.value,
+            audit.agent_id,
+            audit.wall_clock_time.isoformat(),
+            json.dumps(forward_delta, default=str),
+            prior_audit_hash,
+        )
+        write_audit_record_sync(driver, audit)
+
+        _write_branch_wil(
+            driver, parent_episode_id, str(terminus.aside_terminus_id), "ASIDE_CLOSE"
+        )
+
+        if not reference_scan_passed:
+            logger.warning(
+                f"Aside {aside_id[:8]}... closed with external reference leaks: "
+                f"{len(external_refs)} external segments reference internal state. "
+                f"Recorded in audit trail."
+            )
+
+        logger.info(
+            f"Aside closed: {aside_id[:8]}... "
+            f"scan_passed={reference_scan_passed} duration={duration_ms}ms"
+        )
+
+        return AsideCloseResult(
+            aside_id=aside_id,
+            aside_terminus_id=str(terminus.aside_terminus_id),
+            final_content_hash=final_content_hash,
+            reference_scan_passed=reference_scan_passed,
+            external_references_found=external_refs,
+            notification_targets=notification_targets or [],
+            delta_id=str(audit.audit_id),
+            audit_record_id=str(audit.audit_id),
+        )
+
+    except AriadneGovernanceError:
+        raise
+    except Exception as e:
+        logger.error(f"close_aside failed: {e}", exc_info=True)
+        return None
+
+
+# ============================================================================
+# Phase 3 — Soliloquy Operations (agent-initiated internal deliberation)
+# ============================================================================
+
+
+def create_soliloquy(
+    driver,
+    parent_episode_id: str,
+    parent_segment_id: str,
+    soliloquy_purpose: str,
+    initiated_by_agent: str,
+    visibility_policy: Optional[dict] = None,
+    deliberation_chain: Optional[list] = None,
+    caught_by: str = "AGENT",
+):
+    """Initiate a soliloquy: agent-initiated internal deliberation.
+
+    Invariants:
+      - Humans ALWAYS have read access (enforced)
+      - Other agents: ESCALATION_ONLY by default
+      - Coherence monitoring continues inside
+      - Return obligation required (unconcluded = audit violation)
+
+    Returns:
+        SoliloquyResult on success, None on failure
+    """
+    from ariadne.core.branching import (
+        SoliloquySegmentNode,
+        SoliloquyVisibilityPolicy,
+        AuditRecord,
+        CognitiveDeltaType,
+        TriggerType,
+        compute_soliloquy_content_hash,
+        compute_audit_record_hash,
+        enforce_soliloquy_purpose_required,
+        enforce_soliloquy_human_accessible,
+        SoliloquyResult,
+    )
+    from ariadne.adapters.neo4j.writer import (
+        write_soliloquy_sync,
+        write_audit_record_sync,
+    )
+
+    try:
+        # STEP 1: Validate preconditions
+        enforce_soliloquy_purpose_required(soliloquy_purpose)
+        if not initiated_by_agent or not initiated_by_agent.strip():
+            raise AriadneGovernanceError("Soliloquy requires initiated_by_agent")
+
+        policy = SoliloquyVisibilityPolicy(**(visibility_policy or {}))
+        enforce_soliloquy_human_accessible(policy)
+
+        # Verify parent episode is ACTIVE
+        with driver.session() as session:
+            ep_check = session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $eid})
+                RETURN e.episode_status AS status
+            """, {"eid": parent_episode_id})
+            ep_record = ep_check.single()
+            if not ep_record:
+                logger.error(f"Parent episode {parent_episode_id} not found")
+                return None
+            if ep_record["status"] not in ("ACTIVE", "PENDING_HITL"):
+                logger.error(
+                    f"Parent episode not in ACTIVE state: {ep_record['status']}"
+                )
+                return None
+
+        # STEP 2: Create SoliloquySegmentNode
+        soliloquy = SoliloquySegmentNode(
+            parent_episode_id=parent_episode_id,
+            parent_segment_id=parent_segment_id,
+            soliloquy_purpose=soliloquy_purpose,
+            initiated_by_agent=initiated_by_agent,
+            visibility_policy=policy,
+            deliberation_chain=deliberation_chain or [],
+        )
+        soliloquy.content_hash = compute_soliloquy_content_hash(
+            str(soliloquy.soliloquy_id),
+            str(soliloquy.parent_episode_id),
+            soliloquy.parent_segment_id,
+            soliloquy.initiated_by_agent,
+            soliloquy.timestamp_utc.isoformat(),
+            soliloquy.deliberation_chain,
+            policy,
+        )
+
+        # STEP 3: Write SoliloquySegmentNode
+        write_soliloquy_sync(driver, soliloquy)
+
+        # STEP 4: Write SOLILOQUY_INITIATED AuditRecord
+        forward_delta = {
+            "parent_episode_id": parent_episode_id,
+            "parent_segment_id": parent_segment_id,
+            "soliloquy_id": str(soliloquy.soliloquy_id),
+            "soliloquy_purpose": soliloquy_purpose,
+            "initiated_by_agent": initiated_by_agent,
+            "visibility_policy": policy.model_dump(mode="json"),
+            "content_hash": soliloquy.content_hash,
+        }
+        reverse_delta = {"delete_soliloquy_id": str(soliloquy.soliloquy_id)}
+
+        delta_sequence = _get_next_delta_sequence(driver, parent_episode_id)
+        prior_audit_hash = _get_prior_audit_hash(driver, parent_episode_id)
+
+        audit = AuditRecord(
+            delta_sequence=delta_sequence,
+            agent_id=initiated_by_agent,
+            session_id=f"soliloquy-{soliloquy.soliloquy_id}",
+            delta_type=CognitiveDeltaType.SOLILOQUY_INITIATED,
+            forward_delta=forward_delta,
+            reverse_delta=reverse_delta,
+            affected_nodes=[str(soliloquy.soliloquy_id)],
+            trigger_context=TriggerType.AGENT_DETECTED,
+            explicit_reason=soliloquy_purpose,
+            prior_audit_hash=prior_audit_hash,
+            caught_by=caught_by,
+            episode_id=parent_episode_id,
+        )
+        audit.record_hash = compute_audit_record_hash(
+            str(audit.audit_id),
+            audit.delta_sequence,
+            audit.delta_type.value,
+            audit.agent_id,
+            audit.wall_clock_time.isoformat(),
+            json.dumps(forward_delta, default=str),
+            prior_audit_hash,
+        )
+        write_audit_record_sync(driver, audit)
+
+        _write_branch_wil(
+            driver, parent_episode_id, str(soliloquy.soliloquy_id), "SOLILOQUY_INIT"
+        )
+
+        logger.info(
+            f"Soliloquy initiated: {str(soliloquy.soliloquy_id)[:8]}... "
+            f"[agent={initiated_by_agent}, "
+            f"policy={policy.content_hash_policy.value}] "
+            f"episode={parent_episode_id[:8]}..."
+        )
+
+        return SoliloquyResult(
+            soliloquy_id=str(soliloquy.soliloquy_id),
+            parent_episode_id=parent_episode_id,
+            parent_segment_id=parent_segment_id,
+            initiated_by_agent=initiated_by_agent,
+            delta_id=str(audit.audit_id),
+            audit_record_id=str(audit.audit_id),
+        )
+
+    except AriadneGovernanceError:
+        raise
+    except Exception as e:
+        logger.error(f"create_soliloquy failed: {e}", exc_info=True)
+        return None
+
+
+def conclude_soliloquy(
+    driver,
+    soliloquy_id: str,
+    conclusion_summary: str,
+    merged_into_segment_id: str,
+    final_deliberation_chain: Optional[list] = None,
+):
+    """Conclude a soliloquy: only the conclusion merges back to the spine.
+
+    The deliberation chain stays sealed inside the Soliloquy node. A
+    tamper-evident deliberation_chain_hash is recorded on the conclusion
+    so auditors with access can verify the chain content.
+
+    Returns:
+        SoliloquyConclusionResult on success, None on failure
+    """
+    from ariadne.core.branching import (
+        SoliloquyConclusionNode,
+        SoliloquyTerminationStatus,
+        AuditRecord,
+        CognitiveDeltaType,
+        TriggerType,
+        compute_deliberation_chain_hash,
+        compute_soliloquy_conclusion_hash,
+        compute_audit_record_hash,
+        enforce_soliloquy_conclusion_required,
+        SoliloquyConclusionResult,
+    )
+    from ariadne.adapters.neo4j.writer import (
+        load_soliloquy_sync,
+        write_soliloquy_conclusion_sync,
+        write_audit_record_sync,
+    )
+
+    try:
+        # STEP 1: Validate preconditions
+        enforce_soliloquy_conclusion_required(conclusion_summary)
+        if not merged_into_segment_id or not merged_into_segment_id.strip():
+            raise AriadneGovernanceError(
+                "Conclusion must specify merged_into_segment_id — "
+                "only the conclusion merges back"
+            )
+
+        loaded = load_soliloquy_sync(driver, soliloquy_id)
+        if not loaded:
+            logger.error(f"Soliloquy {soliloquy_id} not found")
+            return None
+        if loaded["is_concluded"]:
+            logger.error(f"Soliloquy {soliloquy_id} already concluded")
+            return None
+
+        sol_data = loaded["soliloquy"]
+        parent_episode_id = sol_data.get("parent_episode_id", "")
+        initiated_by_agent = sol_data.get("initiated_by_agent", "")
+        deliberation_chain = (
+            final_deliberation_chain
+            if final_deliberation_chain is not None
+            else list(sol_data.get("deliberation_chain") or [])
+        )
+
+        # STEP 2: Compute chain hash + conclusion hash
+        chain_hash = compute_deliberation_chain_hash(
+            soliloquy_id, deliberation_chain,
+        )
+        ts = datetime.now(timezone.utc)
+
+        conclusion = SoliloquyConclusionNode(
+            soliloquy_id=soliloquy_id,
+            parent_episode_id=parent_episode_id,
+            conclusion_summary=conclusion_summary,
+            conclusion_content_hash="",   # filled below
+            deliberation_chain_hash=chain_hash,
+            merged_into_segment_id=merged_into_segment_id,
+            duration_ms=_compute_branch_duration_ms(sol_data.get("timestamp_utc", "")),
+            termination_status=SoliloquyTerminationStatus.ABSORBED,
+            timestamp_utc=ts,
+        )
+        conclusion.conclusion_content_hash = compute_soliloquy_conclusion_hash(
+            str(conclusion.conclusion_id),
+            soliloquy_id,
+            conclusion_summary,
+            ts.isoformat(),
+        )
+
+        # STEP 3: Write SoliloquyConclusionNode
+        write_soliloquy_conclusion_sync(driver, conclusion)
+
+        # STEP 4: Write SOLILOQUY_CONCLUDED AuditRecord
+        forward_delta = {
+            "soliloquy_id": soliloquy_id,
+            "conclusion_id": str(conclusion.conclusion_id),
+            "conclusion_summary": conclusion_summary,
+            "conclusion_content_hash": conclusion.conclusion_content_hash,
+            "deliberation_chain_hash": chain_hash,
+            "merged_into_segment_id": merged_into_segment_id,
+        }
+        reverse_delta = {"restore_soliloquy_to_active": soliloquy_id}
+
+        delta_sequence = _get_next_delta_sequence(driver, parent_episode_id)
+        prior_audit_hash = _get_prior_audit_hash(driver, parent_episode_id)
+
+        audit = AuditRecord(
+            delta_sequence=delta_sequence,
+            agent_id=initiated_by_agent,
+            session_id=f"soliloquy-conclude-{soliloquy_id}",
+            delta_type=CognitiveDeltaType.SOLILOQUY_CONCLUDED,
+            forward_delta=forward_delta,
+            reverse_delta=reverse_delta,
+            affected_nodes=[soliloquy_id, str(conclusion.conclusion_id)],
+            trigger_context=TriggerType.AGENT_DETECTED,
+            explicit_reason=conclusion_summary,
+            prior_audit_hash=prior_audit_hash,
+            episode_id=parent_episode_id,
+        )
+        audit.record_hash = compute_audit_record_hash(
+            str(audit.audit_id),
+            audit.delta_sequence,
+            audit.delta_type.value,
+            audit.agent_id,
+            audit.wall_clock_time.isoformat(),
+            json.dumps(forward_delta, default=str),
+            prior_audit_hash,
+        )
+        write_audit_record_sync(driver, audit)
+
+        _write_branch_wil(
+            driver, parent_episode_id, str(conclusion.conclusion_id),
+            "SOLILOQUY_CONCLUDE",
+        )
+
+        logger.info(
+            f"Soliloquy concluded: {soliloquy_id[:8]}... "
+            f"conclusion={str(conclusion.conclusion_id)[:8]}... "
+            f"merged_into={merged_into_segment_id[:8]}..."
+        )
+
+        return SoliloquyConclusionResult(
+            soliloquy_id=soliloquy_id,
+            conclusion_id=str(conclusion.conclusion_id),
+            conclusion_content_hash=conclusion.conclusion_content_hash,
+            deliberation_chain_hash=chain_hash,
+            merged_into_segment_id=merged_into_segment_id,
+            delta_id=str(audit.audit_id),
+            audit_record_id=str(audit.audit_id),
+        )
+
+    except AriadneGovernanceError:
+        raise
+    except Exception as e:
+        logger.error(f"conclude_soliloquy failed: {e}", exc_info=True)
+        return None
+
+
 def _write_branch_wil(driver, episode_id: str, node_id: str, operation: str) -> None:
     """Write a WIL entry for a branch operation."""
     try:

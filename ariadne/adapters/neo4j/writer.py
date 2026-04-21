@@ -11,7 +11,7 @@ with session.run()'s own 'parameters' argument. See bdi.py commit history for co
 
 import logging
 import os
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from ariadne.core.schema import (
@@ -75,6 +75,11 @@ SCHEMA_CONSTRAINTS = [
     # Branch/Fork/Merge (Phase 2)
     "CREATE CONSTRAINT ariadne_fork_point_id IF NOT EXISTS FOR (fp:AriadneForkPoint) REQUIRE fp.fork_point_id IS UNIQUE",
     "CREATE CONSTRAINT ariadne_merge_point_id IF NOT EXISTS FOR (mp:AriadneMergePoint) REQUIRE mp.merge_point_id IS UNIQUE",
+    # Phase 3 — Social/Internal Primitives
+    "CREATE CONSTRAINT ariadne_aside_id IF NOT EXISTS FOR (a:AriadneAside) REQUIRE a.aside_id IS UNIQUE",
+    "CREATE CONSTRAINT ariadne_aside_terminus_id IF NOT EXISTS FOR (at:AriadneAsideTerminus) REQUIRE at.aside_terminus_id IS UNIQUE",
+    "CREATE CONSTRAINT ariadne_soliloquy_id IF NOT EXISTS FOR (sol:AriadneSoliloquy) REQUIRE sol.soliloquy_id IS UNIQUE",
+    "CREATE CONSTRAINT ariadne_soliloquy_conclusion_id IF NOT EXISTS FOR (sc:AriadneSoliloquyConclusion) REQUIRE sc.conclusion_id IS UNIQUE",
 ]
 
 SCHEMA_INDEXES = [
@@ -129,6 +134,13 @@ SCHEMA_INDEXES = [
     "CREATE INDEX ariadne_fork_point_origin IF NOT EXISTS FOR (fp:AriadneForkPoint) ON (fp.origin_episode_id)",
     "CREATE INDEX ariadne_merge_point_merge_id IF NOT EXISTS FOR (mp:AriadneMergePoint) ON (mp.merge_id)",
     "CREATE INDEX ariadne_merge_point_target IF NOT EXISTS FOR (mp:AriadneMergePoint) ON (mp.target_episode_id)",
+    # Phase 3 indexes
+    "CREATE INDEX ariadne_aside_episode IF NOT EXISTS FOR (a:AriadneAside) ON (a.parent_episode_id)",
+    "CREATE INDEX ariadne_aside_status IF NOT EXISTS FOR (a:AriadneAside) ON (a.aside_status)",
+    "CREATE INDEX ariadne_aside_target_agent IF NOT EXISTS FOR (a:AriadneAside) ON (a.target_agent_id)",
+    "CREATE INDEX ariadne_soliloquy_episode IF NOT EXISTS FOR (sol:AriadneSoliloquy) ON (sol.parent_episode_id)",
+    "CREATE INDEX ariadne_soliloquy_status IF NOT EXISTS FOR (sol:AriadneSoliloquy) ON (sol.soliloquy_status)",
+    "CREATE INDEX ariadne_soliloquy_owner IF NOT EXISTS FOR (sol:AriadneSoliloquy) ON (sol.initiated_by_agent)",
 ]
 
 SCHEMA_VERSION_SEED = """
@@ -1312,4 +1324,329 @@ def find_common_ancestor_sync(
 
     except Exception as e:
         logger.warning(f"Ariadne: find_common_ancestor failed: {e}")
+        return None
+
+
+# ── Phase 3 — Aside / Soliloquy Writers ─────────────────────────────────────
+
+
+def write_aside_sync(driver, aside) -> None:
+    """Write an AsideSegmentNode + ASIDE_OPEN edge from parent episode."""
+    if not _ariadne_guard():
+        return
+
+    try:
+        from ariadne.core.schema import ARIADNE_SCHEMA_VERSION
+
+        with driver.session() as session:
+            session.run("""
+                MERGE (a:AriadneAside {aside_id: $aside_id})
+                ON CREATE SET
+                  a.parent_episode_id   = $parent_episode_id,
+                  a.parent_segment_id   = $parent_segment_id,
+                  a.aside_label         = $aside_label,
+                  a.initiated_by_human  = $initiated_by_human,
+                  a.target_agent_id     = $target_agent_id,
+                  a.return_obligation   = $return_obligation,
+                  a.content_refs        = $content_refs,
+                  a.content_hash        = $content_hash,
+                  a.parent_hash         = $parent_hash,
+                  a.timestamp_utc       = $timestamp_utc,
+                  a.schema_version      = $schema_version,
+                  a.aside_status        = 'OPEN'
+            """, {
+                "aside_id": str(aside.aside_id),
+                "parent_episode_id": str(aside.parent_episode_id),
+                "parent_segment_id": aside.parent_segment_id,
+                "aside_label": aside.aside_label,
+                "initiated_by_human": aside.initiated_by_human,
+                "target_agent_id": aside.target_agent_id,
+                "return_obligation": aside.return_obligation,
+                "content_refs": aside.content_refs,
+                "content_hash": aside.content_hash,
+                "parent_hash": aside.parent_hash,
+                "timestamp_utc": aside.timestamp_utc.isoformat(),
+                "schema_version": ARIADNE_SCHEMA_VERSION,
+            })
+            # ASIDE_OPEN edge: parent episode -> Aside
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $parent_episode_id})
+                MATCH (a:AriadneAside {aside_id: $aside_id})
+                MERGE (e)-[:ASIDE_OPEN {
+                    parent_segment_id: $parent_segment_id,
+                    target_agent_id: $target_agent_id,
+                    opened_at: $timestamp_utc
+                }]->(a)
+            """, {
+                "parent_episode_id": str(aside.parent_episode_id),
+                "aside_id": str(aside.aside_id),
+                "parent_segment_id": aside.parent_segment_id,
+                "target_agent_id": aside.target_agent_id,
+                "timestamp_utc": aside.timestamp_utc.isoformat(),
+            })
+
+        logger.info(
+            f"Ariadne: Aside {str(aside.aside_id)[:8]}... "
+            f"[human={aside.initiated_by_human} → agent={aside.target_agent_id}] "
+            f"(episode={str(aside.parent_episode_id)[:8]}...)"
+        )
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write Aside: {e}")
+
+
+def write_aside_terminus_sync(driver, terminus) -> None:
+    """Write an AsideTerminusNode closing an aside."""
+    if not _ariadne_guard():
+        return
+
+    try:
+        with driver.session() as session:
+            session.run("""
+                MERGE (at:AriadneAsideTerminus {aside_terminus_id: $aside_terminus_id})
+                ON CREATE SET
+                  at.aside_id                   = $aside_id,
+                  at.parent_episode_id          = $parent_episode_id,
+                  at.close_reason               = $close_reason,
+                  at.final_content_hash         = $final_content_hash,
+                  at.reference_scan_passed      = $reference_scan_passed,
+                  at.external_references_found  = $external_references_found,
+                  at.notification_targets       = $notification_targets,
+                  at.duration_ms                = $duration_ms,
+                  at.termination_status         = $termination_status,
+                  at.timestamp_utc              = $timestamp_utc,
+                  at.schema_version             = $schema_version
+            """, {
+                "aside_terminus_id": str(terminus.aside_terminus_id),
+                "aside_id": str(terminus.aside_id),
+                "parent_episode_id": str(terminus.parent_episode_id),
+                "close_reason": terminus.close_reason,
+                "final_content_hash": terminus.final_content_hash,
+                "reference_scan_passed": terminus.reference_scan_passed,
+                "external_references_found": terminus.external_references_found,
+                "notification_targets": terminus.notification_targets,
+                "duration_ms": terminus.duration_ms,
+                "termination_status": terminus.termination_status.value,
+                "timestamp_utc": terminus.timestamp_utc.isoformat(),
+                "schema_version": terminus.schema_version,
+            })
+            # Link Aside -> AsideTerminus
+            session.run("""
+                MATCH (a:AriadneAside {aside_id: $aside_id})
+                MATCH (at:AriadneAsideTerminus {aside_terminus_id: $aside_terminus_id})
+                MERGE (a)-[:ASIDE_CLOSED {
+                    closed_at: $timestamp_utc,
+                    termination_status: $termination_status
+                }]->(at)
+                SET a.aside_status = 'CLOSED'
+            """, {
+                "aside_id": str(terminus.aside_id),
+                "aside_terminus_id": str(terminus.aside_terminus_id),
+                "timestamp_utc": terminus.timestamp_utc.isoformat(),
+                "termination_status": terminus.termination_status.value,
+            })
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write AsideTerminus: {e}")
+
+
+def load_aside_sync(driver, aside_id: str) -> Optional[dict]:
+    """Load an aside node with its closure state."""
+    if not _ariadne_guard():
+        return None
+
+    try:
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (a:AriadneAside {aside_id: $aside_id})
+                OPTIONAL MATCH (a)-[:ASIDE_CLOSED]->(at:AriadneAsideTerminus)
+                RETURN a {.*} AS aside, at IS NOT NULL AS is_closed
+            """, {"aside_id": aside_id})
+            record = result.single()
+            if not record or not record["aside"]:
+                return None
+            return {
+                "aside": dict(record["aside"]),
+                "is_closed": record["is_closed"],
+            }
+    except Exception as e:
+        logger.warning(f"Ariadne: load_aside failed: {e}")
+        return None
+
+
+def scan_aside_external_references_sync(
+    driver, aside_id: str, content_refs: List[str],
+) -> List[str]:
+    """Find any segments OUTSIDE the aside that reference aside-internal segments.
+
+    The spec requires this check on close: internal state must not leak
+    into external constructs. Returns a list of offending external segment IDs.
+    """
+    if not _ariadne_guard():
+        return []
+
+    if not content_refs:
+        return []
+
+    try:
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (ext:AriadneSegment)-[:REFERENCES]->(internal:AriadneSegment)
+                WHERE internal.segment_id IN $content_refs
+                  AND NOT ext.segment_id IN $content_refs
+                RETURN collect(DISTINCT ext.segment_id) AS offenders
+            """, {"content_refs": content_refs})
+            record = result.single()
+            if not record:
+                return []
+            return list(record["offenders"] or [])
+    except Exception as e:
+        logger.warning(f"Ariadne: aside reference scan failed: {e}")
+        return []
+
+
+def write_soliloquy_sync(driver, soliloquy) -> None:
+    """Write a SoliloquySegmentNode with visibility policy.
+
+    Content hash is computed per the visibility policy (HASH_PLACEHOLDER
+    preserves the Merkle chain without exposing content).
+    """
+    if not _ariadne_guard():
+        return
+
+    try:
+        from ariadne.core.schema import ARIADNE_SCHEMA_VERSION
+        import json
+
+        with driver.session() as session:
+            session.run("""
+                MERGE (sol:AriadneSoliloquy {soliloquy_id: $soliloquy_id})
+                ON CREATE SET
+                  sol.parent_episode_id     = $parent_episode_id,
+                  sol.parent_segment_id     = $parent_segment_id,
+                  sol.soliloquy_purpose     = $soliloquy_purpose,
+                  sol.initiated_by_agent    = $initiated_by_agent,
+                  sol.visibility_policy     = $visibility_policy,
+                  sol.deliberation_chain    = $deliberation_chain,
+                  sol.content_hash          = $content_hash,
+                  sol.parent_hash           = $parent_hash,
+                  sol.timestamp_utc         = $timestamp_utc,
+                  sol.schema_version        = $schema_version,
+                  sol.soliloquy_status      = 'ACTIVE'
+            """, {
+                "soliloquy_id": str(soliloquy.soliloquy_id),
+                "parent_episode_id": str(soliloquy.parent_episode_id),
+                "parent_segment_id": soliloquy.parent_segment_id,
+                "soliloquy_purpose": soliloquy.soliloquy_purpose,
+                "initiated_by_agent": soliloquy.initiated_by_agent,
+                "visibility_policy": json.dumps(
+                    soliloquy.visibility_policy.model_dump(mode="json"),
+                    default=str,
+                ),
+                "deliberation_chain": soliloquy.deliberation_chain,
+                "content_hash": soliloquy.content_hash,
+                "parent_hash": soliloquy.parent_hash,
+                "timestamp_utc": soliloquy.timestamp_utc.isoformat(),
+                "schema_version": ARIADNE_SCHEMA_VERSION,
+            })
+            # SOLILOQUY_OPEN edge: parent episode -> Soliloquy
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $parent_episode_id})
+                MATCH (sol:AriadneSoliloquy {soliloquy_id: $soliloquy_id})
+                MERGE (e)-[:SOLILOQUY_OPEN {
+                    initiated_by_agent: $initiated_by_agent,
+                    opened_at: $timestamp_utc
+                }]->(sol)
+            """, {
+                "parent_episode_id": str(soliloquy.parent_episode_id),
+                "soliloquy_id": str(soliloquy.soliloquy_id),
+                "initiated_by_agent": soliloquy.initiated_by_agent,
+                "timestamp_utc": soliloquy.timestamp_utc.isoformat(),
+            })
+
+        logger.info(
+            f"Ariadne: Soliloquy {str(soliloquy.soliloquy_id)[:8]}... "
+            f"[agent={soliloquy.initiated_by_agent}, "
+            f"policy={soliloquy.visibility_policy.content_hash_policy.value}] "
+            f"(episode={str(soliloquy.parent_episode_id)[:8]}...)"
+        )
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write Soliloquy: {e}")
+
+
+def write_soliloquy_conclusion_sync(driver, conclusion) -> None:
+    """Write a SoliloquyConclusionNode that merges back to the spine."""
+    if not _ariadne_guard():
+        return
+
+    try:
+        with driver.session() as session:
+            session.run("""
+                MERGE (sc:AriadneSoliloquyConclusion {conclusion_id: $conclusion_id})
+                ON CREATE SET
+                  sc.soliloquy_id             = $soliloquy_id,
+                  sc.parent_episode_id        = $parent_episode_id,
+                  sc.conclusion_summary       = $conclusion_summary,
+                  sc.conclusion_content_hash  = $conclusion_content_hash,
+                  sc.deliberation_chain_hash  = $deliberation_chain_hash,
+                  sc.merged_into_segment_id   = $merged_into_segment_id,
+                  sc.duration_ms              = $duration_ms,
+                  sc.termination_status       = $termination_status,
+                  sc.timestamp_utc            = $timestamp_utc,
+                  sc.schema_version           = $schema_version
+            """, {
+                "conclusion_id": str(conclusion.conclusion_id),
+                "soliloquy_id": str(conclusion.soliloquy_id),
+                "parent_episode_id": str(conclusion.parent_episode_id),
+                "conclusion_summary": conclusion.conclusion_summary,
+                "conclusion_content_hash": conclusion.conclusion_content_hash,
+                "deliberation_chain_hash": conclusion.deliberation_chain_hash,
+                "merged_into_segment_id": conclusion.merged_into_segment_id,
+                "duration_ms": conclusion.duration_ms,
+                "termination_status": conclusion.termination_status.value,
+                "timestamp_utc": conclusion.timestamp_utc.isoformat(),
+                "schema_version": conclusion.schema_version,
+            })
+            # Link Soliloquy -> Conclusion
+            session.run("""
+                MATCH (sol:AriadneSoliloquy {soliloquy_id: $soliloquy_id})
+                MATCH (sc:AriadneSoliloquyConclusion {conclusion_id: $conclusion_id})
+                MERGE (sol)-[:SOLILOQUY_CONCLUDED {
+                    concluded_at: $timestamp_utc,
+                    termination_status: $termination_status
+                }]->(sc)
+                SET sol.soliloquy_status = 'CONCLUDED'
+            """, {
+                "soliloquy_id": str(conclusion.soliloquy_id),
+                "conclusion_id": str(conclusion.conclusion_id),
+                "timestamp_utc": conclusion.timestamp_utc.isoformat(),
+                "termination_status": conclusion.termination_status.value,
+            })
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write SoliloquyConclusion: {e}")
+
+
+def load_soliloquy_sync(driver, soliloquy_id: str) -> Optional[dict]:
+    """Load a soliloquy with its conclusion state."""
+    if not _ariadne_guard():
+        return None
+
+    try:
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (sol:AriadneSoliloquy {soliloquy_id: $soliloquy_id})
+                OPTIONAL MATCH (sol)-[:SOLILOQUY_CONCLUDED]->(sc:AriadneSoliloquyConclusion)
+                RETURN sol {.*} AS soliloquy, sc IS NOT NULL AS is_concluded
+            """, {"soliloquy_id": soliloquy_id})
+            record = result.single()
+            if not record or not record["soliloquy"]:
+                return None
+            return {
+                "soliloquy": dict(record["soliloquy"]),
+                "is_concluded": record["is_concluded"],
+            }
+    except Exception as e:
+        logger.warning(f"Ariadne: load_soliloquy failed: {e}")
         return None

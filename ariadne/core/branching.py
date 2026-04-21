@@ -811,3 +811,405 @@ def enforce_merge_summary_required(summary: Optional[str]) -> None:
             "Merge execution requires a non-empty merge_summary. "
             "The synthesis is the audit trail of what the merge produced."
         )
+
+
+
+
+# ============================================================================
+# Phase 3 — Social/Internal Primitives
+# ============================================================================
+
+
+class AsideStatus(str, Enum):
+    """Lifecycle status of an aside, derived from presence of close record."""
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+
+
+class SoliloquyStatus(str, Enum):
+    """Lifecycle status of a soliloquy."""
+    ACTIVE = "ACTIVE"
+    CONCLUDED = "CONCLUDED"
+
+
+class AsideTerminationStatus(str, Enum):
+    """How an aside was terminated."""
+    CLOSED = "CLOSED"
+    ABANDONED = "ABANDONED"         # Unclosed at episode close — audit violation
+
+
+class SoliloquyTerminationStatus(str, Enum):
+    ABSORBED = "ABSORBED"           # Conclusion merged to spine
+    ABANDONED = "ABANDONED"         # Unclosed — audit violation
+
+
+class SoliloquyContentHashPolicy(str, Enum):
+    """How a soliloquy's content hash is computed for the Merkle chain."""
+    HASH_PLACEHOLDER = "HASH_PLACEHOLDER"   # Preserve chain without content exposure
+    FULL_CONTENT = "FULL_CONTENT"           # Hash the deliberation chain directly
+
+
+# ============================================================================
+# Phase 3 — Delta Payloads
+# ============================================================================
+
+
+class AsideOpenedDelta(BaseModel):
+    """Forward + reverse delta for ASIDE_OPENED."""
+    parent_episode_id: str
+    parent_segment_id: str
+    aside_id: str
+    aside_label: str
+    initiated_by_human: str
+    target_agent_id: str
+    return_obligation: bool = True
+    # Reverse
+    reverse_delete_aside_id: str
+
+
+class AsideClosedDelta(BaseModel):
+    """Forward + reverse delta for ASIDE_CLOSED."""
+    aside_id: str
+    close_reason: str
+    final_content_hash: str
+    reference_scan_passed: bool
+    external_references_found: List[str] = Field(default_factory=list)
+    notification_targets: List[str] = Field(default_factory=list)
+    # Reverse
+    reverse_restore_aside_to_open: str
+
+
+class SoliloquyInitiatedDelta(BaseModel):
+    """Forward + reverse delta for SOLILOQUY_INITIATED."""
+    parent_episode_id: str
+    parent_segment_id: str
+    soliloquy_id: str
+    soliloquy_purpose: str
+    initiated_by_agent: str
+    visibility_policy: Dict[str, Any]
+    # Reverse
+    reverse_delete_soliloquy_id: str
+
+
+class SoliloquyConcludedDelta(BaseModel):
+    """Forward + reverse delta for SOLILOQUY_CONCLUDED."""
+    soliloquy_id: str
+    conclusion_summary: str
+    conclusion_content_hash: str
+    deliberation_chain_hash: str
+    merged_into_segment_id: str
+    # Reverse
+    reverse_restore_soliloquy_to_active: str
+
+
+# ============================================================================
+# Phase 3 — Node Models
+# ============================================================================
+
+
+class SoliloquyVisibilityPolicy(BaseModel):
+    """Per-soliloquy visibility policy. Defaults enforce Decision 1."""
+    human_accessible: bool = True                              # ALWAYS — non-negotiable
+    owner_agent_access: str = "ALWAYS"
+    other_agents_access: AccessLevel = AccessLevel.ESCALATION_ONLY
+    content_hash_policy: SoliloquyContentHashPolicy = SoliloquyContentHashPolicy.HASH_PLACEHOLDER
+    audit_on_access: bool = True
+    deployment_override_permitted: bool = False                # Must be explicit per deployment
+
+
+class AsideSegmentNode(BaseModel):
+    """Created by create_aside() — human-initiated side channel with target agent.
+
+    Invariant: asides are ALWAYS human-initiated. Agent-initiated internal
+    branches are soliloquies, not asides.
+    """
+    aside_id: UUID = Field(default_factory=uuid4)
+    parent_episode_id: UUID
+    parent_segment_id: str                                      # Where the aside opened
+    aside_label: str                                            # Human-readable purpose
+    initiated_by_human: str                                     # Human identifier — required
+    target_agent_id: str                                        # Agent the aside runs with
+    return_obligation: bool = True                              # Must be closed before episode seal
+    content_refs: List[str] = Field(default_factory=list)       # Segments/artifacts produced in aside
+    content_hash: str = ""
+    parent_hash: str = ""
+    timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    schema_version: str = ARIADNE_SCHEMA_VERSION
+
+
+class AsideTerminusNode(BaseModel):
+    """Created by close_aside() — records the aside close.
+
+    Asymmetric merge: other agents are NOTIFIED of the aside's existence,
+    but the internal content is retrieval-accessible only, not injected
+    into working state.
+    """
+    aside_terminus_id: UUID = Field(default_factory=uuid4)
+    aside_id: UUID
+    parent_episode_id: UUID
+    close_reason: str
+    final_content_hash: str
+    reference_scan_passed: bool                                 # No external refs held internal state
+    external_references_found: List[str] = Field(default_factory=list)
+    notification_targets: List[str] = Field(default_factory=list)
+    duration_ms: int = 0
+    termination_status: AsideTerminationStatus = AsideTerminationStatus.CLOSED
+    timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    schema_version: str = ARIADNE_SCHEMA_VERSION
+
+
+class SoliloquySegmentNode(BaseModel):
+    """Created by create_soliloquy() — agent-initiated private deliberation.
+
+    Invariants:
+      - Human-accessible ALWAYS (never private to humans)
+      - Other agents: ESCALATION_ONLY by default
+      - Coherence monitoring continues inside the soliloquy
+      - Return obligation required — unclosed is an audit violation
+    """
+    soliloquy_id: UUID = Field(default_factory=uuid4)
+    parent_episode_id: UUID
+    parent_segment_id: str
+    soliloquy_purpose: str                                      # Why the agent is deliberating
+    initiated_by_agent: str                                     # Agent identifier
+    visibility_policy: SoliloquyVisibilityPolicy = Field(
+        default_factory=SoliloquyVisibilityPolicy
+    )
+    deliberation_chain: List[str] = Field(default_factory=list)  # Internal reasoning segment IDs
+    content_hash: str = ""                                      # Computed via policy (placeholder or full)
+    parent_hash: str = ""
+    timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    schema_version: str = ARIADNE_SCHEMA_VERSION
+
+
+class SoliloquyConclusionNode(BaseModel):
+    """Created by conclude_soliloquy() — the conclusion that merges back to spine.
+
+    Only this conclusion is absorbed into the parent episode. The
+    deliberation chain stays sealed inside the SoliloquySegmentNode.
+    """
+    conclusion_id: UUID = Field(default_factory=uuid4)
+    soliloquy_id: UUID
+    parent_episode_id: UUID
+    conclusion_summary: str                                     # What the agent concluded
+    conclusion_content_hash: str                                # Hash of the public conclusion
+    deliberation_chain_hash: str                                # Tamper-evident hash of private chain
+    merged_into_segment_id: str                                 # Spine segment that received the conclusion
+    duration_ms: int = 0
+    termination_status: SoliloquyTerminationStatus = SoliloquyTerminationStatus.ABSORBED
+    timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    schema_version: str = ARIADNE_SCHEMA_VERSION
+
+
+# ============================================================================
+# Phase 3 — Result Types
+# ============================================================================
+
+
+class AsideResult(BaseModel):
+    aside_id: str
+    parent_episode_id: str
+    parent_segment_id: str
+    target_agent_id: str
+    delta_id: str
+    audit_record_id: str
+    status: AsideStatus = AsideStatus.OPEN
+
+
+class AsideCloseResult(BaseModel):
+    aside_id: str
+    aside_terminus_id: str
+    final_content_hash: str
+    reference_scan_passed: bool
+    external_references_found: List[str] = Field(default_factory=list)
+    notification_targets: List[str] = Field(default_factory=list)
+    delta_id: str
+    audit_record_id: str
+
+
+class SoliloquyResult(BaseModel):
+    soliloquy_id: str
+    parent_episode_id: str
+    parent_segment_id: str
+    initiated_by_agent: str
+    delta_id: str
+    audit_record_id: str
+    status: SoliloquyStatus = SoliloquyStatus.ACTIVE
+
+
+class SoliloquyConclusionResult(BaseModel):
+    soliloquy_id: str
+    conclusion_id: str
+    conclusion_content_hash: str
+    deliberation_chain_hash: str
+    merged_into_segment_id: str
+    delta_id: str
+    audit_record_id: str
+
+
+# ============================================================================
+# Phase 3 — Hash Functions
+# ============================================================================
+
+
+def compute_aside_hash(
+    aside_id: str,
+    parent_episode_id: str,
+    parent_segment_id: str,
+    initiated_by_human: str,
+    target_agent_id: str,
+    timestamp: str,
+    parent_hash: str,
+) -> str:
+    """Compute the content hash of an AsideSegmentNode.
+
+    Domain separation prefix: ASIDE:
+    """
+    preimage = (
+        f"{aside_id}:{parent_episode_id}:{parent_segment_id}:"
+        f"{initiated_by_human}:{target_agent_id}:{timestamp}:{parent_hash}"
+    )
+    return sha3_256(b"ASIDE:" + preimage.encode())
+
+
+def compute_soliloquy_content_hash(
+    soliloquy_id: str,
+    parent_episode_id: str,
+    parent_segment_id: str,
+    initiated_by_agent: str,
+    timestamp: str,
+    deliberation_chain: List[str],
+    policy: SoliloquyVisibilityPolicy,
+) -> str:
+    """Compute the content hash of a SoliloquySegmentNode per visibility policy.
+
+    HASH_PLACEHOLDER: hashes only identity + timestamp (chain preserved, content hidden)
+    FULL_CONTENT:    hashes the deliberation chain directly
+
+    Domain separation prefix: SOLILOQUY_PLACEHOLDER: or SOLILOQUY_FULL:
+    """
+    if policy.content_hash_policy == SoliloquyContentHashPolicy.HASH_PLACEHOLDER:
+        preimage = (
+            f"{soliloquy_id}:{parent_episode_id}:{parent_segment_id}:"
+            f"{initiated_by_agent}:{timestamp}"
+        )
+        return sha3_256(b"SOLILOQUY_PLACEHOLDER:" + preimage.encode())
+    else:
+        chain_str = "|".join(deliberation_chain)
+        preimage = (
+            f"{soliloquy_id}:{parent_episode_id}:{parent_segment_id}:"
+            f"{initiated_by_agent}:{timestamp}:{chain_str}"
+        )
+        return sha3_256(b"SOLILOQUY_FULL:" + preimage.encode())
+
+
+def compute_deliberation_chain_hash(
+    soliloquy_id: str,
+    deliberation_chain: List[str],
+) -> str:
+    """Tamper-evident hash of the private deliberation chain.
+
+    Stored on the conclusion node so that an auditor with access can
+    verify the deliberation content without the content being exposed
+    in the public conclusion.
+
+    Domain separation prefix: DELIBERATION_CHAIN:
+    """
+    chain_str = "|".join(deliberation_chain)
+    preimage = f"{soliloquy_id}:{chain_str}"
+    return sha3_256(b"DELIBERATION_CHAIN:" + preimage.encode())
+
+
+def compute_soliloquy_conclusion_hash(
+    conclusion_id: str,
+    soliloquy_id: str,
+    conclusion_summary: str,
+    timestamp: str,
+) -> str:
+    """Hash of the public conclusion that merges back to spine.
+
+    Domain separation prefix: SOLILOQUY_CONCLUSION:
+    """
+    preimage = f"{conclusion_id}:{soliloquy_id}:{conclusion_summary}:{timestamp}"
+    return sha3_256(b"SOLILOQUY_CONCLUSION:" + preimage.encode())
+
+
+# ============================================================================
+# Phase 3 — Governance Rules
+# ============================================================================
+
+
+def enforce_aside_human_initiated(initiated_by_human: Optional[str]) -> None:
+    """Asides are ALWAYS human-initiated. An agent-initiated internal branch
+    is a soliloquy, not an aside."""
+    if not initiated_by_human or not initiated_by_human.strip():
+        raise AriadneGovernanceError(
+            "Asides must be human-initiated — initiated_by_human is required. "
+            "Agent-initiated internal branches are soliloquies."
+        )
+
+
+def enforce_aside_target_agent(target_agent_id: Optional[str]) -> None:
+    """Aside runs with a specific target agent — required."""
+    if not target_agent_id or not target_agent_id.strip():
+        raise AriadneGovernanceError(
+            "Asides require a target_agent_id — aside runs with exactly one agent."
+        )
+
+
+def enforce_aside_close_reason(reason: Optional[str]) -> None:
+    """Asides must be closed with a non-empty reason."""
+    if not reason or not reason.strip():
+        raise AriadneGovernanceError(
+            "Closing an aside requires a non-empty close_reason. "
+            "Return obligation is part of the audit trail."
+        )
+
+
+def enforce_soliloquy_purpose_required(purpose: Optional[str]) -> None:
+    """Soliloquies must have a non-empty purpose."""
+    if not purpose or not purpose.strip():
+        raise AriadneGovernanceError(
+            "Soliloquy creation requires a non-empty purpose. "
+            "A soliloquy without purpose is indistinguishable from silence."
+        )
+
+
+def enforce_soliloquy_human_accessible(policy: SoliloquyVisibilityPolicy) -> None:
+    """Non-negotiable: humans always have read access to soliloquies."""
+    if not policy.human_accessible:
+        raise AriadneGovernanceError(
+            "Soliloquy visibility policy violation: human_accessible=false. "
+            "Humans ALWAYS have read access — this is non-negotiable. "
+            "Deliberation content can be private to other agents, never to humans."
+        )
+
+
+def enforce_soliloquy_conclusion_required(summary: Optional[str]) -> None:
+    """Concluding a soliloquy requires a non-empty summary — only the
+    conclusion merges back to the spine."""
+    if not summary or not summary.strip():
+        raise AriadneGovernanceError(
+            "Soliloquy conclusion requires a non-empty summary. "
+            "Only the conclusion merges back — silence is not an exit."
+        )
+
+
+def check_aside_return_obligation(aside_open: bool, episode_sealing: bool = False) -> None:
+    """On episode seal, any still-open aside is an audit violation."""
+    if aside_open and episode_sealing:
+        raise AriadneGovernanceError(
+            "Return obligation violated: aside is still OPEN at episode seal. "
+            "Unclosed asides are audit violations — close or explicitly abandon."
+        )
+
+
+def check_soliloquy_return_obligation(
+    soliloquy_active: bool, episode_sealing: bool = False,
+) -> None:
+    """On episode seal, any still-active soliloquy is an audit violation."""
+    if soliloquy_active and episode_sealing:
+        raise AriadneGovernanceError(
+            "Return obligation violated: soliloquy is still ACTIVE at episode seal. "
+            "Unconcluded soliloquies are audit violations — conclude or explicitly abandon."
+        )
