@@ -1,9 +1,9 @@
 # Ariadne State Tree Protocol Specification
 
-**Version:** 2.4.0-draft
-**Status:** Working Draft — Phase 1-3 Implemented, Phase 4 (HITL) Implemented
+**Version:** 2.5.0-draft
+**Status:** Working Draft — Phase 1-3 (node system) + Phase 4 (HITL) Implemented; Branch/Fork/Merge Taxonomy Phases 1-4 Implemented
 **Authors:** Scorched Earth Labs
-**Date:** 2026-04-16
+**Date:** 2026-04-21
 **Supersedes:** SPEC-v1.md (0.1.0-draft)
 
 ## 1. Abstract
@@ -898,8 +898,368 @@ This test should be run bidirectionally (A→B and B→A).
 | 2.2.0-draft | 2026-04-12 | Phase 2 observability: signal_versions_read (4.5), retrieval audit records (11.1), spine tip cache (13), rebalance events (14). |
 | 2.3.0-draft | 2026-04-12 | Phase 3 trust infrastructure: Protocol vs. Implementation Boundary (2.5), node key hierarchy (16.2), transparency log anchoring (16.3), witness signatures (16.4), cross-node chain proof (16.5), G-11 through G-16. |
 | 2.4.0-draft | 2026-04-16 | Phase 4 HITL: HITLEventNode first-class node type (4.6), two-phase lifecycle (INVOKED→RESOLVED), HITL_GATE edges (BLOCKS/FOLLOWS), Merkle spine participation as causal anchors, PENDING_HITL crystallization guard, two-layer Ed25519 signing (agent invocation + human resolution), CONDITIONALLY_VALID advisory gates, pending_hitl_ref segment tagging, G-17 (invocation before resolution), G-18 (crystallization block). Schema version 1.2.0. |
+| 2.5.0-draft | 2026-04-21 | Branch/Fork/Merge Taxonomy §19 covering BFM Phases 1–4: BranchPoint/BranchTerminus (§19.2), ForkPoint/MergePoint/BranchReturn with three-Merkle-root verification (§19.3), AsideSegment/SoliloquySegment with HASH_PLACEHOLDER content policy and Decision 1 visibility (§19.4), CoherenceFingerprint write-intercept state machine and ConfirmationCache (§19.5). New governance rules G-19 through G-29. New delta types BRANCH_CREATED/ABANDONED, FORK_CREATED/RESOLVED, MERGE_EXECUTED, ASIDE_OPENED/CLOSED, SOLILOQUY_INITIATED/CONCLUDED. AuditRecord chain integrity (`prior_audit_hash`), IntentRecord idempotency, derived lifecycle state (§19.2.4). |
 
-## 19. References
+## 19. Branch/Fork/Merge Taxonomy
+
+This section specifies the node types, governance rules, delta types, and
+state transitions that model non-linear cognitive work: when an agent (or
+human) diverges from a single coherent thread and later reconciles (or
+terminates) the divergence. The taxonomy is orthogonal to §4–§16 — it
+adds new node types on top of the `CognitiveNode` primitive.
+
+**Governing principle.** Every state transition in this taxonomy
+simultaneously produces (a) a structural node, (b) a cognitive delta, and
+(c) an append-only audit record. If any of the three writes is absent or
+fails, the transition is incomplete. A partial transition is worse than
+no transition — it produces ghost state the system cannot reason about.
+
+### 19.1 Foundation Layer
+
+#### 19.1.1 AuditRecord
+
+`AuditRecord` is the tamper-evident append-only log for the taxonomy.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `audit_id` | UUID | Record identity |
+| `delta_sequence` | int (monotonic) | Global ordering; never resets |
+| `agent_id`, `session_id`, `human_actor` | string | Who |
+| `wall_clock_time`, `episode_time` | ISO8601, logical clock | When |
+| `delta_type` | enum | What transition (see §19.1.2) |
+| `forward_delta`, `reverse_delta` | payload | Forward + reverse written simultaneously |
+| `prior_audit_hash` | SHA3-256 hex | Previous record's `record_hash` — chain link |
+| `record_hash` | SHA3-256 hex | `sha3_256(b"AUDIT:" + …)` |
+| `caught_by` | AGENT / HUMAN / SYSTEM / UNCAUGHT | Detection provenance |
+| `detection_window_open` | bool | Was active detection running? |
+
+**Chain integrity.** `prior_audit_hash` is the previous record's
+`record_hash`, forming a hash chain scoped by `episode_id`. Any
+insertion, deletion, or modification of a historical record breaks the
+chain from that point forward.
+
+**Invariant.** Rollback creates a new forward record. The log is never
+edited in place — a reverse delta is written as a new audit record that
+references the original.
+
+#### 19.1.2 CognitiveDelta Registry — Taxonomy Types
+
+| Delta Type | Phase | Writer |
+|-----------|-------|--------|
+| `BRANCH_CREATED` | 1 | `create_branch()` |
+| `BRANCH_ABANDONED` | 1 | `abandon_branch()` |
+| `FORK_CREATED` | 2 | `create_fork()` |
+| `FORK_RESOLVED` | 2 | `resolve_fork()` |
+| `MERGE_EXECUTED` | 2 | `execute_merge()` |
+| `ASIDE_OPENED` | 3 | `create_aside()` |
+| `ASIDE_CLOSED` | 3 | `close_aside()` |
+| `SOLILOQUY_INITIATED` | 3 | `create_soliloquy()` |
+| `SOLILOQUY_CONCLUDED` | 3 | `conclude_soliloquy()` |
+
+All types register at protocol load time. Functions reference the
+registry — the registry never references functions.
+
+#### 19.1.3 AccessPolicy
+
+Per-resource read/write policy. Default resource types: `BRANCH`, `FORK`,
+`ASIDE`, `SOLILOQUY`. Defaults:
+
+| Resource | `other_agents_read` | `audit_on_access` |
+|----------|--------------------|--------------------|
+| `BRANCH` / `FORK` / `ASIDE` | `OPEN` | false |
+| `SOLILOQUY` | `ESCALATION_ONLY` | true |
+
+**Enforcement rule:** fail-closed. If a policy cannot be evaluated,
+access is denied and a denial is written to the audit chain.
+
+#### 19.1.4 IntentRecord
+
+Prevents concurrent duplicate creation (Harmonia Scenario A). Idempotency
+key: `SHA3-256("INTENT:" + source_episode_id + source_segment_id + intent_hash)`.
+An `acquire_intent_sync` lookup with a COMPLETE status returns the prior
+result; a PENDING status short-circuits; a new intent is written
+atomically.
+
+### 19.2 Phase 1 — Branch Lifecycle
+
+#### 19.2.1 BranchPointNode
+
+Created by `create_branch()` at the exact divergence point on the spine.
+Immutable after creation; lifecycle state is derived from the presence
+or absence of a matching `BranchTerminusNode`.
+
+Key fields: `branch_id` (stable UUID), `parent_episode_id`,
+`source_segment_id`, `branch_type`, `branch_depth` (soft max 4),
+`declaration_type` (`EXPLICIT` / `INFERRED` / `RETROACTIVE`),
+`spine_merkle_snapshot` (immutable coherence anchor), `content_hash`
+(domain prefix `BRANCH_POINT:`).
+
+Retroactive declarations additionally carry
+`pre_declaration_merkle_root`, `declared_retroactively_at`, `declared_by`.
+
+#### 19.2.2 BranchTerminusNode
+
+Created by `abandon_branch()` (type `ABANDONED`) or `execute_merge()`
+(type `MERGED`). Terminal — the branch cannot be reopened.
+
+Integrity link: `branch_point_hash` MUST equal the originating
+`BranchPointNode.content_hash`. The terminus hash uses domain prefix
+`BRANCH_TERMINUS:`.
+
+#### 19.2.3 Dual Hash Chain
+
+Branches create non-linear Episode graphs that must remain verifiable:
+
+- **Spine chain.** `BranchPointNode.content_hash` is included in the
+  spine chain. Branch *contents* are NOT — the spine is self-contained
+  and verifiable without them.
+- **Branch chain.** Starts at `BranchPointNode` and ends at
+  `BranchTerminusNode`. Verifiable independently of the spine.
+- **Merge verification (Phase 2).** Requires three Merkle roots — see §19.3.3.
+
+**Depth constraint.** `branch_depth` maximum of 4 (soft). Exceeding it
+raises `AriadneGovernanceError`; callers may catch and record an
+override in the audit trail.
+
+#### 19.2.4 Derived Lifecycle State
+
+Lifecycle state is always recomputed from the log — never stored as a
+mutable field:
+
+```
+IF BranchPointNode(branch_id) missing             → ERROR
+IF BranchTerminusNode(branch_id, MERGED) exists   → MERGED
+IF BranchTerminusNode(branch_id, ABANDONED) exists → ABANDONED
+ELSE                                              → ACTIVE
+```
+
+### 19.3 Phase 2 — Resolution Primitives
+
+#### 19.3.1 ForkPointNode
+
+Forks differ from branches: a fork produces a new Episode with a
+distinct objective. A single `create_fork()` call writes N ForkPointNodes
+sharing the same `fork_id`; each ForkPoint anchors a new Episode.
+Domain prefix: `FORK_POINT:`.
+
+Governance:
+- **G-19.** `fork_objective` non-empty. A fork without an objective is
+  indistinguishable from a branch.
+- **G-20.** At least 2 alternatives per fork. Single-path divergence is
+  a branch.
+
+`resolve_fork()` marks one sibling `PROMOTED` and all others `DISCARDED`,
+writing `FORK_RESOLVED`. `resolution_rationale` is required (G-21).
+
+#### 19.3.2 MergePointNode
+
+Created by `execute_merge()` on the target spine. Carries three Merkle
+roots: `source_merkle_root` (branch state at merge),
+`target_merkle_root_pre` (spine before merge), `target_merkle_root_post`
+(spine after merge — must match recompute). Domain prefix: `MERGE_POINT:`
+binds all three roots into the content hash.
+
+**G-22.** `merge_summary` non-empty. The synthesis is the audit trail.
+
+**G-23 (Conflict Surface Invariant).** `execute_merge()` never resolves
+conflicts silently. When conflicts exist without matching
+`ConflictResolution` entries, or when `merge_strategy == AUTO` and any
+conflicts exist, the function returns a `ConflictManifest` and writes
+NO merge records. The manifest carries `source_merkle_root`,
+`target_merkle_root_pre`, the common ancestor, and all conflict
+segments; callers must re-invoke with resolutions.
+
+**G-24.** The three integrity assertions in §5 Step 8 of the build spec
+must pass before `MergePointNode` is written. On failure the merge is
+aborted and a SYSTEM-caught failure audit record is written.
+
+#### 19.3.3 Merge Integrity Verification
+
+```
+source_valid      := merge.source_merkle_root      == branch.merkle_root at merge time
+target_pre_valid  := merge.target_merkle_root_pre  == spine.merkle_root before merge
+target_post_valid := merge.target_merkle_root_post == recomputed spine root
+integrity_holds   := all three
+```
+
+`verify_merge_integrity(merge_id)` returns a `MergeIntegrityResult`.
+Any `false` in `integrity_holds` is a critical health metric
+(`merge_integrity_failures`, target: 0).
+
+#### 19.3.4 BranchReturnEdge
+
+On merge, a `BRANCH_RETURN` edge connects `BranchTerminusNode(MERGED)`
+to the `MergePointNode` on the target spine. Carries
+`synthesis_summary` and `nodes_integrated`.
+
+### 19.4 Phase 3 — Social/Internal Primitives
+
+#### 19.4.1 AsideSegmentNode
+
+Human-initiated side channel with a target agent. Domain prefix `ASIDE:`.
+
+**G-25 (Aside Human-Initiation Invariant).** Asides are ALWAYS
+human-initiated. `initiated_by_human` is required; an attempt to create
+an aside without a human actor raises `AriadneGovernanceError`.
+Agent-initiated internal branches are soliloquies (§19.4.2).
+
+**G-26 (Aside Return Obligation).** An aside that remains OPEN at
+episode seal is an audit violation. `check_aside_return_obligation()`
+enforces this at seal time.
+
+**Asymmetric merge on close.** `close_aside()` runs a reference scan:
+external segments that hold references to aside-internal segments are
+recorded in the `AsideTerminusNode` and `ASIDE_CLOSED` audit record as
+`external_references_found`. The close proceeds — the scan is a
+disclosure mechanism, not a block — but the leak is part of the
+permanent audit trail.
+
+#### 19.4.2 SoliloquySegmentNode
+
+Agent-initiated private deliberation. Domain prefix
+`SOLILOQUY_PLACEHOLDER:` or `SOLILOQUY_FULL:` depending on the
+`content_hash_policy` field (see §19.4.3).
+
+**G-27 (Soliloquy Human Accessibility Invariant — Decision 1).** Humans
+ALWAYS have read access. `SoliloquyVisibilityPolicy.human_accessible`
+defaulting or being set to `false` raises `AriadneGovernanceError`.
+Deliberation content can be private to other agents, never private to
+humans.
+
+**G-28 (Soliloquy Return Obligation).** Soliloquies left ACTIVE at
+episode seal are audit violations. Coherence monitoring continues
+inside the soliloquy — the agent cannot use soliloquy to escape the
+framework.
+
+**Conclusion merges, chain stays.** `conclude_soliloquy()` writes a
+`SoliloquyConclusionNode` carrying `conclusion_content_hash` (public)
+and `deliberation_chain_hash` (tamper-evident hash of the private
+chain). Only the conclusion is absorbed into the spine; the
+deliberation chain remains sealed inside the `SoliloquySegmentNode`.
+
+#### 19.4.3 Soliloquy Content Hash Policy
+
+| Policy | Preimage | Use Case |
+|--------|---------|----------|
+| `HASH_PLACEHOLDER` | `SOLILOQUY_PLACEHOLDER:{id}:{ep}:{seg}:{agent}:{ts}` | Preserves Merkle chain integrity without exposing content. Default. |
+| `FULL_CONTENT` | `SOLILOQUY_FULL:{id}:{ep}:{seg}:{agent}:{ts}:{chain}` | Chain content bound into the hash. Use when privacy is not required. |
+
+The placeholder variant is the key protocol innovation for private
+deliberation — the spine verifies that a node exists at a given
+position without the content being recoverable from the hash.
+
+### 19.5 Phase 4 — Prescriptive Enforcement
+
+Detection moves from descriptive (retroactive analysis) to prescriptive
+(active, at segment write time).
+
+#### 19.5.1 CoherenceFingerprint
+
+Embedded per segment at write time:
+
+| Field | Purpose |
+|-------|---------|
+| `topic_vector` | Caller-supplied embedding |
+| `intent_class` | CONTINUE / EXPAND / SHIFT / RESOLVE / INTRODUCE |
+| `objective_hash` | `sha3_256("OBJECTIVE:" + canonicalized objective)` |
+| `drift_from_spine` | 0.0–1.0 cosine distance |
+| `consecutive_drift_count` | Persisted across turns |
+| `detection_state` | NOMINAL / WATCHING / CANDIDATE / MATERIALIZED |
+
+**G-29 (Write-Time Fingerprint Invariant).** Fingerprints must be
+computed at segment write time. `enforce_write_time_fingerprint(None)`
+raises — retroactive fingerprinting defeats the detection window.
+
+#### 19.5.2 Detection State Machine
+
+`advance_detection_state(prior_state, prior_count, drift, obj_changed, intent, thresholds)`
+is a pure function. Default thresholds match the spec:
+
+| Target state | Drift ≥ | Consecutive turns ≥ |
+|--------------|--------|---------------------|
+| WATCHING | 0.3 | 1 |
+| CANDIDATE | 0.3 | 3 |
+| MATERIALIZED | 0.5 | 5 |
+
+Two overrides force immediate CANDIDATE regardless of drift:
+- `objective_hash` changed between consecutive observations
+- `intent_class == INTRODUCE`
+
+Drift below `watching_drift` resets the count to 0 and returns state to
+NOMINAL. Thresholds are tunable per-episode-type via
+`DetectionThresholds`.
+
+#### 19.5.3 Write Intercept Protocol
+
+`intercept_segment_write()` is the application hook. Sequence:
+
+1. Compute `objective_hash` from the current episode objective.
+2. Call `detect_branch_candidate()` — reads last fingerprint, advances
+   state, computes `materialized_recommendation` if the state
+   transitions to MATERIALIZED for the first time.
+3. Persist the new fingerprint via the registry.
+4. Return `DetectionResult`. If the result carries a
+   `materialized_recommendation`, the caller SHOULD invoke
+   `create_branch(declaration_type=RETROACTIVE, source_segment_id=rec.source_segment_id)`.
+   The recommendation anchors at the last NOMINAL segment — the point
+   before drift began.
+
+`detect_branch_candidate()` is pure-read; only
+`intercept_segment_write()` persists.
+
+#### 19.5.4 ConfirmationCache
+
+Prevents the confirmation loop when a detected candidate is confirmed
+as a legitimate branch. TTL is measured in episode turns:
+
+```
+confirmation_valid_until = confirmed_at_turn + valid_for_turns
+```
+
+Lookup is case- and whitespace-insensitive on the action description.
+Expiry is checked at read time; expired entries are discarded.
+
+### 19.6 Edge and Relationship Summary
+
+| Edge | From → To | Phase |
+|------|-----------|-------|
+| `BRANCH_ORIGIN` | Episode → BranchPoint | 1 |
+| `BRANCH_TERMINUS` | BranchPoint → BranchTerminus | 1 |
+| `AUDIT_TRAIL` | Episode → AuditRecord | 1 |
+| `FORK_ORIGIN` | Episode → ForkPoint | 2 |
+| `MERGE_INTO` | Source Episode → MergePoint | 2 |
+| `MERGE_TARGET` | MergePoint → Target Episode | 2 |
+| `BRANCH_RETURN` | BranchTerminus(MERGED) → MergePoint | 2 |
+| `ASIDE_OPEN` | Episode → Aside | 3 |
+| `ASIDE_CLOSED` | Aside → AsideTerminus | 3 |
+| `SOLILOQUY_OPEN` | Episode → Soliloquy | 3 |
+| `SOLILOQUY_CONCLUDED` | Soliloquy → SoliloquyConclusion | 3 |
+| `FINGERPRINTS` | Episode → CoherenceFingerprint | 4 |
+
+### 19.7 Implementation Status
+
+All four BFM phases are implemented and covered by unit tests against
+the Neo4j adapter (mocked driver). See `tests/unit/protocol/test_phase2_*.py`,
+`test_phase3_*.py`, `test_phase4_*.py`.
+
+Scoping notes deliberately left in the implementation layer:
+
+1. **`target_merkle_root_post`** in `execute_merge()` is computed
+   deterministically from pre-merge roots and resolutions rather than
+   from full spine recomputation. Full recomputation requires a
+   branch-aware segment model (segments tagged with `branch_id`), which
+   is a forward-compatible extension.
+2. **`find_common_ancestor()`** walks one level — from the branch's
+   originating BranchPoint to the target spine. Multi-level nested
+   merges require iterative traversal (forward-compatible).
+3. **Return-obligation checks** (`check_aside_return_obligation`,
+   `check_soliloquy_return_obligation`) are available as callable
+   guards but are not yet invoked from the episode-seal path; the
+   integration is owned by the seal implementation.
+4. **Access-policy runtime enforcement** (audit on ESCALATION_ONLY reads)
+   is spec'd at the coordination layer and left to the application.
+
+## 20. References
 
 Internal Scorched Earth Labs design documents that informed the protocol:
 
