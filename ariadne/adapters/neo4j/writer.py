@@ -11,6 +11,7 @@ with session.run()'s own 'parameters' argument. See bdi.py commit history for co
 
 import logging
 import os
+from typing import Optional
 from uuid import UUID
 
 from ariadne.core.schema import (
@@ -71,6 +72,9 @@ SCHEMA_CONSTRAINTS = [
     "CREATE CONSTRAINT ariadne_audit_record_id IF NOT EXISTS FOR (ar:AriadneAuditRecord) REQUIRE ar.audit_id IS UNIQUE",
     "CREATE CONSTRAINT ariadne_intent_record_id IF NOT EXISTS FOR (ir:AriadneIntentRecord) REQUIRE ir.intent_id IS UNIQUE",
     "CREATE CONSTRAINT ariadne_intent_idempotency IF NOT EXISTS FOR (ir:AriadneIntentRecord) REQUIRE ir.idempotency_key IS UNIQUE",
+    # Branch/Fork/Merge (Phase 2)
+    "CREATE CONSTRAINT ariadne_fork_point_id IF NOT EXISTS FOR (fp:AriadneForkPoint) REQUIRE fp.fork_point_id IS UNIQUE",
+    "CREATE CONSTRAINT ariadne_merge_point_id IF NOT EXISTS FOR (mp:AriadneMergePoint) REQUIRE mp.merge_point_id IS UNIQUE",
 ]
 
 SCHEMA_INDEXES = [
@@ -120,6 +124,11 @@ SCHEMA_INDEXES = [
     "CREATE INDEX ariadne_audit_sequence IF NOT EXISTS FOR (ar:AriadneAuditRecord) ON (ar.delta_sequence)",
     "CREATE INDEX ariadne_intent_status IF NOT EXISTS FOR (ir:AriadneIntentRecord) ON (ir.status)",
     "CREATE INDEX ariadne_episode_parent IF NOT EXISTS FOR (e:AriadneEpisode) ON (e.parent_episode_id)",
+    # Branch/Fork/Merge indexes (Phase 2)
+    "CREATE INDEX ariadne_fork_point_fork_id IF NOT EXISTS FOR (fp:AriadneForkPoint) ON (fp.fork_id)",
+    "CREATE INDEX ariadne_fork_point_origin IF NOT EXISTS FOR (fp:AriadneForkPoint) ON (fp.origin_episode_id)",
+    "CREATE INDEX ariadne_merge_point_merge_id IF NOT EXISTS FOR (mp:AriadneMergePoint) ON (mp.merge_id)",
+    "CREATE INDEX ariadne_merge_point_target IF NOT EXISTS FOR (mp:AriadneMergePoint) ON (mp.target_episode_id)",
 ]
 
 SCHEMA_VERSION_SEED = """
@@ -1030,3 +1039,277 @@ def complete_intent_sync(driver, idempotency_key: str, result_node_id: str) -> N
 
     except Exception as e:
         logger.warning(f"Ariadne: Failed to complete intent: {e}")
+
+
+# ── Branch/Fork/Merge Writer (Phase 2) ──────────────────────────────────────
+
+
+def write_fork_point_sync(driver, fork_point) -> None:
+    """Write a ForkPointNode + FORK_ORIGIN edge from origin episode.
+
+    A single create_fork() call writes N ForkPointNodes sharing the same
+    fork_id. Each ForkPoint anchors a new Episode.
+    """
+    if not _ariadne_guard():
+        return
+
+    try:
+        from ariadne.core.schema import ARIADNE_SCHEMA_VERSION
+
+        with driver.session() as session:
+            session.run("""
+                MERGE (fp:AriadneForkPoint {fork_point_id: $fork_point_id})
+                ON CREATE SET
+                  fp.fork_id             = $fork_id,
+                  fp.episode_id          = $episode_id,
+                  fp.origin_episode_id   = $origin_episode_id,
+                  fp.origin_segment_id   = $origin_segment_id,
+                  fp.fork_objective      = $fork_objective,
+                  fp.fork_intent         = $fork_intent,
+                  fp.carried_artifacts   = $carried_artifacts,
+                  fp.initiator           = $initiator,
+                  fp.participants        = $participants,
+                  fp.sibling_count       = $sibling_count,
+                  fp.sibling_index       = $sibling_index,
+                  fp.content_hash        = $content_hash,
+                  fp.parent_hash         = $parent_hash,
+                  fp.timestamp_utc       = $timestamp_utc,
+                  fp.schema_version      = $schema_version,
+                  fp.fork_status         = 'ACTIVE'
+            """, {
+                "fork_point_id": str(fork_point.fork_point_id),
+                "fork_id": str(fork_point.fork_id),
+                "episode_id": str(fork_point.episode_id),
+                "origin_episode_id": str(fork_point.origin_episode_id),
+                "origin_segment_id": fork_point.origin_segment_id,
+                "fork_objective": fork_point.fork_objective,
+                "fork_intent": fork_point.fork_intent,
+                "carried_artifacts": fork_point.carried_artifacts,
+                "initiator": fork_point.initiator,
+                "participants": fork_point.participants,
+                "sibling_count": fork_point.sibling_count,
+                "sibling_index": fork_point.sibling_index,
+                "content_hash": fork_point.content_hash,
+                "parent_hash": fork_point.parent_hash,
+                "timestamp_utc": fork_point.timestamp_utc.isoformat(),
+                "schema_version": ARIADNE_SCHEMA_VERSION,
+            })
+
+            # FORK_ORIGIN edge: origin Episode -> ForkPoint
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $origin_episode_id})
+                MATCH (fp:AriadneForkPoint {fork_point_id: $fork_point_id})
+                MERGE (e)-[:FORK_ORIGIN {
+                    fork_id: $fork_id,
+                    sibling_index: $sibling_index,
+                    created_at: $timestamp_utc
+                }]->(fp)
+            """, {
+                "origin_episode_id": str(fork_point.origin_episode_id),
+                "fork_point_id": str(fork_point.fork_point_id),
+                "fork_id": str(fork_point.fork_id),
+                "sibling_index": fork_point.sibling_index,
+                "timestamp_utc": fork_point.timestamp_utc.isoformat(),
+            })
+
+        logger.info(
+            f"Ariadne: ForkPoint {str(fork_point.fork_point_id)[:8]}... "
+            f"[{fork_point.sibling_index + 1}/{fork_point.sibling_count}] "
+            f"(fork={str(fork_point.fork_id)[:8]}...)"
+        )
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write ForkPoint: {e}")
+
+
+def mark_fork_point_status_sync(driver, fork_point_id: str, status: str) -> None:
+    """Update a ForkPoint's fork_status — used by resolve_fork.
+
+    status: 'ACTIVE' | 'PROMOTED' | 'DISCARDED'
+    """
+    if not _ariadne_guard():
+        return
+
+    try:
+        with driver.session() as session:
+            session.run("""
+                MATCH (fp:AriadneForkPoint {fork_point_id: $fork_point_id})
+                SET fp.fork_status = $status,
+                    fp.resolved_at = $resolved_at
+            """, {
+                "fork_point_id": fork_point_id,
+                "status": status,
+                "resolved_at": __import__("datetime").datetime.now(
+                    __import__("datetime").timezone.utc
+                ).isoformat(),
+            })
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to update fork point status: {e}")
+
+
+def write_merge_point_sync(driver, merge_point) -> None:
+    """Write a MergePointNode on the target spine with all three Merkle roots."""
+    if not _ariadne_guard():
+        return
+
+    try:
+        from ariadne.core.schema import ARIADNE_SCHEMA_VERSION
+
+        with driver.session() as session:
+            session.run("""
+                MERGE (mp:AriadneMergePoint {merge_point_id: $merge_point_id})
+                ON CREATE SET
+                  mp.merge_id                 = $merge_id,
+                  mp.source_episode_id        = $source_episode_id,
+                  mp.source_branch_id         = $source_branch_id,
+                  mp.target_episode_id        = $target_episode_id,
+                  mp.merge_type               = $merge_type,
+                  mp.source_merkle_root       = $source_merkle_root,
+                  mp.target_merkle_root_pre   = $target_merkle_root_pre,
+                  mp.target_merkle_root_post  = $target_merkle_root_post,
+                  mp.common_ancestor_id       = $common_ancestor_id,
+                  mp.conflict_segments        = $conflict_segments,
+                  mp.resolution_artifacts     = $resolution_artifacts,
+                  mp.merge_coherence_delta    = $merge_coherence_delta,
+                  mp.merge_summary            = $merge_summary,
+                  mp.initiator                = $initiator,
+                  mp.content_hash             = $content_hash,
+                  mp.parent_hash              = $parent_hash,
+                  mp.timestamp_utc            = $timestamp_utc,
+                  mp.schema_version           = $schema_version
+            """, {
+                "merge_point_id": str(merge_point.merge_point_id),
+                "merge_id": str(merge_point.merge_id),
+                "source_episode_id": merge_point.source_episode_id,
+                "source_branch_id": merge_point.source_branch_id,
+                "target_episode_id": merge_point.target_episode_id,
+                "merge_type": merge_point.merge_type.value,
+                "source_merkle_root": merge_point.source_merkle_root,
+                "target_merkle_root_pre": merge_point.target_merkle_root_pre,
+                "target_merkle_root_post": merge_point.target_merkle_root_post,
+                "common_ancestor_id": merge_point.common_ancestor_id,
+                "conflict_segments": merge_point.conflict_segments,
+                "resolution_artifacts": merge_point.resolution_artifacts,
+                "merge_coherence_delta": merge_point.merge_coherence_delta,
+                "merge_summary": merge_point.merge_summary,
+                "initiator": merge_point.initiator,
+                "content_hash": merge_point.content_hash,
+                "parent_hash": merge_point.parent_hash,
+                "timestamp_utc": merge_point.timestamp_utc.isoformat(),
+                "schema_version": ARIADNE_SCHEMA_VERSION,
+            })
+
+            # MERGE_INTO edge: source episode -> MergePoint
+            session.run("""
+                MATCH (src:AriadneEpisode {episode_id: $source_episode_id})
+                MATCH (mp:AriadneMergePoint {merge_point_id: $merge_point_id})
+                MERGE (src)-[:MERGE_INTO {
+                    merge_id: $merge_id,
+                    merged_at: $timestamp_utc
+                }]->(mp)
+            """, {
+                "source_episode_id": merge_point.source_episode_id,
+                "merge_point_id": str(merge_point.merge_point_id),
+                "merge_id": str(merge_point.merge_id),
+                "timestamp_utc": merge_point.timestamp_utc.isoformat(),
+            })
+
+            # MERGE_TARGET edge: MergePoint -> target episode
+            session.run("""
+                MATCH (mp:AriadneMergePoint {merge_point_id: $merge_point_id})
+                MATCH (tgt:AriadneEpisode {episode_id: $target_episode_id})
+                MERGE (mp)-[:MERGE_TARGET {
+                    merge_id: $merge_id,
+                    merged_at: $timestamp_utc
+                }]->(tgt)
+            """, {
+                "target_episode_id": merge_point.target_episode_id,
+                "merge_point_id": str(merge_point.merge_point_id),
+                "merge_id": str(merge_point.merge_id),
+                "timestamp_utc": merge_point.timestamp_utc.isoformat(),
+            })
+
+        logger.info(
+            f"Ariadne: MergePoint {str(merge_point.merge_point_id)[:8]}... "
+            f"[{merge_point.merge_type.value}] "
+            f"(source={merge_point.source_episode_id[:8]}... → "
+            f"target={merge_point.target_episode_id[:8]}...)"
+        )
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write MergePoint: {e}")
+
+
+def write_branch_return_edge_sync(driver, branch_return) -> None:
+    """Write BRANCH_RETURN edge from BranchTerminus(MERGED) to MergePoint."""
+    if not _ariadne_guard():
+        return
+
+    try:
+        with driver.session() as session:
+            session.run("""
+                MATCH (bt:AriadneBranchTerminus {terminus_id: $terminus_id})
+                MATCH (mp:AriadneMergePoint {merge_point_id: $merge_point_id})
+                MERGE (bt)-[:BRANCH_RETURN {
+                    edge_id: $edge_id,
+                    branch_id: $branch_id,
+                    synthesis_summary: $synthesis_summary,
+                    nodes_integrated: $nodes_integrated,
+                    target_episode_id: $target_episode_id,
+                    created_at: $timestamp_utc
+                }]->(mp)
+            """, {
+                "edge_id": str(branch_return.edge_id),
+                "terminus_id": branch_return.terminus_id,
+                "merge_point_id": branch_return.merge_point_id,
+                "branch_id": branch_return.branch_id,
+                "synthesis_summary": branch_return.synthesis_summary,
+                "nodes_integrated": branch_return.nodes_integrated,
+                "target_episode_id": branch_return.target_episode_id,
+                "timestamp_utc": branch_return.timestamp_utc.isoformat(),
+            })
+
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write BranchReturnEdge: {e}")
+
+
+def find_common_ancestor_sync(
+    driver,
+    branch_id: str,
+    target_episode_id: str,
+) -> Optional[dict]:
+    """Walk branch chain back to BranchPoint; confirm it anchors on target spine.
+
+    Returns dict with common_ancestor_node_id (the BranchPoint's source segment)
+    or None if no common ancestor found.
+    """
+    if not _ariadne_guard():
+        return None
+
+    try:
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (bp:AriadneBranchPoint {branch_id: $branch_id})
+                MATCH (e:AriadneEpisode {episode_id: $target_episode_id})
+                WHERE bp.parent_episode_id = e.episode_id
+                RETURN bp.source_segment_id   AS ancestor_segment_id,
+                       bp.branch_point_id     AS branch_point_id,
+                       bp.parent_episode_id   AS parent_episode_id,
+                       bp.spine_merkle_snapshot AS anchor_merkle
+            """, {
+                "branch_id": branch_id,
+                "target_episode_id": target_episode_id,
+            })
+            record = result.single()
+            if not record:
+                return None
+            return {
+                "common_ancestor_node_id": record["ancestor_segment_id"],
+                "branch_point_id": record["branch_point_id"],
+                "parent_episode_id": record["parent_episode_id"],
+                "anchor_merkle": record["anchor_merkle"],
+            }
+
+    except Exception as e:
+        logger.warning(f"Ariadne: find_common_ancestor failed: {e}")
+        return None

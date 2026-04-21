@@ -466,3 +466,348 @@ def enforce_abandonment_reason_required(reason: Optional[str]) -> None:
             "Branch abandonment requires a non-empty reason. "
             "ABANDONED is terminal — the reason is the audit trail."
         )
+
+
+
+
+# ============================================================================
+# Phase 2 — Resolution Primitives
+# ============================================================================
+
+
+class MergeType(str, Enum):
+    """Classification of how a merge resolved."""
+    CLEAN = "CLEAN"         # No conflicts
+    RESOLVED = "RESOLVED"   # Conflicts present but all resolved
+    PARTIAL = "PARTIAL"     # Some conflicts deferred
+
+
+class MergeStrategy(str, Enum):
+    """How execute_merge should handle conflicts."""
+    AUTO = "AUTO"                           # Never resolves conflicts silently — returns manifest
+    MANUAL_REVIEW = "MANUAL_REVIEW"         # Human must supply all resolutions
+    AGENT_RESOLVED = "AGENT_RESOLVED"       # Agent-supplied resolutions
+    CONCLUSION_ONLY = "CONCLUSION_ONLY"     # Merge only the branch's synthesis, not every segment
+
+
+class ForkResolutionOutcome(str, Enum):
+    """Outcome of a fork resolution."""
+    PROMOTED = "PROMOTED"         # Selected branch promoted back to spine
+    ABANDONED = "ABANDONED"       # Discarded forks abandoned
+
+
+# ============================================================================
+# Phase 2 — Delta Payloads
+# ============================================================================
+
+
+class ForkCreatedDelta(BaseModel):
+    """Forward + reverse delta for FORK_CREATED."""
+    origin_episode_id: str
+    origin_segment_id: str
+    fork_id: str
+    fork_objective: str
+    fork_intent: str
+    fork_point_ids: List[str]
+    carried_artifacts: List[str] = Field(default_factory=list)
+    # Reverse
+    reverse_delete_fork_id: str
+    reverse_delete_fork_point_ids: List[str]
+
+
+class ForkResolvedDelta(BaseModel):
+    """Forward + reverse delta for FORK_RESOLVED."""
+    fork_id: str
+    selected_fork_point_id: str
+    discarded_fork_point_ids: List[str]
+    resolution_rationale: str
+    # Reverse
+    reverse_restore_discarded: List[str]
+    reverse_clear_resolution: str
+
+
+class MergeExecutedDelta(BaseModel):
+    """Forward + reverse delta for MERGE_EXECUTED."""
+    source_episode_id: str
+    target_episode_id: str
+    merge_id: str
+    merge_type: MergeType
+    merge_map: Dict[str, Any] = Field(default_factory=dict)
+    conflict_resolutions: List[Dict[str, Any]] = Field(default_factory=list)
+    source_merkle_root: str
+    target_merkle_root_pre: str
+    target_merkle_root_post: str
+    # Reverse
+    reverse_split_to_source_branches: List[str]
+    reverse_clear_merge_record: str
+
+
+# ============================================================================
+# Phase 2 — Node and Edge Models
+# ============================================================================
+
+
+class ForkPointNode(BaseModel):
+    """Created by create_fork() — one node per fork branch.
+
+    Forks differ from branches: a fork produces a new Episode with a
+    distinct objective. A single create_fork() call typically writes
+    N ForkPointNodes (one per alternative path).
+    """
+    fork_point_id: UUID = Field(default_factory=uuid4)
+    fork_id: UUID                                     # Shared across sibling fork points
+    episode_id: UUID                                   # New forked episode ID
+    origin_episode_id: UUID                            # Episode the fork originated from
+    origin_segment_id: str                             # Provenance anchor
+    fork_objective: str                                # New Episode's objective
+    fork_intent: str                                   # Why a fork, not a branch
+    carried_artifacts: List[str] = Field(default_factory=list)
+    initiator: str
+    participants: List[str] = Field(default_factory=list)
+    sibling_count: int = 1                             # Total forks created in this call
+    sibling_index: int = 0                             # Position among siblings
+    content_hash: str = ""
+    parent_hash: str = ""
+    timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    schema_version: str = ARIADNE_SCHEMA_VERSION
+
+
+class MergePointNode(BaseModel):
+    """Created by execute_merge() — records the three-way merge on the target spine.
+
+    Contains all three Merkle roots for integrity verification:
+    source (branch state at merge), target_pre (spine before merge),
+    target_post (spine after merge, must match recomputed value).
+    """
+    merge_point_id: UUID = Field(default_factory=uuid4)
+    merge_id: UUID = Field(default_factory=uuid4)
+    source_episode_id: str
+    source_branch_id: str
+    target_episode_id: str
+    merge_type: MergeType
+    source_merkle_root: str
+    target_merkle_root_pre: str
+    target_merkle_root_post: str
+    common_ancestor_id: str
+    conflict_segments: List[str] = Field(default_factory=list)
+    resolution_artifacts: List[str] = Field(default_factory=list)
+    merge_coherence_delta: float = 0.0
+    merge_summary: str = ""
+    initiator: str
+    content_hash: str = ""
+    parent_hash: str = ""
+    timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    schema_version: str = ARIADNE_SCHEMA_VERSION
+
+
+class BranchReturnEdge(BaseModel):
+    """Connects BranchTerminus (MERGED) to the merge target spine.
+
+    Edge written at the same time as the MergePointNode.
+    """
+    edge_id: UUID = Field(default_factory=uuid4)
+    branch_id: str
+    terminus_id: str
+    merge_point_id: str
+    target_episode_id: str
+    synthesis_summary: str = ""
+    nodes_integrated: int = 0
+    timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ============================================================================
+# Phase 2 — Conflict Manifest
+# ============================================================================
+
+
+class ConflictSegment(BaseModel):
+    """A single conflict surfaced by three-way merge."""
+    segment_id: str
+    ancestor_content_hash: str
+    source_content_hash: str
+    target_content_hash: str
+    description: str = ""
+
+
+class ConflictResolution(BaseModel):
+    """A caller-supplied resolution for a specific conflict segment."""
+    segment_id: str
+    resolution_type: str         # "TAKE_SOURCE" | "TAKE_TARGET" | "CUSTOM"
+    resolved_content_hash: str
+    resolver: str
+    rationale: str = ""
+
+
+class ConflictManifest(BaseModel):
+    """Returned by execute_merge() when conflicts exist without resolutions.
+
+    Merge does NOT proceed — the caller must re-invoke with resolutions.
+    """
+    merge_id: UUID = Field(default_factory=uuid4)
+    source_episode_id: str
+    target_episode_id: str
+    common_ancestor_id: str
+    conflicts: List[ConflictSegment] = Field(default_factory=list)
+    source_merkle_root: str
+    target_merkle_root_pre: str
+    requested_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ============================================================================
+# Phase 2 — Result Types
+# ============================================================================
+
+
+class CommonAncestorResult(BaseModel):
+    """Result of find_common_ancestor()."""
+    common_ancestor_node_id: str
+    branch_delta_from_ancestor: List[str] = Field(default_factory=list)
+    target_delta_from_ancestor: List[str] = Field(default_factory=list)
+
+
+class ForkResult(BaseModel):
+    """Result of create_fork()."""
+    fork_id: str
+    fork_point_ids: List[str]
+    origin_episode_id: str
+    origin_segment_id: str
+    delta_id: str
+    audit_record_id: str
+
+
+class ResolveForkResult(BaseModel):
+    """Result of resolve_fork()."""
+    fork_id: str
+    selected_fork_point_id: str
+    discarded_fork_point_ids: List[str]
+    discarded_terminus_ids: List[str]
+    delta_id: str
+    audit_record_id: str
+
+
+class MergeResult(BaseModel):
+    """Result of execute_merge() on the success path.
+
+    When conflicts exist without resolutions, execute_merge returns a
+    ConflictManifest instead of a MergeResult.
+    """
+    merge_id: str
+    merge_point_id: str
+    merge_type: MergeType
+    source_merkle_root: str
+    target_merkle_root_pre: str
+    target_merkle_root_post: str
+    conflict_segments: List[str] = Field(default_factory=list)
+    resolution_artifacts: List[str] = Field(default_factory=list)
+    terminus_id: str
+    delta_id: str
+    audit_record_id: str
+
+
+class MergeIntegrityResult(BaseModel):
+    """Result of verify_merge_integrity()."""
+    merge_id: str
+    source_valid: bool
+    target_pre_valid: bool
+    target_post_valid: bool
+    integrity_holds: bool
+
+
+# ============================================================================
+# Phase 2 — Hash Functions
+# ============================================================================
+
+
+def compute_fork_point_hash(
+    fork_point_id: str,
+    fork_id: str,
+    episode_id: str,
+    origin_episode_id: str,
+    origin_segment_id: str,
+    fork_objective: str,
+    initiator: str,
+    sibling_index: int,
+    timestamp: str,
+    parent_hash: str,
+) -> str:
+    """Compute the content hash of a ForkPointNode.
+
+    Domain separation prefix: FORK_POINT:
+    """
+    preimage = (
+        f"{fork_point_id}:{fork_id}:{episode_id}:{origin_episode_id}:"
+        f"{origin_segment_id}:{fork_objective}:{initiator}:{sibling_index}:"
+        f"{timestamp}:{parent_hash}"
+    )
+    return sha3_256(b"FORK_POINT:" + preimage.encode())
+
+
+def compute_merge_point_hash(
+    merge_point_id: str,
+    merge_id: str,
+    source_episode_id: str,
+    target_episode_id: str,
+    source_merkle_root: str,
+    target_merkle_root_pre: str,
+    target_merkle_root_post: str,
+    common_ancestor_id: str,
+    timestamp: str,
+    parent_hash: str,
+) -> str:
+    """Compute the content hash of a MergePointNode.
+
+    Domain separation prefix: MERGE_POINT:
+    All three Merkle roots bound into the hash — tamper-evident.
+    """
+    preimage = (
+        f"{merge_point_id}:{merge_id}:{source_episode_id}:{target_episode_id}:"
+        f"{source_merkle_root}:{target_merkle_root_pre}:{target_merkle_root_post}:"
+        f"{common_ancestor_id}:{timestamp}:{parent_hash}"
+    )
+    return sha3_256(b"MERGE_POINT:" + preimage.encode())
+
+
+def compute_conflict_manifest_hash(
+    merge_id: str,
+    source_episode_id: str,
+    target_episode_id: str,
+    conflict_segment_ids: List[str],
+) -> str:
+    """Compute a content hash for a conflict manifest (for audit trail)."""
+    conflicts_str = ",".join(sorted(conflict_segment_ids))
+    preimage = (
+        f"{merge_id}:{source_episode_id}:{target_episode_id}:{conflicts_str}"
+    )
+    return sha3_256(b"CONFLICT_MANIFEST:" + preimage.encode())
+
+
+# ============================================================================
+# Phase 2 — Governance Rules
+# ============================================================================
+
+
+def enforce_fork_objective_required(objective: Optional[str]) -> None:
+    """Fork objective must be non-empty — a fork without objective is a branch."""
+    if not objective or not objective.strip():
+        raise AriadneGovernanceError(
+            "Fork creation requires a non-empty fork_objective. "
+            "A fork without an objective is indistinguishable from a branch."
+        )
+
+
+def enforce_fork_sibling_count(count: int) -> None:
+    """Fork must have at least 2 alternatives — a 1-path fork is a branch."""
+    if count < 2:
+        raise AriadneGovernanceError(
+            f"Fork requires at least 2 alternatives (got {count}). "
+            "Single-path divergence is a branch, not a fork."
+        )
+
+
+def enforce_merge_summary_required(summary: Optional[str]) -> None:
+    """Merge summary must be non-empty — the synthesis is the audit trail."""
+    if not summary or not summary.strip():
+        raise AriadneGovernanceError(
+            "Merge execution requires a non-empty merge_summary. "
+            "The synthesis is the audit trail of what the merge produced."
+        )
