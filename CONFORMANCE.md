@@ -5,12 +5,13 @@
 **Authors:** Scorched Earth Labs / Clotho
 **Date:** 2026-04-12
 **Applies To:** SPEC.md v2.3.0-draft, Phase 3 Trust Infrastructure (§16)
+**Companion:** [CONFORMANCE-BFM.md](CONFORMANCE-BFM.md) covers SPEC §19 (Branch/Fork/Merge/Aside/Soliloquy/CoherenceFingerprint).
 
 ---
 
 ## 1. Overview
 
-This document specifies the conformance test vectors for Phase 3 of the Ariadne Protocol. A conforming implementation MUST pass all vectors marked **REQUIRED**. Vectors marked **RECOMMENDED** test behaviors that conforming implementations SHOULD support.
+This document specifies the conformance test vectors for Phase 3 Trust Infrastructure (§16) of the Ariadne Protocol. For the BFM feature family (§19), see the companion document [CONFORMANCE-BFM.md](CONFORMANCE-BFM.md). A conforming implementation MUST pass all vectors marked **REQUIRED**. Vectors marked **RECOMMENDED** test behaviors that conforming implementations SHOULD support.
 
 **Test vector format:**
 
