@@ -68,6 +68,13 @@ class CognitiveDeltaType(str, Enum):
     ASIDE_CLOSED = "ASIDE_CLOSED"
     SOLILOQUY_INITIATED = "SOLILOQUY_INITIATED"
     SOLILOQUY_CONCLUDED = "SOLILOQUY_CONCLUDED"
+    # Amendment v2.0 — Cross-Episode Linking. LINK_ACCEPTED fires on every
+    # link assertion in Phase 1 (manual, human-asserted only). LINK_PROPOSED
+    # and LINK_REJECTED are registered now for forward-compat with the
+    # Phase 2 discovery flow but have no Phase 1 emitter.
+    LINK_PROPOSED = "LINK_PROPOSED"
+    LINK_ACCEPTED = "LINK_ACCEPTED"
+    LINK_REJECTED = "LINK_REJECTED"
 
 
 class TriggerType(str, Enum):

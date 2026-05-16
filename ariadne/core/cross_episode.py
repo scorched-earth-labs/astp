@@ -292,3 +292,189 @@ def stamp_content_hash(link: EpisodeLink) -> EpisodeLink:
     update the hash on re-stamp."""
     link.content_hash = compute_episode_link_content_hash(link)
     return link
+
+
+# ── Audit delta payloads ─────────────────────────────────────────────────────
+
+
+class LinkAcceptedDelta(BaseModel):
+    """Forward + reverse delta for `CognitiveDeltaType.LINK_ACCEPTED`.
+
+    Carried on the AuditRecord for every cross-episode link assertion. The
+    reverse delta records what to do to undo: delete the link node and the
+    LINKED_TO edge by link_id. Reversal does NOT re-emit a corresponding
+    `LINK_REJECTED` — the audit chain is append-only; reversal is a new
+    forward event of its own.
+    """
+
+    # Forward delta (what happened)
+    link_id: str
+    source_episode: str
+    target_episode: str
+    link_type: str               # LinkType.value
+    link_strength: float
+    is_inferred: bool
+    retroactive: bool
+
+    # Reverse delta (how to undo)
+    reverse_delete_link_id: str
+
+
+# ── Operation layer: assertion + audit emission ─────────────────────────────
+
+
+def assert_episode_link(
+    driver,
+    link: EpisodeLink,
+    *,
+    session_id: Optional[str] = None,
+    explicit_reason: Optional[str] = None,
+) -> EpisodeLink:
+    """Operation-layer entry point for asserting a cross-episode link.
+
+    Wraps the low-level `write_episode_link_sync` adapter with audit-chain
+    emission. This is the function the server endpoint and Faculty code
+    paths should call — they should NOT call `write_episode_link_sync`
+    directly, because doing so bypasses the audit chain.
+
+    Args:
+        driver: Neo4j driver.
+        link: EpisodeLink to assert. `created_by` must be set (audit
+            chain requires an actor). `content_hash` will be stamped if
+            not already present.
+        session_id: Optional session/context identifier for the audit
+            record. Defaults to a synthetic `link-<short_id>` if omitted —
+            matches the BFM pattern (`branch-<branch_id>`).
+        explicit_reason: Optional free-text rationale captured on the
+            AuditRecord. For Phase 1 (manual assertion) this is usually
+            the user's reason from the API call.
+
+    Returns the link with `content_hash` populated. The link is now
+    persisted in Neo4j and the audit chain has advanced by one record.
+
+    Phase 1 scope: this function emits LINK_ACCEPTED only — every
+    successful assertion is treated as an acceptance event. Phase 2's
+    discovery flow will introduce LINK_PROPOSED + LINK_REJECTED emissions
+    via separate operation functions.
+    """
+    # Deferred imports — adapter + audit chain primitives. Done inline so
+    # the operation function can be referenced without pulling the full
+    # adapter graph in environments that don't need it (e.g., schema
+    # validation tools, type-only imports).
+    import json as _json
+    from ariadne.adapters.neo4j.writer import (
+        write_audit_record_sync,
+        write_episode_link_sync,
+    )
+    from ariadne.core.branching import (
+        AuditRecord,
+        CognitiveDeltaType,
+        TriggerType,
+        compute_audit_record_hash,
+    )
+
+    # 1. Write the link node + edge through the adapter. The adapter
+    # enforces endpoint existence + mutual-exclusivity governance and
+    # stamps content_hash if not already set.
+    write_episode_link_sync(driver, link)
+
+    # 2. Build the forward + reverse deltas for the audit record.
+    delta = LinkAcceptedDelta(
+        link_id=str(link.link_id),
+        source_episode=str(link.source_episode),
+        target_episode=str(link.target_episode),
+        link_type=link.link_type.value,
+        link_strength=link.link_strength,
+        is_inferred=link.is_inferred,
+        retroactive=link.retroactive,
+        reverse_delete_link_id=str(link.link_id),
+    )
+    forward_delta_dict = delta.model_dump()
+    reverse_delta_dict = {"operation": "delete_episode_link", "link_id": str(link.link_id)}
+
+    # 3. Acquire delta_sequence + prior_audit_hash from the audit chain
+    # for the source episode. Source episode is the audit anchor — the
+    # episode "asserting" the relationship owns the audit chain entry.
+    src_episode_id = str(link.source_episode)
+    delta_sequence = _get_next_audit_delta_sequence(driver, src_episode_id)
+    prior_audit_hash = _get_prior_audit_hash(driver, src_episode_id)
+
+    # 4. Build and hash the AuditRecord, then write it.
+    short_link_id = str(link.link_id)[:8]
+    audit = AuditRecord(
+        delta_sequence=delta_sequence,
+        agent_id=link.created_by,
+        session_id=session_id or f"link-{short_link_id}",
+        delta_type=CognitiveDeltaType.LINK_ACCEPTED,
+        forward_delta=forward_delta_dict,
+        reverse_delta=reverse_delta_dict,
+        affected_nodes=[str(link.link_id), src_episode_id, str(link.target_episode)],
+        # Phase 1 manual assertion is always human-explicit. Phase 2's
+        # discovery flow will switch this to AGENT_DETECTED when LINK_PROPOSED
+        # fires from an automated candidate sweep.
+        trigger_context=TriggerType.HUMAN_EXPLICIT,
+        explicit_reason=explicit_reason,
+        prior_audit_hash=prior_audit_hash,
+        caught_by="HUMAN",
+        episode_id=src_episode_id,
+    )
+    audit.record_hash = compute_audit_record_hash(
+        str(audit.audit_id),
+        audit.delta_sequence,
+        audit.delta_type.value,
+        audit.agent_id,
+        audit.wall_clock_time.isoformat(),
+        _json.dumps(forward_delta_dict, default=str, sort_keys=True),
+        prior_audit_hash,
+    )
+    write_audit_record_sync(driver, audit)
+
+    return link
+
+
+# ── Audit chain helpers (scoped to cross-episode use) ───────────────────────
+
+
+def _get_next_audit_delta_sequence(driver, episode_id: str) -> int:
+    """Next monotonic delta sequence for the episode's audit chain.
+
+    Duplicates the helper in ariadne.core.branch_operations._get_next_delta_sequence
+    intentionally — that one is module-private. Both implementations read
+    the same source-of-truth (max delta_sequence on AriadneAuditRecord
+    nodes scoped to the episode). If a future refactor lifts this into a
+    shared `audit_chain.py` module, both call sites collapse onto it.
+    """
+    try:
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (ar:AriadneAuditRecord {episode_id: $eid})
+                RETURN max(ar.delta_sequence) AS max_seq
+                """,
+                {"eid": episode_id},
+            )
+            record = result.single()
+            current_max = record["max_seq"] if record and record["max_seq"] is not None else 0
+            return current_max + 1
+    except Exception:
+        return 1
+
+
+def _get_prior_audit_hash(driver, episode_id: str) -> str:
+    """Prior record hash for chain integrity. Returns GENESIS for an
+    empty chain. Mirrors ariadne.core.branch_operations._get_prior_audit_hash."""
+    try:
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (ar:AriadneAuditRecord {episode_id: $eid})
+                RETURN ar.record_hash AS hash
+                ORDER BY ar.delta_sequence DESC
+                LIMIT 1
+                """,
+                {"eid": episode_id},
+            )
+            record = result.single()
+            return record["hash"] if record and record["hash"] else "GENESIS"
+    except Exception:
+        return "GENESIS"
