@@ -148,6 +148,13 @@ SCHEMA_INDEXES = [
     "CREATE INDEX ariadne_fingerprint_segment IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) ON (fp.segment_id)",
     "CREATE INDEX ariadne_fingerprint_sequence IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) ON (fp.sequence_index)",
     "CREATE INDEX ariadne_fingerprint_state IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) ON (fp.detection_state)",
+    # Cross-Episode Linking (Amendment v2.0). Label is `AriadneEpisodeLink`
+    # for consistency with the Ariadne* prefix convention; the amendment's
+    # bare `EpisodeLink` notation is the protocol-level abstraction.
+    "CREATE CONSTRAINT ariadne_episode_link_id IF NOT EXISTS FOR (l:AriadneEpisodeLink) REQUIRE l.link_id IS UNIQUE",
+    "CREATE INDEX ariadne_episode_link_health IF NOT EXISTS FOR (l:AriadneEpisodeLink) ON (l.health_state)",
+    "CREATE INDEX ariadne_episode_link_source IF NOT EXISTS FOR (l:AriadneEpisodeLink) ON (l.source_episode)",
+    "CREATE INDEX ariadne_episode_link_target IF NOT EXISTS FOR (l:AriadneEpisodeLink) ON (l.target_episode)",
 ]
 
 SCHEMA_VERSION_SEED = """
@@ -1769,3 +1776,163 @@ def get_last_nominal_segment_sync(driver, episode_id: str) -> Optional[str]:
     except Exception as e:
         logger.warning(f"Ariadne: get_last_nominal_segment failed: {e}")
         return None
+
+
+# ── Cross-Episode Linking (Amendment v2.0) ──────────────────────────────────
+
+
+def write_episode_link_sync(driver, link) -> None:
+    """Persist an EpisodeLink to Neo4j — Amendment v2.0 §2 + §11.1.2.
+
+    Pre-write contract:
+    1. Both source and target episodes must exist as `AriadneEpisode` nodes.
+    2. The link must not violate mutual-exclusivity rules (§3) against
+       existing links sharing the same (source_episode, target_episode) pair.
+    3. `content_hash` is computed at write time if not already stamped.
+
+    On success, creates:
+    - `(:AriadneEpisodeLink {...})` node holding all link fields
+    - `(:AriadneEpisode)-[:LINKED_TO {via: link_id}]->(:AriadneEpisode)` edge
+
+    The relationship-property `via` carries the link_id for cheap lookup
+    from edge to link node — agents traversing the episode graph can pick
+    up the link metadata in one hop.
+
+    Raises:
+        LinkGovernanceError: if mutual-exclusivity rules are violated.
+        ValueError: if source or target episode does not exist.
+    """
+    if not _ariadne_guard():
+        return
+
+    # Imports deferred to call time so the writer module stays
+    # importable in environments where the core has not yet loaded
+    # (e.g. schema-init bootstrap before episode types are wired).
+    from ariadne.core.cross_episode import (
+        EpisodeLink,
+        compute_episode_link_content_hash,
+        enforce_link_mutual_exclusivity,
+        LinkType,
+    )
+
+    if not isinstance(link, EpisodeLink):
+        raise TypeError(f"expected EpisodeLink, got {type(link).__name__}")
+
+    src_id = str(link.source_episode)
+    tgt_id = str(link.target_episode)
+
+    with driver.session() as session:
+        # 1. Both endpoints must exist.
+        endpoints = session.run(
+            """
+            MATCH (s:AriadneEpisode {episode_id: $src})
+            MATCH (t:AriadneEpisode {episode_id: $tgt})
+            RETURN s.episode_id AS src_id, t.episode_id AS tgt_id
+            """,
+            {"src": src_id, "tgt": tgt_id},
+        ).single()
+        if endpoints is None:
+            raise ValueError(
+                f"Cannot create EpisodeLink: one or both endpoints not found "
+                f"(source={src_id}, target={tgt_id})"
+            )
+
+        # 2. Mutual exclusivity check.
+        existing = session.run(
+            """
+            MATCH (s:AriadneEpisode {episode_id: $src})-[r:LINKED_TO]->(t:AriadneEpisode {episode_id: $tgt})
+            MATCH (l:AriadneEpisodeLink {link_id: r.via})
+            RETURN l.link_type AS link_type
+            """,
+            {"src": src_id, "tgt": tgt_id},
+        )
+        existing_types = [LinkType(record["link_type"]) for record in existing]
+        enforce_link_mutual_exclusivity(link.link_type, existing_types)
+
+        # 3. Stamp hash if caller didn't.
+        if not link.content_hash:
+            link.content_hash = compute_episode_link_content_hash(link)
+
+        # 4. Write node + edge in one transaction-equivalent block. Inline
+        # signal serialization to a string list — Neo4j property graph
+        # doesn't store nested maps cleanly. Full signal records live on
+        # the audit trail; the node carries a compact representation.
+        signals_compact = [
+            f"{s.signal_type.value}:{s.signal_value:.4f}@w={s.signal_weight:.4f}"
+            for s in link.inference_signals
+        ]
+        params = {
+            "link_id": str(link.link_id),
+            "source_episode": src_id,
+            "target_episode": tgt_id,
+            "created_at": link.created_at.isoformat(),
+            "created_by": link.created_by,
+            "link_type": link.link_type.value,
+            "link_strength": link.link_strength,
+            "is_inferred": link.is_inferred,
+            "inference_signals": signals_compact,
+            "inference_threshold": link.inference_threshold,
+            "retroactive": link.retroactive,
+            "health_state": link.health_state.value,
+            "health_checked_at": link.health_checked_at.isoformat(),
+            "source_version": link.source_version,
+            "target_version": link.target_version,
+            "quarantine_reason": link.quarantine_reason,
+            "quarantined_at": link.quarantined_at.isoformat() if link.quarantined_at else None,
+            "quarantine_resolved_at": (
+                link.quarantine_resolved_at.isoformat() if link.quarantine_resolved_at else None
+            ),
+            "quarantine_resolution": (
+                link.quarantine_resolution.value if link.quarantine_resolution else None
+            ),
+            "content_hash": link.content_hash,
+        }
+        session.run(
+            """
+            CREATE (l:AriadneEpisodeLink {
+                link_id:                $link_id,
+                source_episode:         $source_episode,
+                target_episode:         $target_episode,
+                created_at:             $created_at,
+                created_by:             $created_by,
+                link_type:              $link_type,
+                link_strength:          $link_strength,
+                is_inferred:            $is_inferred,
+                inference_signals:      $inference_signals,
+                inference_threshold:    $inference_threshold,
+                retroactive:            $retroactive,
+                health_state:           $health_state,
+                health_checked_at:      $health_checked_at,
+                source_version:         $source_version,
+                target_version:         $target_version,
+                quarantine_reason:      $quarantine_reason,
+                quarantined_at:         $quarantined_at,
+                quarantine_resolved_at: $quarantine_resolved_at,
+                quarantine_resolution:  $quarantine_resolution,
+                content_hash:           $content_hash
+            })
+            """,
+            params,
+        )
+        session.run(
+            """
+            MATCH (s:AriadneEpisode {episode_id: $src})
+            MATCH (t:AriadneEpisode {episode_id: $tgt})
+            MERGE (s)-[r:LINKED_TO {via: $link_id}]->(t)
+            ON CREATE SET r.created_at = $created_at, r.link_type = $link_type
+            """,
+            {
+                "src": src_id,
+                "tgt": tgt_id,
+                "link_id": str(link.link_id),
+                "created_at": link.created_at.isoformat(),
+                "link_type": link.link_type.value,
+            },
+        )
+
+    logger.info(
+        f"Ariadne: EpisodeLink {str(link.link_id)[:8]}... "
+        f"{link.link_type.value} from {src_id[:8]} → {tgt_id[:8]} "
+        f"(strength={link.link_strength:.2f}, "
+        f"{'inferred' if link.is_inferred else 'human-asserted'})"
+    )

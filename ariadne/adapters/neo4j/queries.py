@@ -833,3 +833,117 @@ async def get_audit_trail(
             return [dict(record["audit_record"]) for record in result]
 
     return await asyncio.to_thread(_query)
+
+
+# ── Cross-Episode Linking (Amendment v2.0) ──────────────────────────────────
+
+
+async def list_links_for_episode(
+    driver,
+    episode_id: str,
+    direction: str = "outbound",
+    health_filter: Optional[list[str]] = None,
+    link_type_filter: Optional[list[str]] = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Return cross-episode links for an episode — Amendment v2.0 §11.1.6 Pattern.
+
+    Args:
+        episode_id: Episode whose links to fetch.
+        direction: 'outbound' (this episode → others), 'inbound' (others →
+            this episode), or 'both'. Default 'outbound' — matches
+            resumption-loader's primary use case.
+        health_filter: Optional list of LinkHealthState values to include.
+            None = all states. Common values: ['VALID','STALE','FROZEN'] to
+            exclude BROKEN/QUARANTINED from active traversal.
+        link_type_filter: Optional list of LinkType values to include.
+            None = all types. For resumption-loader, callers typically pass
+            ['CONTINUES_FROM','SUPERSEDES','INFORMED_BY'] per §3 isolation
+            rule (REFERENCES is non-loading and excluded).
+        limit: Cap results to prevent unbounded loads.
+
+    Returns: list of dicts with link fields + `direction` ('out'/'in') +
+    `other_episode_id` (the non-self endpoint). Empty list if Ariadne
+    disabled or no matching links.
+    """
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        params: dict[str, Any] = {"episode_id": episode_id, "limit": limit}
+        where_clauses = []
+        if health_filter:
+            where_clauses.append("l.health_state IN $health_filter")
+            params["health_filter"] = health_filter
+        if link_type_filter:
+            where_clauses.append("l.link_type IN $link_type_filter")
+            params["link_type_filter"] = link_type_filter
+        where_sql = ("AND " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        if direction == "outbound":
+            cypher = f"""
+                MATCH (s:AriadneEpisode {{episode_id: $episode_id}})-[r:LINKED_TO]->(t:AriadneEpisode)
+                MATCH (l:AriadneEpisodeLink {{link_id: r.via}})
+                WHERE 1=1 {where_sql}
+                RETURN l {{.*}} AS link, 'out' AS direction, t.episode_id AS other_episode_id
+                ORDER BY l.created_at DESC
+                LIMIT $limit
+            """
+        elif direction == "inbound":
+            cypher = f"""
+                MATCH (s:AriadneEpisode)-[r:LINKED_TO]->(t:AriadneEpisode {{episode_id: $episode_id}})
+                MATCH (l:AriadneEpisodeLink {{link_id: r.via}})
+                WHERE 1=1 {where_sql}
+                RETURN l {{.*}} AS link, 'in' AS direction, s.episode_id AS other_episode_id
+                ORDER BY l.created_at DESC
+                LIMIT $limit
+            """
+        elif direction == "both":
+            cypher = f"""
+                MATCH (self:AriadneEpisode {{episode_id: $episode_id}})
+                MATCH (self)-[r:LINKED_TO]-(other:AriadneEpisode)
+                MATCH (l:AriadneEpisodeLink {{link_id: r.via}})
+                WHERE 1=1 {where_sql}
+                RETURN l {{.*}} AS link,
+                    CASE WHEN l.source_episode = $episode_id THEN 'out' ELSE 'in' END AS direction,
+                    other.episode_id AS other_episode_id
+                ORDER BY l.created_at DESC
+                LIMIT $limit
+            """
+        else:
+            raise ValueError(
+                f"direction must be 'outbound', 'inbound', or 'both' — got {direction!r}"
+            )
+
+        with driver.session() as session:
+            result = session.run(cypher, params)
+            out: list[dict[str, Any]] = []
+            for record in result:
+                row = dict(record["link"])
+                row["direction"] = record["direction"]
+                row["other_episode_id"] = record["other_episode_id"]
+                out.append(row)
+            return out
+
+    return await asyncio.to_thread(_query)
+
+
+async def get_episode_link(driver, link_id: str) -> Optional[dict[str, Any]]:
+    """Fetch a single EpisodeLink by id. Returns None when not found or
+    when Ariadne is disabled."""
+    if not ARIADNE_ENABLED:
+        return None
+
+    def _query():
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (l:AriadneEpisodeLink {link_id: $link_id})
+                RETURN l {.*} AS link
+                """,
+                {"link_id": link_id},
+            )
+            record = result.single()
+            return dict(record["link"]) if record else None
+
+    return await asyncio.to_thread(_query)
