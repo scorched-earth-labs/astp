@@ -947,3 +947,221 @@ async def get_episode_link(driver, link_id: str) -> Optional[dict[str, Any]]:
             return dict(record["link"]) if record else None
 
     return await asyncio.to_thread(_query)
+
+
+# ── Episode Grouping (Amendment v2.0 §7-§8) ─────────────────────────────────
+
+
+async def list_memberships_for_episode(
+    driver,
+    episode_id: str,
+    *,
+    include_superseded: bool = False,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List MembershipRecords for an episode.
+
+    By default returns ACTIVE memberships only (records with no
+    superseded_by_record_id). Set `include_superseded=True` to walk the
+    full history including prior records.
+    """
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        where_extra = "" if include_superseded else "AND m.superseded_by_record_id IS NULL"
+        cypher = f"""
+            MATCH (m:AriadneMembershipRecord {{episode_id: $episode_id}})
+            WHERE 1=1 {where_extra}
+            RETURN m {{.*}} AS record
+            ORDER BY m.asserted_at DESC
+            LIMIT $limit
+        """
+        with driver.session() as session:
+            result = session.run(cypher, {"episode_id": episode_id, "limit": limit})
+            return [dict(r["record"]) for r in result]
+
+    return await asyncio.to_thread(_query)
+
+
+async def list_memberships_for_group(
+    driver,
+    group_id: str,
+    group_system: str,
+    *,
+    membership_roles: Optional[list[str]] = None,
+    include_superseded: bool = False,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List MembershipRecords for a (group_id, group_system) tuple.
+
+    By default returns ACTIVE memberships only. Optional role filter.
+    """
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        params: dict[str, Any] = {
+            "group_id": group_id,
+            "group_system": group_system,
+            "limit": limit,
+        }
+        where_clauses = []
+        if not include_superseded:
+            where_clauses.append("m.superseded_by_record_id IS NULL")
+        if membership_roles:
+            where_clauses.append("m.membership_role IN $membership_roles")
+            params["membership_roles"] = membership_roles
+        where_sql = ("AND " + " AND ".join(where_clauses)) if where_clauses else ""
+        cypher = f"""
+            MATCH (m:AriadneMembershipRecord {{group_id: $group_id, group_system: $group_system}})
+            WHERE 1=1 {where_sql}
+            RETURN m {{.*}} AS record
+            ORDER BY m.asserted_at ASC
+            LIMIT $limit
+        """
+        with driver.session() as session:
+            result = session.run(cypher, params)
+            return [dict(r["record"]) for r in result]
+
+    return await asyncio.to_thread(_query)
+
+
+async def get_active_membership(
+    driver,
+    episode_id: str,
+    group_id: str,
+    group_system: str,
+) -> Optional[dict[str, Any]]:
+    """Get the active (unsuperseded) MembershipRecord for a specific
+    (episode, group_id, group_system) tuple. Returns None if no membership
+    exists or all are superseded (should not happen — succession always
+    creates a new active record)."""
+    if not ARIADNE_ENABLED:
+        return None
+
+    def _query():
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (m:AriadneMembershipRecord {
+                    episode_id: $episode_id,
+                    group_id: $group_id,
+                    group_system: $group_system
+                })
+                WHERE m.superseded_by_record_id IS NULL
+                RETURN m {.*} AS record
+                """,
+                {
+                    "episode_id": episode_id,
+                    "group_id": group_id,
+                    "group_system": group_system,
+                },
+            )
+            record = result.single()
+            return dict(record["record"]) if record else None
+
+    return await asyncio.to_thread(_query)
+
+
+async def list_membership_history(
+    driver,
+    episode_id: str,
+    group_id: str,
+    group_system: str,
+) -> list[dict[str, Any]]:
+    """Return the full succession chain for an (episode, group) tuple,
+    ordered oldest → newest. Used when reconstructing membership role
+    history for audit / display.
+    """
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (m:AriadneMembershipRecord {
+                    episode_id: $episode_id,
+                    group_id: $group_id,
+                    group_system: $group_system
+                })
+                RETURN m {.*} AS record
+                ORDER BY m.asserted_at ASC
+                """,
+                {
+                    "episode_id": episode_id,
+                    "group_id": group_id,
+                    "group_system": group_system,
+                },
+            )
+            return [dict(r["record"]) for r in result]
+
+    return await asyncio.to_thread(_query)
+
+
+async def get_active_conformance_declaration(
+    driver,
+    group_system: str,
+    group_id: str,
+) -> Optional[dict[str, Any]]:
+    """Return the active (unsuperseded) ConformanceDeclaration for a
+    (group_system, group_id) pair. Returns None if no declaration is
+    registered or all are superseded."""
+    if not ARIADNE_ENABLED:
+        return None
+
+    def _query():
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (cd:AriadneConformanceDeclaration {
+                    group_system: $group_system,
+                    group_id: $group_id
+                })
+                WHERE cd.superseded_by IS NULL
+                RETURN cd {.*} AS declaration
+                ORDER BY cd.declared_at DESC
+                LIMIT 1
+                """,
+                {"group_system": group_system, "group_id": group_id},
+            )
+            record = result.single()
+            return dict(record["declaration"]) if record else None
+
+    return await asyncio.to_thread(_query)
+
+
+async def list_conformance_declarations(
+    driver,
+    group_system: Optional[str] = None,
+    *,
+    include_superseded: bool = False,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List ConformanceDeclarations, optionally filtered by group_system.
+    Returns active only by default."""
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        params: dict[str, Any] = {"limit": limit}
+        where_clauses = []
+        if group_system:
+            where_clauses.append("cd.group_system = $group_system")
+            params["group_system"] = group_system
+        if not include_superseded:
+            where_clauses.append("cd.superseded_by IS NULL")
+        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        cypher = f"""
+            MATCH (cd:AriadneConformanceDeclaration)
+            {where_sql}
+            RETURN cd {{.*}} AS declaration
+            ORDER BY cd.declared_at DESC
+            LIMIT $limit
+        """
+        with driver.session() as session:
+            result = session.run(cypher, params)
+            return [dict(r["declaration"]) for r in result]
+
+    return await asyncio.to_thread(_query)
