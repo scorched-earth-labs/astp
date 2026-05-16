@@ -359,12 +359,14 @@ class MembershipRecordCreatedDelta(BaseModel):
     reverse_delete_record_id: str
 
 
-class MembershipRoleChangedDelta(BaseModel):
-    """Forward + reverse delta for MEMBERSHIP_ROLE_CHANGED.
+class MembershipRecordSupersededDelta(BaseModel):
+    """Forward + reverse delta for MEMBERSHIP_RECORD_SUPERSEDED.
 
-    Specialization of MEMBERSHIP_RECORD_CREATED for the case where the
-    succession is specifically a role change. Carries both the old and
-    new role for clarity in the audit trail.
+    Fires alongside MEMBERSHIP_RECORD_CREATED on any succession event:
+    MRC describes the creation of the new record; MRS describes the
+    supersession itself (old → new). Two distinct facts about one
+    operation. Carries old and new roles to make role-change history
+    queryable from the audit log without joining back to the records.
     """
 
     old_record_id: str
@@ -414,3 +416,318 @@ class DeclarationSupersededDelta(BaseModel):
 
     reverse_delete_new_declaration_id: str
     reverse_restore_old_declaration_id: str
+
+
+# ── Operation layer: assertion + audit emission ─────────────────────────────
+
+
+# Per-group audit chain anchor. Declaration events have no natural episode
+# home — they describe protocol-level changes to a grouping's conformance,
+# not work done within an episode. We anchor them to a synthetic chain id
+# `declaration:{group_system}:{group_id}` so each group has its own ordered
+# declaration history. Same chain machinery as episode-anchored events;
+# different namespace.
+def _declaration_audit_chain_id(group_system: str, group_id: str) -> str:
+    return f"declaration:{group_system}:{group_id}"
+
+
+def assert_membership_record(
+    driver,
+    record: MembershipRecord,
+    *,
+    session_id: Optional[str] = None,
+    explicit_reason: Optional[str] = None,
+) -> MembershipRecord:
+    """Operation-layer entry point for asserting a membership.
+
+    Wraps the adapter-level `write_membership_record_sync` with audit
+    chain emission. Emits MEMBERSHIP_RECORD_CREATED unconditionally;
+    additionally emits MEMBERSHIP_RECORD_SUPERSEDED if the new record
+    supersedes a prior — both events describe one operation. Audit
+    chain is anchored at the record's episode_id.
+
+    Use this in preference to the bare writer so the audit chain
+    advances. The bare writer is for cases where the caller already
+    has audit handling (e.g., bulk migration with batched audit).
+    """
+    import json as _json
+    from ariadne.adapters.neo4j.writer import (
+        write_audit_record_sync,
+        write_membership_record_sync,
+    )
+    from ariadne.core.branching import (
+        AuditRecord,
+        CognitiveDeltaType,
+        TriggerType,
+        compute_audit_record_hash,
+    )
+    from ariadne.core.cross_episode import (
+        _get_next_audit_delta_sequence,
+        _get_prior_audit_hash,
+    )
+
+    # 1. Write the membership record (governance + hash stamping + edge).
+    write_membership_record_sync(driver, record)
+
+    # 2. Build MEMBERSHIP_RECORD_CREATED audit record.
+    created_delta = MembershipRecordCreatedDelta(
+        record_id=str(record.record_id),
+        episode_id=str(record.episode_id),
+        group_id=record.group_id,
+        group_system=record.group_system,
+        membership_role=record.membership_role.value,
+        supersedes_record_id=(
+            str(record.supersedes_record_id) if record.supersedes_record_id else None
+        ),
+        reverse_delete_record_id=str(record.record_id),
+    )
+    created_forward = created_delta.model_dump()
+    created_reverse = {
+        "operation": "delete_membership_record",
+        "record_id": str(record.record_id),
+    }
+
+    episode_id_str = str(record.episode_id)
+    seq_a = _get_next_audit_delta_sequence(driver, episode_id_str)
+    prior_a = _get_prior_audit_hash(driver, episode_id_str)
+
+    short_record_id = str(record.record_id)[:8]
+    audit_created = AuditRecord(
+        delta_sequence=seq_a,
+        agent_id=record.asserted_by,
+        session_id=session_id or f"membership-{short_record_id}",
+        delta_type=CognitiveDeltaType.MEMBERSHIP_RECORD_CREATED,
+        forward_delta=created_forward,
+        reverse_delta=created_reverse,
+        affected_nodes=[str(record.record_id), episode_id_str],
+        trigger_context=TriggerType.HUMAN_EXPLICIT,
+        explicit_reason=explicit_reason,
+        prior_audit_hash=prior_a,
+        caught_by="HUMAN",
+        episode_id=episode_id_str,
+    )
+    audit_created.record_hash = compute_audit_record_hash(
+        str(audit_created.audit_id),
+        audit_created.delta_sequence,
+        audit_created.delta_type.value,
+        audit_created.agent_id,
+        audit_created.wall_clock_time.isoformat(),
+        _json.dumps(created_forward, default=str, sort_keys=True),
+        prior_a,
+    )
+    write_audit_record_sync(driver, audit_created)
+
+    # 3. If this is a succession, fetch the prior record's role and emit
+    # MEMBERSHIP_RECORD_SUPERSEDED in addition.
+    if record.supersedes_record_id is not None:
+        with driver.session() as session:
+            prior_row = session.run(
+                "MATCH (m:AriadneMembershipRecord {record_id: $rid}) "
+                "RETURN m.membership_role AS role",
+                {"rid": str(record.supersedes_record_id)},
+            ).single()
+        old_role = prior_row["role"] if prior_row else "(unknown)"
+
+        superseded_delta = MembershipRecordSupersededDelta(
+            old_record_id=str(record.supersedes_record_id),
+            new_record_id=str(record.record_id),
+            episode_id=episode_id_str,
+            group_id=record.group_id,
+            group_system=record.group_system,
+            old_role=old_role,
+            new_role=record.membership_role.value,
+            reverse_delete_new_record_id=str(record.record_id),
+            reverse_restore_old_record_id=str(record.supersedes_record_id),
+        )
+        superseded_forward = superseded_delta.model_dump()
+        superseded_reverse = {
+            "operation": "restore_membership_record",
+            "old_record_id": str(record.supersedes_record_id),
+            "new_record_id": str(record.record_id),
+        }
+
+        seq_b = _get_next_audit_delta_sequence(driver, episode_id_str)
+        prior_b = audit_created.record_hash  # Chain directly off the just-written record
+
+        audit_superseded = AuditRecord(
+            delta_sequence=seq_b,
+            agent_id=record.asserted_by,
+            session_id=session_id or f"membership-{short_record_id}",
+            delta_type=CognitiveDeltaType.MEMBERSHIP_RECORD_SUPERSEDED,
+            forward_delta=superseded_forward,
+            reverse_delta=superseded_reverse,
+            affected_nodes=[
+                str(record.record_id),
+                str(record.supersedes_record_id),
+                episode_id_str,
+            ],
+            trigger_context=TriggerType.HUMAN_EXPLICIT,
+            explicit_reason=record.succession_reason or explicit_reason,
+            prior_audit_hash=prior_b,
+            caught_by="HUMAN",
+            episode_id=episode_id_str,
+        )
+        audit_superseded.record_hash = compute_audit_record_hash(
+            str(audit_superseded.audit_id),
+            audit_superseded.delta_sequence,
+            audit_superseded.delta_type.value,
+            audit_superseded.agent_id,
+            audit_superseded.wall_clock_time.isoformat(),
+            _json.dumps(superseded_forward, default=str, sort_keys=True),
+            prior_b,
+        )
+        write_audit_record_sync(driver, audit_superseded)
+
+    return record
+
+
+def register_conformance_declaration(
+    driver,
+    declaration: ConformanceDeclaration,
+) -> ConformanceDeclaration:
+    """Persist an initial ConformanceDeclaration (no version bump).
+
+    Per §11.4 audit registry, initial declaration registration does NOT
+    fire a dedicated audit event — only version bumps do
+    (DECLARATION_VERSION_BUMPED / DECLARATION_SUPERSEDED). The
+    declaration_hash itself is the cryptographic anchor for "this
+    declaration existed as written at this time."
+
+    For Phase 1, this is a thin wrapper over the adapter. If a future
+    amendment adds a DECLARATION_CREATED event, this is the natural
+    place to emit it.
+    """
+    from ariadne.adapters.neo4j.writer import write_conformance_declaration_sync
+
+    write_conformance_declaration_sync(driver, declaration)
+    return declaration
+
+
+def bump_conformance_declaration(
+    driver,
+    new_declaration: ConformanceDeclaration,
+    prior_declaration_id: str,
+    *,
+    prior_version: str,
+    session_id: Optional[str] = None,
+    explicit_reason: Optional[str] = None,
+) -> tuple[ConformanceDeclaration, str]:
+    """Operation-layer entry point for bumping a ConformanceDeclaration.
+
+    Classifies the version bump (`classify_version_bump`), writes the
+    new declaration, links it as the successor to the prior declaration,
+    and emits the appropriate audit event:
+      - major bump → `DECLARATION_SUPERSEDED` (breaking)
+      - minor/patch → `DECLARATION_VERSION_BUMPED` (compatible)
+
+    Audit chain is anchored at `_declaration_audit_chain_id(group_system,
+    group_id)` — declarations have no natural episode home, so each
+    (group_system, group_id) pair has its own audit chain.
+
+    Returns (new_declaration, bump_kind) — bump_kind is one of "major" |
+    "minor" | "patch" for caller convenience.
+
+    Raises:
+        GroupingGovernanceError: if version classification fails.
+    """
+    import json as _json
+    from ariadne.adapters.neo4j.writer import (
+        supersede_conformance_declaration_sync,
+        write_audit_record_sync,
+        write_conformance_declaration_sync,
+    )
+    from ariadne.core.branching import (
+        AuditRecord,
+        CognitiveDeltaType,
+        TriggerType,
+        compute_audit_record_hash,
+    )
+    from ariadne.core.cross_episode import (
+        _get_next_audit_delta_sequence,
+        _get_prior_audit_hash,
+    )
+
+    # 1. Classify (raises on invalid). This validates SemVer + ordering
+    # BEFORE we write the new declaration, so failures don't leave a
+    # half-applied state.
+    bump_kind = classify_version_bump(prior_version, new_declaration.declaration_version)
+
+    # 2. Write the new declaration.
+    write_conformance_declaration_sync(driver, new_declaration)
+
+    # 3. Link supersession + set forward pointer on prior.
+    supersede_conformance_declaration_sync(
+        driver, prior_declaration_id, str(new_declaration.declaration_id)
+    )
+
+    # 4. Build the delta payload + emit the appropriate audit event.
+    if bump_kind == "major":
+        delta = DeclarationSupersededDelta(
+            old_declaration_id=prior_declaration_id,
+            new_declaration_id=str(new_declaration.declaration_id),
+            group_system=new_declaration.group_system,
+            group_id=new_declaration.group_id,
+            old_version=prior_version,
+            new_version=new_declaration.declaration_version,
+            reverse_delete_new_declaration_id=str(new_declaration.declaration_id),
+            reverse_restore_old_declaration_id=prior_declaration_id,
+        )
+        delta_type = CognitiveDeltaType.DECLARATION_SUPERSEDED
+    else:
+        # minor or patch
+        delta = DeclarationVersionBumpedDelta(
+            old_declaration_id=prior_declaration_id,
+            new_declaration_id=str(new_declaration.declaration_id),
+            group_system=new_declaration.group_system,
+            group_id=new_declaration.group_id,
+            old_version=prior_version,
+            new_version=new_declaration.declaration_version,
+            bump_kind=bump_kind,
+            reverse_delete_new_declaration_id=str(new_declaration.declaration_id),
+            reverse_restore_old_declaration_id=prior_declaration_id,
+        )
+        delta_type = CognitiveDeltaType.DECLARATION_VERSION_BUMPED
+
+    forward_delta = delta.model_dump()
+    reverse_delta = {
+        "operation": "restore_conformance_declaration",
+        "old_declaration_id": prior_declaration_id,
+        "new_declaration_id": str(new_declaration.declaration_id),
+    }
+
+    chain_key = _declaration_audit_chain_id(
+        new_declaration.group_system, new_declaration.group_id
+    )
+    seq = _get_next_audit_delta_sequence(driver, chain_key)
+    prior_hash = _get_prior_audit_hash(driver, chain_key)
+
+    audit = AuditRecord(
+        delta_sequence=seq,
+        agent_id=new_declaration.declared_by,
+        session_id=session_id
+        or f"declaration-{str(new_declaration.declaration_id)[:8]}",
+        delta_type=delta_type,
+        forward_delta=forward_delta,
+        reverse_delta=reverse_delta,
+        affected_nodes=[
+            str(new_declaration.declaration_id),
+            prior_declaration_id,
+        ],
+        trigger_context=TriggerType.HUMAN_EXPLICIT,
+        explicit_reason=explicit_reason,
+        prior_audit_hash=prior_hash,
+        caught_by="HUMAN",
+        episode_id=chain_key,  # Synthetic chain anchor for declaration events.
+    )
+    audit.record_hash = compute_audit_record_hash(
+        str(audit.audit_id),
+        audit.delta_sequence,
+        audit.delta_type.value,
+        audit.agent_id,
+        audit.wall_clock_time.isoformat(),
+        _json.dumps(forward_delta, default=str, sort_keys=True),
+        prior_hash,
+    )
+    write_audit_record_sync(driver, audit)
+
+    return new_declaration, bump_kind
