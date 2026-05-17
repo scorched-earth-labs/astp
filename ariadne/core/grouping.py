@@ -25,7 +25,6 @@ rule.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
@@ -33,7 +32,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from ariadne.core.schema import sha3_256
+from ariadne.core.hash_canonical import hash_preimage
 
 
 # ── Enums ────────────────────────────────────────────────────────────────────
@@ -254,43 +253,9 @@ _DECLARATION_HASH_PREIMAGE_FIELDS: tuple[str, ...] = (
 )
 
 
-# ── Canonical value serializer ──────────────────────────────────────────────
-
-
-def _canonical_value(value):
-    """Mirror of the canonicalizer in cross_episode.py — datetimes → UTC ISO
-    8601, UUIDs → str, enums → .value, floats → repr, Pydantic models → dict.
-
-    Duplicated by intent: both hash systems should be self-contained. If
-    we ever lift this into a shared `hash_canonical.py` module, both
-    modules can collapse onto it. For Phase 1 the duplication is the
-    smaller risk than coupling the two hash implementations.
-    """
-    if value is None:
-        return None
-    if isinstance(value, UUID):
-        return str(value)
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc).isoformat()
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return repr(value)
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        return [_canonical_value(v) for v in value]
-    if isinstance(value, BaseModel):
-        return {k: _canonical_value(v) for k, v in value.model_dump().items()}
-    if isinstance(value, dict):
-        return {k: _canonical_value(v) for k, v in value.items()}
-    raise TypeError(f"Unhashable value type {type(value).__name__}: {value!r}")
+# Canonicalization rules + JSON serialization live in
+# ariadne.core.hash_canonical. Both functions below delegate to the shared
+# `hash_preimage` helper with their respective field tuples.
 
 
 def compute_membership_record_content_hash(record: MembershipRecord) -> str:
@@ -302,24 +267,20 @@ def compute_membership_record_content_hash(record: MembershipRecord) -> str:
     at this time."
 
     Excludes `superseded_by_record_id` per §10 — that's a forward
-    pointer set by a LATER operation; the integrity is maintained
-    through the audit log, not through the hash.
+    pointer set by a LATER operation; integrity is maintained through
+    the audit log, not the hash.
     """
-    preimage = {f: _canonical_value(getattr(record, f)) for f in _MEMBERSHIP_HASH_PREIMAGE_FIELDS}
-    serialized = json.dumps(preimage, sort_keys=False, separators=(",", ":"), ensure_ascii=False)
-    return sha3_256(serialized.encode("utf-8"))
+    return hash_preimage(record, _MEMBERSHIP_HASH_PREIMAGE_FIELDS)
 
 
 def compute_conformance_declaration_hash(declaration: ConformanceDeclaration) -> str:
     """SHA3-256 of the ConformanceDeclaration canonical preimage — §8.
 
     Excludes `superseded_by` per §10 forward-pointer-exclusion. The
-    declaration's hash commits to the declaration as authored; succession
-    is recorded separately via the audit chain.
+    declaration's hash commits to the declaration as authored;
+    succession is recorded separately via the audit chain.
     """
-    preimage = {f: _canonical_value(getattr(declaration, f)) for f in _DECLARATION_HASH_PREIMAGE_FIELDS}
-    serialized = json.dumps(preimage, sort_keys=False, separators=(",", ":"), ensure_ascii=False)
-    return sha3_256(serialized.encode("utf-8"))
+    return hash_preimage(declaration, _DECLARATION_HASH_PREIMAGE_FIELDS)
 
 
 def stamp_membership_record_hash(record: MembershipRecord) -> MembershipRecord:
@@ -461,10 +422,7 @@ def assert_membership_record(
         TriggerType,
         compute_audit_record_hash,
     )
-    from ariadne.core.cross_episode import (
-        _get_next_audit_delta_sequence,
-        _get_prior_audit_hash,
-    )
+    from ariadne.core.audit_chain import next_delta_sequence, prior_audit_hash
 
     # 1. Write the membership record (governance + hash stamping + edge).
     write_membership_record_sync(driver, record)
@@ -488,8 +446,8 @@ def assert_membership_record(
     }
 
     episode_id_str = str(record.episode_id)
-    seq_a = _get_next_audit_delta_sequence(driver, episode_id_str)
-    prior_a = _get_prior_audit_hash(driver, episode_id_str)
+    seq_a = next_delta_sequence(driver, episode_id_str)
+    prior_a = prior_audit_hash(driver, episode_id_str)
 
     short_record_id = str(record.record_id)[:8]
     audit_created = AuditRecord(
@@ -546,7 +504,7 @@ def assert_membership_record(
             "new_record_id": str(record.record_id),
         }
 
-        seq_b = _get_next_audit_delta_sequence(driver, episode_id_str)
+        seq_b = next_delta_sequence(driver, episode_id_str)
         prior_b = audit_created.record_hash  # Chain directly off the just-written record
 
         audit_superseded = AuditRecord(
@@ -642,10 +600,7 @@ def bump_conformance_declaration(
         TriggerType,
         compute_audit_record_hash,
     )
-    from ariadne.core.cross_episode import (
-        _get_next_audit_delta_sequence,
-        _get_prior_audit_hash,
-    )
+    from ariadne.core.audit_chain import next_delta_sequence, prior_audit_hash
 
     # 1. Classify (raises on invalid). This validates SemVer + ordering
     # BEFORE we write the new declaration, so failures don't leave a
@@ -698,8 +653,8 @@ def bump_conformance_declaration(
     chain_key = _declaration_audit_chain_id(
         new_declaration.group_system, new_declaration.group_id
     )
-    seq = _get_next_audit_delta_sequence(driver, chain_key)
-    prior_hash = _get_prior_audit_hash(driver, chain_key)
+    seq = next_delta_sequence(driver, chain_key)
+    prior_hash = prior_audit_hash(driver, chain_key)
 
     audit = AuditRecord(
         delta_sequence=seq,

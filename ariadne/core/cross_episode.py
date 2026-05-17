@@ -20,7 +20,6 @@ new node type. The existing `sha3_256` primitive is reused.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
@@ -28,7 +27,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from ariadne.core.schema import sha3_256
+from ariadne.core.hash_canonical import hash_preimage
 
 
 # ── Enums ────────────────────────────────────────────────────────────────────
@@ -228,61 +227,18 @@ _HASH_PREIMAGE_FIELDS: tuple[str, ...] = (
 )
 
 
-def _canonical_value(value):
-    """Recursive canonical-form serialization helper.
-
-    Datetimes → ISO 8601 with UTC offset. UUIDs → hex string. Enums →
-    .value. None → null. Floats → repr (no precision loss). Lists →
-    recurse. Pydantic models → dict then recurse.
-    """
-    if value is None:
-        return None
-    if isinstance(value, (UUID,)):
-        return str(value)
-    if isinstance(value, datetime):
-        # Always normalize to UTC for hash stability.
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc).isoformat()
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, bool):
-        return value  # JSON-encodes as true/false
-    if isinstance(value, (int,)):
-        return value
-    if isinstance(value, float):
-        # repr() produces a round-trippable representation. Avoids platform
-        # float→string differences that would break hash stability.
-        return repr(value)
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        return [_canonical_value(v) for v in value]
-    if isinstance(value, BaseModel):
-        return {k: _canonical_value(v) for k, v in value.model_dump().items()}
-    if isinstance(value, dict):
-        return {k: _canonical_value(v) for k, v in value.items()}
-    raise TypeError(f"Unhashable value type {type(value).__name__}: {value!r}")
-
-
 def compute_episode_link_content_hash(link: EpisodeLink) -> str:
     """SHA3-256 of the EpisodeLink canonical preimage.
-
-    Preimage is a JSON object with keys in _HASH_PREIMAGE_FIELDS order and
-    canonically serialized values. JSON serialization uses sort_keys=False
-    (we already control the field order) and separators=(',', ':') (no
-    whitespace). The preimage is encoded as UTF-8 before hashing.
 
     Excludes `quarantine_resolved_at` and `quarantine_resolution` per
     Amendment v2.0 §2 — these are mutable lifecycle annotations whose
     integrity lives in the audit log, not the content hash.
+
+    Canonicalization rules (UTC ISO 8601 datetimes, repr() floats, etc.)
+    live in `ariadne.core.hash_canonical`. Field order is the order
+    declared in `_HASH_PREIMAGE_FIELDS`.
     """
-    preimage: dict = {}
-    for field_name in _HASH_PREIMAGE_FIELDS:
-        preimage[field_name] = _canonical_value(getattr(link, field_name))
-    # sort_keys=False — we use the explicit _HASH_PREIMAGE_FIELDS ordering.
-    serialized = json.dumps(preimage, sort_keys=False, separators=(",", ":"), ensure_ascii=False)
-    return sha3_256(serialized.encode("utf-8"))
+    return hash_preimage(link, _HASH_PREIMAGE_FIELDS)
 
 
 def stamp_content_hash(link: EpisodeLink) -> EpisodeLink:
@@ -366,6 +322,7 @@ def assert_episode_link(
         write_audit_record_sync,
         write_episode_link_sync,
     )
+    from ariadne.core.audit_chain import next_delta_sequence, prior_audit_hash
     from ariadne.core.branching import (
         AuditRecord,
         CognitiveDeltaType,
@@ -392,12 +349,12 @@ def assert_episode_link(
     forward_delta_dict = delta.model_dump()
     reverse_delta_dict = {"operation": "delete_episode_link", "link_id": str(link.link_id)}
 
-    # 3. Acquire delta_sequence + prior_audit_hash from the audit chain
-    # for the source episode. Source episode is the audit anchor — the
-    # episode "asserting" the relationship owns the audit chain entry.
+    # 3. Acquire delta_sequence + prior hash from the audit chain for the
+    # source episode. Source episode is the audit anchor — the episode
+    # "asserting" the relationship owns the audit chain entry.
     src_episode_id = str(link.source_episode)
-    delta_sequence = _get_next_audit_delta_sequence(driver, src_episode_id)
-    prior_audit_hash = _get_prior_audit_hash(driver, src_episode_id)
+    delta_sequence = next_delta_sequence(driver, src_episode_id)
+    prior_hash = prior_audit_hash(driver, src_episode_id)
 
     # 4. Build and hash the AuditRecord, then write it.
     short_link_id = str(link.link_id)[:8]
@@ -414,7 +371,7 @@ def assert_episode_link(
         # fires from an automated candidate sweep.
         trigger_context=TriggerType.HUMAN_EXPLICIT,
         explicit_reason=explicit_reason,
-        prior_audit_hash=prior_audit_hash,
+        prior_audit_hash=prior_hash,
         caught_by="HUMAN",
         episode_id=src_episode_id,
     )
@@ -425,56 +382,13 @@ def assert_episode_link(
         audit.agent_id,
         audit.wall_clock_time.isoformat(),
         _json.dumps(forward_delta_dict, default=str, sort_keys=True),
-        prior_audit_hash,
+        prior_hash,
     )
     write_audit_record_sync(driver, audit)
 
     return link
 
 
-# ── Audit chain helpers (scoped to cross-episode use) ───────────────────────
-
-
-def _get_next_audit_delta_sequence(driver, episode_id: str) -> int:
-    """Next monotonic delta sequence for the episode's audit chain.
-
-    Duplicates the helper in ariadne.core.branch_operations._get_next_delta_sequence
-    intentionally — that one is module-private. Both implementations read
-    the same source-of-truth (max delta_sequence on AriadneAuditRecord
-    nodes scoped to the episode). If a future refactor lifts this into a
-    shared `audit_chain.py` module, both call sites collapse onto it.
-    """
-    try:
-        with driver.session() as session:
-            result = session.run(
-                """
-                MATCH (ar:AriadneAuditRecord {episode_id: $eid})
-                RETURN max(ar.delta_sequence) AS max_seq
-                """,
-                {"eid": episode_id},
-            )
-            record = result.single()
-            current_max = record["max_seq"] if record and record["max_seq"] is not None else 0
-            return current_max + 1
-    except Exception:
-        return 1
-
-
-def _get_prior_audit_hash(driver, episode_id: str) -> str:
-    """Prior record hash for chain integrity. Returns GENESIS for an
-    empty chain. Mirrors ariadne.core.branch_operations._get_prior_audit_hash."""
-    try:
-        with driver.session() as session:
-            result = session.run(
-                """
-                MATCH (ar:AriadneAuditRecord {episode_id: $eid})
-                RETURN ar.record_hash AS hash
-                ORDER BY ar.delta_sequence DESC
-                LIMIT 1
-                """,
-                {"eid": episode_id},
-            )
-            record = result.single()
-            return record["hash"] if record and record["hash"] else "GENESIS"
-    except Exception:
-        return "GENESIS"
+# Audit chain helpers (next_delta_sequence + prior_audit_hash) live in
+# ariadne.core.audit_chain — shared across all operation-layer modules
+# that advance the audit log.
