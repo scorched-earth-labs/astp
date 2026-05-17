@@ -69,12 +69,17 @@ class CognitiveDeltaType(str, Enum):
     SOLILOQUY_INITIATED = "SOLILOQUY_INITIATED"
     SOLILOQUY_CONCLUDED = "SOLILOQUY_CONCLUDED"
     # Amendment v2.0 — Cross-Episode Linking. LINK_ACCEPTED fires on every
-    # link assertion in Phase 1 (manual, human-asserted only). LINK_PROPOSED
-    # and LINK_REJECTED are registered now for forward-compat with the
-    # Phase 2 discovery flow but have no Phase 1 emitter.
+    # link assertion (whether human-asserted or auto-accepted from
+    # discovery above AUTO_ACCEPT_THRESHOLD). LINK_PROPOSED fires when
+    # discovery surfaces a candidate ≥ DISCOVERY_THRESHOLD for human
+    # review. LINK_REJECTED fires when a human rejects a proposed
+    # candidate. CANDIDATE_REJECTED fires when discovery scores a
+    # candidate BELOW DISCOVERY_THRESHOLD — recorded for calibration
+    # tuning (§1 calibration narrative).
     LINK_PROPOSED = "LINK_PROPOSED"
     LINK_ACCEPTED = "LINK_ACCEPTED"
     LINK_REJECTED = "LINK_REJECTED"
+    CANDIDATE_REJECTED = "CANDIDATE_REJECTED"
     # Amendment v2.0 — Episode Grouping. Per §11.4 consolidated audit
     # registry: MEMBERSHIP_RECORD_CREATED fires on every new MembershipRecord
     # (whether initial or succession). MEMBERSHIP_RECORD_SUPERSEDED fires

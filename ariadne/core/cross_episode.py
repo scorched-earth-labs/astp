@@ -276,6 +276,89 @@ class LinkAcceptedDelta(BaseModel):
     reverse_delete_link_id: str
 
 
+class LinkProposedDelta(BaseModel):
+    """Forward delta for `CognitiveDeltaType.LINK_PROPOSED` (Amendment §5).
+
+    Fires when discovery surfaces a candidate at or above
+    DISCOVERY_THRESHOLD but below AUTO_ACCEPT_THRESHOLD — i.e., the
+    system thinks this link is likely correct but wants human review
+    before committing.
+
+    The audit-the-decision pattern (§12.2): record full inference
+    signals + thresholds in effect at proposal time so the candidate
+    is interpretable later (post-hoc calibration of threshold values).
+
+    No reverse delta — proposals are append-only. Rejection of a
+    proposed candidate emits a separate LINK_REJECTED event; acceptance
+    emits LINK_ACCEPTED + creates the EpisodeLink. The proposal record
+    survives in the audit log either way.
+    """
+
+    source_episode: str
+    target_episode: str
+    proposed_link_type: str              # LinkType.value
+    composite_score: float               # final score that crossed DISCOVERY_THRESHOLD
+    inference_signals: list[Signal]      # full signal breakdown for audit-the-decision
+    discovery_threshold_at_creation: float
+    auto_accept_threshold_at_creation: float
+
+
+class LinkRejectedDelta(BaseModel):
+    """Forward delta for `CognitiveDeltaType.LINK_REJECTED`.
+
+    Fires when a human rejects a candidate that was previously surfaced
+    via LINK_PROPOSED. Carries the original audit_event_id of the
+    proposal so the calibration loop can correlate proposed-and-rejected
+    candidates and tune scoring weights / thresholds.
+
+    Per the §5 RejectionReason enum, the reason categorizes the
+    rejection so the calibration signal has structure.
+    """
+
+    proposed_audit_event_id: str  # the LINK_PROPOSED audit_id this rejects
+    source_episode: str
+    target_episode: str
+    proposed_link_type: str
+    rejecting_agent: str
+    rejection_reason: str         # RejectionReason value (see below)
+    rejection_note: Optional[str] = None  # optional free-text
+
+
+class CandidateRejectedDelta(BaseModel):
+    """Forward delta for `CognitiveDeltaType.CANDIDATE_REJECTED` (Amendment §5).
+
+    Fires when discovery scores a candidate strictly BELOW
+    DISCOVERY_THRESHOLD. The candidate is NOT surfaced for human review;
+    the event exists purely for calibration — implementations can analyze
+    rejected-at-score-X patterns to tune DISCOVERY_THRESHOLD.
+
+    Carries full signals to make retrospective "would this candidate have
+    been useful if our threshold were lower" analysis possible.
+    """
+
+    source_episode: str
+    target_episode: str
+    proposed_link_type: str          # the link_type that would have been used
+    composite_score: float
+    inference_signals: list[Signal]
+    discovery_threshold_at_creation: float
+
+
+class RejectionReason(str, Enum):
+    """Structured rejection reasons per Amendment v2.0 §5.
+
+    Used by LinkRejectedDelta — implementations should pick the most
+    specific value. NOT_RELATED and LOW_CONFIDENCE are the calibration-
+    actionable ones (signal that the threshold is too low or the signal
+    weights are off).
+    """
+
+    LOW_CONFIDENCE = "LOW_CONFIDENCE"               # Score above threshold but relationship not meaningful
+    WRONG_RELATIONSHIP_TYPE = "WRONG_RELATIONSHIP_TYPE"  # Relationship exists but link_type incorrect
+    NOT_RELATED = "NOT_RELATED"                     # Episodes are not meaningfully related
+    DUPLICATE_OF_EXISTING = "DUPLICATE_OF_EXISTING"  # Already captured by another link
+
+
 # ── Operation layer: assertion + audit emission ─────────────────────────────
 
 
@@ -387,6 +470,248 @@ def assert_episode_link(
     write_audit_record_sync(driver, audit)
 
     return link
+
+
+# ── Phase 2: Discovery operation layer ──────────────────────────────────────
+#
+# These operations emit audit-only events. None create EpisodeLink nodes.
+# They feed the calibration loop and (for LINK_PROPOSED) the human-review
+# queue. See Amendment v2.0 §5 and §12.2 (audit-the-decision pattern).
+
+
+def propose_link_candidate(
+    driver,
+    *,
+    source_episode: str,
+    target_episode: str,
+    proposed_link_type: LinkType,
+    composite_score: float,
+    inference_signals: list[Signal],
+    discovery_threshold: float,
+    auto_accept_threshold: float,
+    proposing_agent: str,
+    session_id: Optional[str] = None,
+) -> str:
+    """Emit a `LINK_PROPOSED` audit event for human review.
+
+    Used by the Phase 2 discovery flow when a candidate scores at or above
+    `discovery_threshold` but strictly below `auto_accept_threshold`.
+    The candidate is surfaced for human review; no EpisodeLink is created
+    yet. Acceptance flows through `assert_episode_link` (which emits
+    LINK_ACCEPTED + creates the link). Rejection flows through
+    `record_link_rejection` (which references this proposal's audit_id).
+
+    The audit-the-decision pattern (§12.2): full signal breakdown +
+    threshold values at proposal time are recorded so the calibration
+    loop can analyze "what scored where" without re-running the model.
+
+    Returns the audit_id of the LINK_PROPOSED record so the caller can
+    surface it in the review queue and later correlate the
+    accept/reject decision back to the proposal.
+    """
+    import json as _json
+    from ariadne.adapters.neo4j.writer import write_audit_record_sync
+    from ariadne.core.audit_chain import next_delta_sequence, prior_audit_hash
+    from ariadne.core.branching import (
+        AuditRecord,
+        CognitiveDeltaType,
+        TriggerType,
+        compute_audit_record_hash,
+    )
+
+    delta = LinkProposedDelta(
+        source_episode=source_episode,
+        target_episode=target_episode,
+        proposed_link_type=proposed_link_type.value,
+        composite_score=composite_score,
+        inference_signals=inference_signals,
+        discovery_threshold_at_creation=discovery_threshold,
+        auto_accept_threshold_at_creation=auto_accept_threshold,
+    )
+    forward_delta_dict = delta.model_dump()
+    # Proposals are append-only — rejection is a separate forward event.
+    reverse_delta_dict = {"operation": "noop", "reason": "proposals are append-only"}
+
+    delta_sequence = next_delta_sequence(driver, source_episode)
+    prior_hash = prior_audit_hash(driver, source_episode)
+
+    audit = AuditRecord(
+        delta_sequence=delta_sequence,
+        agent_id=proposing_agent,
+        session_id=session_id or f"propose-{source_episode[:8]}",
+        delta_type=CognitiveDeltaType.LINK_PROPOSED,
+        forward_delta=forward_delta_dict,
+        reverse_delta=reverse_delta_dict,
+        affected_nodes=[source_episode, target_episode],
+        trigger_context=TriggerType.AGENT_DETECTED,
+        explicit_reason=None,
+        prior_audit_hash=prior_hash,
+        caught_by="AGENT",
+        episode_id=source_episode,
+    )
+    audit.record_hash = compute_audit_record_hash(
+        str(audit.audit_id),
+        audit.delta_sequence,
+        audit.delta_type.value,
+        audit.agent_id,
+        audit.wall_clock_time.isoformat(),
+        _json.dumps(forward_delta_dict, default=str, sort_keys=True),
+        prior_hash,
+    )
+    write_audit_record_sync(driver, audit)
+
+    return str(audit.audit_id)
+
+
+def record_candidate_rejection(
+    driver,
+    *,
+    source_episode: str,
+    target_episode: str,
+    proposed_link_type: LinkType,
+    composite_score: float,
+    inference_signals: list[Signal],
+    discovery_threshold: float,
+    detecting_agent: str,
+    session_id: Optional[str] = None,
+) -> str:
+    """Emit a `CANDIDATE_REJECTED` audit event for calibration.
+
+    Used by the Phase 2 discovery flow when a candidate scores strictly
+    BELOW `discovery_threshold`. The candidate is not surfaced for
+    review — this event exists purely so the calibration loop can analyze
+    sub-threshold scoring patterns and tune DISCOVERY_THRESHOLD over time.
+
+    Per §1, high-volume CANDIDATE_REJECTED events at scores just below
+    threshold are the primary signal for lowering the threshold.
+
+    Returns the audit_id of the CANDIDATE_REJECTED record.
+    """
+    import json as _json
+    from ariadne.adapters.neo4j.writer import write_audit_record_sync
+    from ariadne.core.audit_chain import next_delta_sequence, prior_audit_hash
+    from ariadne.core.branching import (
+        AuditRecord,
+        CognitiveDeltaType,
+        TriggerType,
+        compute_audit_record_hash,
+    )
+
+    delta = CandidateRejectedDelta(
+        source_episode=source_episode,
+        target_episode=target_episode,
+        proposed_link_type=proposed_link_type.value,
+        composite_score=composite_score,
+        inference_signals=inference_signals,
+        discovery_threshold_at_creation=discovery_threshold,
+    )
+    forward_delta_dict = delta.model_dump()
+    reverse_delta_dict = {"operation": "noop", "reason": "candidate rejections are append-only"}
+
+    delta_sequence = next_delta_sequence(driver, source_episode)
+    prior_hash = prior_audit_hash(driver, source_episode)
+
+    audit = AuditRecord(
+        delta_sequence=delta_sequence,
+        agent_id=detecting_agent,
+        session_id=session_id or f"reject-{source_episode[:8]}",
+        delta_type=CognitiveDeltaType.CANDIDATE_REJECTED,
+        forward_delta=forward_delta_dict,
+        reverse_delta=reverse_delta_dict,
+        affected_nodes=[source_episode, target_episode],
+        trigger_context=TriggerType.AGENT_DETECTED,
+        explicit_reason=None,
+        prior_audit_hash=prior_hash,
+        caught_by="AGENT",
+        episode_id=source_episode,
+    )
+    audit.record_hash = compute_audit_record_hash(
+        str(audit.audit_id),
+        audit.delta_sequence,
+        audit.delta_type.value,
+        audit.agent_id,
+        audit.wall_clock_time.isoformat(),
+        _json.dumps(forward_delta_dict, default=str, sort_keys=True),
+        prior_hash,
+    )
+    write_audit_record_sync(driver, audit)
+
+    return str(audit.audit_id)
+
+
+def record_link_rejection(
+    driver,
+    *,
+    proposed_audit_event_id: str,
+    source_episode: str,
+    target_episode: str,
+    proposed_link_type: LinkType,
+    rejecting_agent: str,
+    rejection_reason: RejectionReason,
+    rejection_note: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> str:
+    """Emit a `LINK_REJECTED` audit event when a human rejects a proposed candidate.
+
+    Carries `proposed_audit_event_id` so the calibration loop can pair
+    LINK_PROPOSED → LINK_REJECTED events and learn from the score-at-
+    proposal vs. human-judgment delta. The `rejection_reason` is the
+    structured signal — NOT_RELATED at a high composite_score is the
+    strongest evidence that the scoring weights need adjustment.
+
+    Returns the audit_id of the LINK_REJECTED record.
+    """
+    import json as _json
+    from ariadne.adapters.neo4j.writer import write_audit_record_sync
+    from ariadne.core.audit_chain import next_delta_sequence, prior_audit_hash
+    from ariadne.core.branching import (
+        AuditRecord,
+        CognitiveDeltaType,
+        TriggerType,
+        compute_audit_record_hash,
+    )
+
+    delta = LinkRejectedDelta(
+        proposed_audit_event_id=proposed_audit_event_id,
+        source_episode=source_episode,
+        target_episode=target_episode,
+        proposed_link_type=proposed_link_type.value,
+        rejecting_agent=rejecting_agent,
+        rejection_reason=rejection_reason.value,
+        rejection_note=rejection_note,
+    )
+    forward_delta_dict = delta.model_dump()
+    reverse_delta_dict = {"operation": "noop", "reason": "link rejections are append-only"}
+
+    delta_sequence = next_delta_sequence(driver, source_episode)
+    prior_hash = prior_audit_hash(driver, source_episode)
+
+    audit = AuditRecord(
+        delta_sequence=delta_sequence,
+        agent_id=rejecting_agent,
+        session_id=session_id or f"reject-{source_episode[:8]}",
+        delta_type=CognitiveDeltaType.LINK_REJECTED,
+        forward_delta=forward_delta_dict,
+        reverse_delta=reverse_delta_dict,
+        affected_nodes=[source_episode, target_episode],
+        trigger_context=TriggerType.HUMAN_EXPLICIT,
+        explicit_reason=rejection_note,
+        prior_audit_hash=prior_hash,
+        caught_by="HUMAN",
+        episode_id=source_episode,
+    )
+    audit.record_hash = compute_audit_record_hash(
+        str(audit.audit_id),
+        audit.delta_sequence,
+        audit.delta_type.value,
+        audit.agent_id,
+        audit.wall_clock_time.isoformat(),
+        _json.dumps(forward_delta_dict, default=str, sort_keys=True),
+        prior_hash,
+    )
+    write_audit_record_sync(driver, audit)
+
+    return str(audit.audit_id)
 
 
 # Audit chain helpers (next_delta_sequence + prior_audit_hash) live in

@@ -949,6 +949,112 @@ async def get_episode_link(driver, link_id: str) -> Optional[dict[str, Any]]:
     return await asyncio.to_thread(_query)
 
 
+async def list_pending_link_candidates(
+    driver,
+    episode_id: str,
+    *,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return outstanding `LINK_PROPOSED` candidates for human review.
+
+    A candidate is "pending" when its `LINK_PROPOSED` audit record has
+    NOT been resolved by either:
+      - a `LINK_REJECTED` audit event whose `proposed_audit_event_id`
+        matches the proposal's audit_id, or
+      - a `LINK_ACCEPTED` audit event that asserts the same
+        (source_episode, target_episode, link_type) triple (the
+        proposal was elevated into an actual link by the user).
+
+    The query keys off the source_episode's audit chain — proposals
+    anchor their audit records there (Amendment v2.0 §5).
+
+    Returns: list of dicts with proposal_audit_id, source_episode,
+    target_episode, proposed_link_type, composite_score,
+    inference_signals, threshold values, wall_clock_time, agent_id.
+    Sorted by composite_score DESC so the highest-confidence
+    pending candidates surface first.
+
+    Empty list if Ariadne disabled. forward_delta JSON is decoded in
+    Python (rather than via APOC) to keep the query dependency-free.
+    """
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        import json as _json
+
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (ar:AriadneAuditRecord {episode_id: $episode_id})
+                WHERE ar.delta_type IN ['LINK_PROPOSED', 'LINK_REJECTED', 'LINK_ACCEPTED']
+                RETURN ar.audit_id AS audit_id,
+                       ar.delta_type AS delta_type,
+                       ar.forward_delta AS forward_delta,
+                       ar.agent_id AS agent_id,
+                       ar.wall_clock_time AS wall_clock_time
+                """,
+                {"episode_id": episode_id},
+            )
+
+            proposals: list[dict[str, Any]] = []
+            rejected_proposal_ids: set[str] = set()
+            accepted_triples: set[tuple[str, str, str]] = set()
+
+            for record in result:
+                delta_type = record["delta_type"]
+                try:
+                    forward = _json.loads(record["forward_delta"]) if record["forward_delta"] else {}
+                except (TypeError, ValueError):
+                    forward = {}
+
+                if delta_type == "LINK_PROPOSED":
+                    proposals.append({
+                        "proposal_audit_id": record["audit_id"],
+                        "source_episode": forward.get("source_episode"),
+                        "target_episode": forward.get("target_episode"),
+                        "proposed_link_type": forward.get("proposed_link_type"),
+                        "composite_score": forward.get("composite_score"),
+                        "inference_signals": forward.get("inference_signals", []),
+                        "discovery_threshold_at_creation": forward.get(
+                            "discovery_threshold_at_creation"
+                        ),
+                        "auto_accept_threshold_at_creation": forward.get(
+                            "auto_accept_threshold_at_creation"
+                        ),
+                        "agent_id": record["agent_id"],
+                        "wall_clock_time": record["wall_clock_time"],
+                    })
+                elif delta_type == "LINK_REJECTED":
+                    proposed_id = forward.get("proposed_audit_event_id")
+                    if proposed_id:
+                        rejected_proposal_ids.add(proposed_id)
+                elif delta_type == "LINK_ACCEPTED":
+                    accepted_triples.add((
+                        forward.get("source_episode"),
+                        forward.get("target_episode"),
+                        forward.get("link_type"),
+                    ))
+
+            pending = [
+                p for p in proposals
+                if p["proposal_audit_id"] not in rejected_proposal_ids
+                and (
+                    p["source_episode"],
+                    p["target_episode"],
+                    p["proposed_link_type"],
+                ) not in accepted_triples
+            ]
+
+            pending.sort(
+                key=lambda p: (p["composite_score"] or 0.0),
+                reverse=True,
+            )
+            return pending[:limit]
+
+    return await asyncio.to_thread(_query)
+
+
 # ── Episode Grouping (Amendment v2.0 §7-§8) ─────────────────────────────────
 
 
