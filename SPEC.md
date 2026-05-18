@@ -119,6 +119,20 @@ The protocol layer MUST NOT import from any node-type layer. This boundary is en
 
 This separation enables tree rebalancing without breaking integrity. Changing `sequence_index` is equivalent to rewriting history — it is a protocol violation. Changing `tree_leaf_index` is a structural optimization with no integrity impact.
 
+### 3.4 The Persistence Layer Model
+
+The protocol defines three **persistence layers** — distinct from the code-architecture layering of §3.1. Each persistence layer is a separate cryptographic surface, owned by a distinct authority, and isolated from the others' hash integrity:
+
+| Layer | Contents | Owner | Hash Participation |
+|-------|----------|-------|-------------------|
+| **Layer 1 — Merkle Spine** | EpisodeNode, IntentionNode, BeliefNode, SignalNode, and other cognitive primitives | Protocol kernel | Hash-chained, witness-signable, authoritative cognitive record |
+| **Layer 2 — Episode Content** | Segments, BranchPoints, HITLEventNodes; Adaptive Merkle Tree under the Spine | Protocol kernel | Anchored to Layer 1 via parent references |
+| **Layer 3 — Workflow & Execution DAG** | WorkflowDeclaration, ExecutionNode, SkillInvocation | Cognitive Implementation Authority (per workspace, per node type — see Amendment v3.0 §3) | **Isolated**: Layer 3 nodes do NOT participate in Spine hash computation. Cross-layer references are by ID only. |
+
+**Layer 3 was introduced by Amendment v3.0 — Workflow & Execution DAG Codification.** The full Layer 3 surface — node schemas, hash preimage rules, immutability invariants, state machine, sole-writer principle (Cognitive Implementation Authority), and audit event types (`WORKFLOW_DECLARED`, `EXECUTION_RECORDED`, `SKILL_INVOKED`, `WORKFLOW_CLOSED`) — is normatively specified in `AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`. This section names Layer 3's existence and position in the persistence model; the amendment is the authoritative reference for its semantics.
+
+The two three-layer models — code-architecture (§3.1) and persistence (§3.4) — are **orthogonal**. The code-architecture layering governs what can import what (Protocol → Instantiation → Node Type, never reverse). The persistence layering governs what participates in which cryptographic structure. A given node type (e.g., `WorkflowDeclaration`) sits in the Node Type code-architecture layer AND in Persistence Layer 3 simultaneously; the two memberships describe different properties.
+
 ## 4. Data Model
 
 ### 4.1 CognitiveNode

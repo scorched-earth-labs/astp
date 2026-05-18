@@ -91,6 +91,23 @@ class CognitiveDeltaType(str, Enum):
     MEMBERSHIP_RECORD_SUPERSEDED = "MEMBERSHIP_RECORD_SUPERSEDED"
     DECLARATION_VERSION_BUMPED = "DECLARATION_VERSION_BUMPED"
     DECLARATION_SUPERSEDED = "DECLARATION_SUPERSEDED"
+    # Amendment v3.0 — Layer 3 Codification (Workflow & Execution DAG).
+    # Per §11 audit event registry: WORKFLOW_DECLARED fires on every
+    # WorkflowDeclaration creation. EXECUTION_RECORDED fires on every
+    # ExecutionNode creation (and is the wire-tier signal that the
+    # workflow's auto-transition DECLARED → IN_PROGRESS occurred on the
+    # first such write). SKILL_INVOKED fires on every SkillInvocation
+    # creation. WORKFLOW_CLOSED fires on every transition of
+    # WorkflowDeclaration.status into a terminal state (COMPLETED,
+    # FAILED, INTERRUPTED) via the close operation. Every Layer 3
+    # audit event MUST carry the cia_identifier of the workspace's
+    # designated Cognitive Implementation Authority for the node type
+    # being written (§3 sole-writer principle, §11 audit chain
+    # integrity).
+    WORKFLOW_DECLARED = "WORKFLOW_DECLARED"
+    EXECUTION_RECORDED = "EXECUTION_RECORDED"
+    SKILL_INVOKED = "SKILL_INVOKED"
+    WORKFLOW_CLOSED = "WORKFLOW_CLOSED"
 
 
 class TriggerType(str, Enum):
