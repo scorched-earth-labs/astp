@@ -4,6 +4,8 @@
 
 Bring your own cognitive architecture. Ariadne handles the persistence, integrity verification, and coordination of agent state transitions.
 
+📖 **New to Ariadne?** Start with the [Glossary](./GLOSSARY.md) — every term used in the spec and code, defined once with explicit structural relationships (e.g. how `EpisodeNode` relates to `CognitiveNode` + `EpisodePayload`).
+
 ---
 
 ## What It Is
