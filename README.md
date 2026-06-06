@@ -6,6 +6,8 @@ Bring your own cognitive architecture. Ariadne handles the persistence, integrit
 
 📖 **New to Ariadne?** Start with the [Glossary](./GLOSSARY.md) — every term used in the spec and code, defined once with explicit structural relationships (e.g. how `EpisodeNode` relates to `CognitiveNode` + `EpisodePayload`).
 
+**Current version:** `2.5.0-draft` — see [`SPEC.md`](./SPEC.md). Versioning policy: [`VERSIONING.md`](./VERSIONING.md). Change history: [`CHANGELOG.md`](./CHANGELOG.md).
+
 ---
 
 ## What It Is
@@ -145,6 +147,20 @@ ariadne-protocol = {path = "../ariadne-protocol"}
 **Alpha.** The protocol core and Neo4j reference adapter are extracted and stable. Active development continues on branching, forking, merging, and agent tool-call retrieval interfaces. The protocol specification is in `SPEC.md`.
 
 Not recommended for production use outside of the Ignis OS environment until the first stable release.
+
+---
+
+## Versioning
+
+Ariadne follows [Semantic Versioning](https://semver.org/) — `MAJOR.MINOR.PATCH`:
+
+- **MAJOR** — changes to canonical form (hash preimages, serialization, required fields). Conformance-breaking.
+- **MINOR** — additive surface (new optional node types, new query surface, new fields with safe defaults). Existing implementations remain conformant.
+- **PATCH** — errata, clarifications, ambiguity resolution. No semantic change.
+
+`SPEC.md` is the canonical version source — the `Version:` field at the top of that file IS the protocol version. Implementation guides, conformance documents, and amendments are versioned-against (they describe behavior at a specific protocol version), not versioned-independently.
+
+Full policy: [`VERSIONING.md`](./VERSIONING.md). Change history: [`CHANGELOG.md`](./CHANGELOG.md).
 
 ---
 
