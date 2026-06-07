@@ -6,7 +6,7 @@ Bring your own cognitive architecture. Ariadne handles the persistence, integrit
 
 📖 **New to Ariadne?** Start with the [Glossary](./GLOSSARY.md) — every term used in the spec and code, defined once with explicit structural relationships (e.g. how `EpisodeNode` relates to `CognitiveNode` + `EpisodePayload`).
 
-**Current version:** `2.5.0-draft` — see [`SPEC.md`](./SPEC.md). Versioning policy: [`VERSIONING.md`](./VERSIONING.md). Change history: [`CHANGELOG.md`](./CHANGELOG.md).
+**Current version:** `3.1.0` — see [`SPEC.md`](./SPEC.md). Versioning policy: [`VERSIONING.md`](./VERSIONING.md). Change history: [`CHANGELOG.md`](./CHANGELOG.md).
 
 ---
 
@@ -152,13 +152,18 @@ Not recommended for production use outside of the Ignis OS environment until the
 
 ## Amendments
 
-Protocol amendments are recorded as standalone documents alongside `SPEC.md`. They are ratified in a designated Episode of Record and reference the Episode's spine hash for provenance. The Episode of Record is the cryptographic anchor; the document is the human-readable artifact.
+Protocol amendments are recorded as standalone documents alongside `SPEC.md`. They are ratified in a designated Episode of Record and reference the Episode's spine hash for provenance. The Episode of Record is the cryptographic anchor; the document is the human-readable artifact. Amendment documents retain their authoring numerals; the canonical SPEC version per [`VERSIONING.md`](./VERSIONING.md) is shown alongside.
 
-| Amendment | Status | Document |
-|-----------|--------|----------|
-| v2.0 — Cross-Episode Linking & Grouping Interface | Ratified; implementation in progress | [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) |
+| Amendment | SPEC version | Status | Document |
+|-----------|--------------|--------|----------|
+| v2.0 — Cross-Episode Linking & Grouping Interface | v3.0.0 | Merged into main; normative pending integration pass | [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) |
+| v3.0 — Layer 3 Workflow & Execution DAG Codification | v3.1.0 | Merged into main; normative pending integration pass | [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) |
 
-Amendment v2.0 introduces typed cross-episode links, an EpisodeGrouping interface (with `MembershipRecord` as the protocol-owned artifact), succession-chain governance for `MembershipRecord` and `ConformanceDeclaration`, audit-the-decision pattern for behavioral-tier implementation choices (§12), and a three-tier conformance taxonomy (wire / state / behavioral). Schema bump: v2.0.0. Breaking hash preimage changes on three node types — see Appendix A of the amendment for the full breaking-change reference.
+**SPEC v3.0.0 (cross-episode linking, MAJOR)** introduces typed cross-episode links, an EpisodeGrouping interface (with `MembershipRecord` as the protocol-owned artifact), succession-chain governance for `MembershipRecord` and `ConformanceDeclaration`, audit-the-decision pattern for behavioral-tier implementation choices (§12), and a three-tier conformance taxonomy (wire / state / behavioral). Breaking hash preimage changes on three node types — see Appendix A of the amendment for the full breaking-change reference.
+
+**SPEC v3.1.0 (Layer 3, MINOR)** formalizes the three-Merkle-layer model and codifies Layer 3 — `WorkflowDeclaration`, `ExecutionNode`, `SkillInvocation`. Layer 3 is cryptographically isolated from Spine integrity by construction (Layer 3 nodes reference Layers 1/2 by ID only; never participate in Spine hashing), so no future Layer-3 change can force a MAJOR bump on Spine grounds. Each Layer 3 node type has a designated Cognitive Implementation Authority (CIA) — sole-writer guarantee as a wire-tier conformance principle.
+
+The SPEC integration pass that folds the amendment material into `SPEC.md`'s body remains pending; until that lands, the amendment documents are the normative source for the surface they define.
 
 ---
 
