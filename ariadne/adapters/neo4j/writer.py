@@ -148,6 +148,21 @@ SCHEMA_INDEXES = [
     "CREATE INDEX ariadne_fingerprint_segment IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) ON (fp.segment_id)",
     "CREATE INDEX ariadne_fingerprint_sequence IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) ON (fp.sequence_index)",
     "CREATE INDEX ariadne_fingerprint_state IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) ON (fp.detection_state)",
+    # Cross-Episode Linking (Amendment v2.0). Label is `AriadneEpisodeLink`
+    # for consistency with the Ariadne* prefix convention; the amendment's
+    # bare `EpisodeLink` notation is the protocol-level abstraction.
+    "CREATE CONSTRAINT ariadne_episode_link_id IF NOT EXISTS FOR (l:AriadneEpisodeLink) REQUIRE l.link_id IS UNIQUE",
+    "CREATE INDEX ariadne_episode_link_health IF NOT EXISTS FOR (l:AriadneEpisodeLink) ON (l.health_state)",
+    "CREATE INDEX ariadne_episode_link_source IF NOT EXISTS FOR (l:AriadneEpisodeLink) ON (l.source_episode)",
+    "CREATE INDEX ariadne_episode_link_target IF NOT EXISTS FOR (l:AriadneEpisodeLink) ON (l.target_episode)",
+    # Episode Grouping (Amendment v2.0 §7-§8). Same labeling convention.
+    "CREATE CONSTRAINT ariadne_membership_record_id IF NOT EXISTS FOR (m:AriadneMembershipRecord) REQUIRE m.record_id IS UNIQUE",
+    "CREATE INDEX ariadne_membership_episode IF NOT EXISTS FOR (m:AriadneMembershipRecord) ON (m.episode_id)",
+    "CREATE INDEX ariadne_membership_group IF NOT EXISTS FOR (m:AriadneMembershipRecord) ON (m.group_id)",
+    "CREATE INDEX ariadne_membership_system IF NOT EXISTS FOR (m:AriadneMembershipRecord) ON (m.group_system)",
+    "CREATE CONSTRAINT ariadne_conformance_declaration_id IF NOT EXISTS FOR (cd:AriadneConformanceDeclaration) REQUIRE cd.declaration_id IS UNIQUE",
+    "CREATE INDEX ariadne_conformance_system IF NOT EXISTS FOR (cd:AriadneConformanceDeclaration) ON (cd.group_system)",
+    "CREATE INDEX ariadne_conformance_group IF NOT EXISTS FOR (cd:AriadneConformanceDeclaration) ON (cd.group_id)",
 ]
 
 SCHEMA_VERSION_SEED = """
@@ -1769,3 +1784,453 @@ def get_last_nominal_segment_sync(driver, episode_id: str) -> Optional[str]:
     except Exception as e:
         logger.warning(f"Ariadne: get_last_nominal_segment failed: {e}")
         return None
+
+
+# ── Cross-Episode Linking (Amendment v2.0) ──────────────────────────────────
+
+
+def write_episode_link_sync(driver, link) -> None:
+    """Persist an EpisodeLink to Neo4j — Amendment v2.0 §2 + §11.1.2.
+
+    Pre-write contract:
+    1. Both source and target episodes must exist as `AriadneEpisode` nodes.
+    2. The link must not violate mutual-exclusivity rules (§3) against
+       existing links sharing the same (source_episode, target_episode) pair.
+    3. `content_hash` is computed at write time if not already stamped.
+
+    On success, creates:
+    - `(:AriadneEpisodeLink {...})` node holding all link fields
+    - `(:AriadneEpisode)-[:LINKED_TO {via: link_id}]->(:AriadneEpisode)` edge
+
+    The relationship-property `via` carries the link_id for cheap lookup
+    from edge to link node — agents traversing the episode graph can pick
+    up the link metadata in one hop.
+
+    Raises:
+        LinkGovernanceError: if mutual-exclusivity rules are violated.
+        ValueError: if source or target episode does not exist.
+    """
+    if not _ariadne_guard():
+        return
+
+    # Imports deferred to call time so the writer module stays
+    # importable in environments where the core has not yet loaded
+    # (e.g. schema-init bootstrap before episode types are wired).
+    from ariadne.core.cross_episode import (
+        EpisodeLink,
+        compute_episode_link_content_hash,
+        enforce_link_mutual_exclusivity,
+        LinkType,
+    )
+
+    if not isinstance(link, EpisodeLink):
+        raise TypeError(f"expected EpisodeLink, got {type(link).__name__}")
+
+    src_id = str(link.source_episode)
+    tgt_id = str(link.target_episode)
+
+    with driver.session() as session:
+        # 1. Both endpoints must exist.
+        endpoints = session.run(
+            """
+            MATCH (s:AriadneEpisode {episode_id: $src})
+            MATCH (t:AriadneEpisode {episode_id: $tgt})
+            RETURN s.episode_id AS src_id, t.episode_id AS tgt_id
+            """,
+            {"src": src_id, "tgt": tgt_id},
+        ).single()
+        if endpoints is None:
+            raise ValueError(
+                f"Cannot create EpisodeLink: one or both endpoints not found "
+                f"(source={src_id}, target={tgt_id})"
+            )
+
+        # 2. Mutual exclusivity check.
+        existing = session.run(
+            """
+            MATCH (s:AriadneEpisode {episode_id: $src})-[r:LINKED_TO]->(t:AriadneEpisode {episode_id: $tgt})
+            MATCH (l:AriadneEpisodeLink {link_id: r.via})
+            RETURN l.link_type AS link_type
+            """,
+            {"src": src_id, "tgt": tgt_id},
+        )
+        existing_types = [LinkType(record["link_type"]) for record in existing]
+        enforce_link_mutual_exclusivity(link.link_type, existing_types)
+
+        # 3. Stamp hash if caller didn't.
+        if not link.content_hash:
+            link.content_hash = compute_episode_link_content_hash(link)
+
+        # 4. Write node + edge in one transaction-equivalent block. Inline
+        # signal serialization to a string list — Neo4j property graph
+        # doesn't store nested maps cleanly. Full signal records live on
+        # the audit trail; the node carries a compact representation.
+        signals_compact = [
+            f"{s.signal_type.value}:{s.signal_value:.4f}@w={s.signal_weight:.4f}"
+            for s in link.inference_signals
+        ]
+        params = {
+            "link_id": str(link.link_id),
+            "source_episode": src_id,
+            "target_episode": tgt_id,
+            "created_at": link.created_at.isoformat(),
+            "created_by": link.created_by,
+            "link_type": link.link_type.value,
+            "link_strength": link.link_strength,
+            "is_inferred": link.is_inferred,
+            "inference_signals": signals_compact,
+            "inference_threshold": link.inference_threshold,
+            "retroactive": link.retroactive,
+            "health_state": link.health_state.value,
+            "health_checked_at": link.health_checked_at.isoformat(),
+            "source_version": link.source_version,
+            "target_version": link.target_version,
+            "quarantine_reason": link.quarantine_reason,
+            "quarantined_at": link.quarantined_at.isoformat() if link.quarantined_at else None,
+            "quarantine_resolved_at": (
+                link.quarantine_resolved_at.isoformat() if link.quarantine_resolved_at else None
+            ),
+            "quarantine_resolution": (
+                link.quarantine_resolution.value if link.quarantine_resolution else None
+            ),
+            "content_hash": link.content_hash,
+        }
+        session.run(
+            """
+            CREATE (l:AriadneEpisodeLink {
+                link_id:                $link_id,
+                source_episode:         $source_episode,
+                target_episode:         $target_episode,
+                created_at:             $created_at,
+                created_by:             $created_by,
+                link_type:              $link_type,
+                link_strength:          $link_strength,
+                is_inferred:            $is_inferred,
+                inference_signals:      $inference_signals,
+                inference_threshold:    $inference_threshold,
+                retroactive:            $retroactive,
+                health_state:           $health_state,
+                health_checked_at:      $health_checked_at,
+                source_version:         $source_version,
+                target_version:         $target_version,
+                quarantine_reason:      $quarantine_reason,
+                quarantined_at:         $quarantined_at,
+                quarantine_resolved_at: $quarantine_resolved_at,
+                quarantine_resolution:  $quarantine_resolution,
+                content_hash:           $content_hash
+            })
+            """,
+            params,
+        )
+        session.run(
+            """
+            MATCH (s:AriadneEpisode {episode_id: $src})
+            MATCH (t:AriadneEpisode {episode_id: $tgt})
+            MERGE (s)-[r:LINKED_TO {via: $link_id}]->(t)
+            ON CREATE SET r.created_at = $created_at, r.link_type = $link_type
+            """,
+            {
+                "src": src_id,
+                "tgt": tgt_id,
+                "link_id": str(link.link_id),
+                "created_at": link.created_at.isoformat(),
+                "link_type": link.link_type.value,
+            },
+        )
+
+    logger.info(
+        f"Ariadne: EpisodeLink {str(link.link_id)[:8]}... "
+        f"{link.link_type.value} from {src_id[:8]} → {tgt_id[:8]} "
+        f"(strength={link.link_strength:.2f}, "
+        f"{'inferred' if link.is_inferred else 'human-asserted'})"
+    )
+
+
+# ── Episode Grouping (Amendment v2.0 §7-§8) ────────────────────────────────
+
+
+def write_membership_record_sync(driver, record) -> None:
+    """Persist a MembershipRecord to Neo4j — Amendment v2.0 §7 + §11.1.2.
+
+    Pre-write contract:
+    1. The target Episode must exist (no orphan memberships).
+    2. content_hash is stamped at write time if not already set.
+    3. If supersedes_record_id is populated, the prior record must exist
+       AND must not already be superseded — chain integrity.
+
+    On success, creates:
+    - `(:AriadneMembershipRecord {...})` node holding all immutable fields
+    - `(:AriadneEpisode)-[:MEMBER_OF {via: record_id}]->(:AriadneEpisodeGroup)` edge
+
+    The :AriadneEpisodeGroup node is stub-merged on first reference (same
+    pattern as :Artifact and :ExternalSessionRef in the lineage writer).
+    The grouping itself may live outside Ariadne's structural layer — see
+    amendment §3 (Part II) on the boundary.
+
+    If supersedes_record_id is set:
+    - Creates `(new)-[:SUPERSEDES]->(prior)` edge
+    - Sets prior.superseded_by_record_id (forward pointer — excluded from
+      prior's content_hash per §10 forward-pointer-exclusion rule)
+
+    Raises:
+        ValueError: target episode not found, or prior record missing /
+            already superseded.
+    """
+    if not _ariadne_guard():
+        return
+
+    from ariadne.core.grouping import (
+        MembershipRecord,
+        compute_membership_record_content_hash,
+    )
+
+    if not isinstance(record, MembershipRecord):
+        raise TypeError(f"expected MembershipRecord, got {type(record).__name__}")
+
+    episode_id = str(record.episode_id)
+
+    with driver.session() as session:
+        # 1. Episode must exist.
+        ep = session.run(
+            "MATCH (e:AriadneEpisode {episode_id: $id}) RETURN e.episode_id AS id",
+            {"id": episode_id},
+        ).single()
+        if ep is None:
+            raise ValueError(
+                f"Cannot create MembershipRecord: episode {episode_id} not found"
+            )
+
+        # 2. Stamp hash if not already set.
+        if not record.content_hash:
+            record.content_hash = compute_membership_record_content_hash(record)
+
+        # 3. Succession integrity check.
+        if record.supersedes_record_id is not None:
+            prior_id = str(record.supersedes_record_id)
+            prior = session.run(
+                """
+                MATCH (m:AriadneMembershipRecord {record_id: $rid})
+                RETURN m.record_id AS rid,
+                       m.superseded_by_record_id AS sup_by,
+                       m.episode_id AS episode_id,
+                       m.group_id AS group_id,
+                       m.group_system AS group_system
+                """,
+                {"rid": prior_id},
+            ).single()
+            if prior is None:
+                raise ValueError(
+                    f"Cannot create MembershipRecord: prior record {prior_id} not found"
+                )
+            if prior["sup_by"]:
+                raise ValueError(
+                    f"Cannot supersede {prior_id}: already superseded by {prior['sup_by']}"
+                )
+            # Chain integrity: new must reference the same episode + group.
+            if prior["episode_id"] != episode_id:
+                raise ValueError(
+                    "Succession chain mismatch: new record's episode does not match prior's episode"
+                )
+            if prior["group_id"] != record.group_id or prior["group_system"] != record.group_system:
+                raise ValueError(
+                    "Succession chain mismatch: new record's (group_id, group_system) "
+                    "does not match prior's"
+                )
+
+        # 4. Write membership-record node.
+        params = {
+            "record_id": str(record.record_id),
+            "episode_id": episode_id,
+            "group_id": record.group_id,
+            "group_system": record.group_system,
+            "asserted_at": record.asserted_at.isoformat(),
+            "asserted_by": record.asserted_by,
+            "membership_role": record.membership_role.value,
+            "supersedes_record_id": (
+                str(record.supersedes_record_id) if record.supersedes_record_id else None
+            ),
+            "succession_reason": record.succession_reason,
+            # Forward pointer — set later by next succession; null at create.
+            "superseded_by_record_id": None,
+            "content_hash": record.content_hash,
+        }
+        session.run(
+            """
+            CREATE (m:AriadneMembershipRecord {
+                record_id:               $record_id,
+                episode_id:              $episode_id,
+                group_id:                $group_id,
+                group_system:            $group_system,
+                asserted_at:             $asserted_at,
+                asserted_by:             $asserted_by,
+                membership_role:         $membership_role,
+                supersedes_record_id:    $supersedes_record_id,
+                succession_reason:       $succession_reason,
+                superseded_by_record_id: $superseded_by_record_id,
+                content_hash:            $content_hash
+            })
+            """,
+            params,
+        )
+
+        # 5. Episode → Group edge. Stub-merge the group node (group may live
+        # outside Ariadne; we keep a graph anchor).
+        session.run(
+            """
+            MATCH (e:AriadneEpisode {episode_id: $ep_id})
+            MERGE (g:AriadneEpisodeGroup {group_id: $group_id, group_system: $group_system})
+            MERGE (e)-[r:MEMBER_OF {via: $record_id}]->(g)
+              ON CREATE SET r.asserted_at = $asserted_at, r.membership_role = $membership_role
+            """,
+            {
+                "ep_id": episode_id,
+                "group_id": record.group_id,
+                "group_system": record.group_system,
+                "record_id": str(record.record_id),
+                "asserted_at": record.asserted_at.isoformat(),
+                "membership_role": record.membership_role.value,
+            },
+        )
+
+        # 6. Succession edge + forward-pointer update on prior.
+        if record.supersedes_record_id is not None:
+            prior_id = str(record.supersedes_record_id)
+            session.run(
+                """
+                MATCH (new:AriadneMembershipRecord {record_id: $new_id})
+                MATCH (prior:AriadneMembershipRecord {record_id: $prior_id})
+                MERGE (new)-[:SUPERSEDES]->(prior)
+                SET prior.superseded_by_record_id = $new_id
+                """,
+                {"new_id": str(record.record_id), "prior_id": prior_id},
+            )
+
+    logger.info(
+        f"Ariadne: MembershipRecord {str(record.record_id)[:8]}... "
+        f"episode {episode_id[:8]} ∈ {record.group_system}:{record.group_id} "
+        f"role={record.membership_role.value}"
+        + (
+            f" supersedes {str(record.supersedes_record_id)[:8]}..."
+            if record.supersedes_record_id else ""
+        )
+    )
+
+
+def write_conformance_declaration_sync(driver, declaration) -> None:
+    """Persist a ConformanceDeclaration — Amendment v2.0 §8 + §11.1.2.
+
+    Pre-write contract:
+    1. SemVer format validation on declaration_version.
+    2. declaration_hash stamped at write time if not already set.
+    3. (Succession is a separate operation — this writer creates a single
+       declaration. To register a version bump, use the operation layer.)
+
+    On success, creates a `:AriadneConformanceDeclaration {...}` node. No
+    edge is created here — the declaration registers a (group_system,
+    group_id, version) and is referenced by MembershipRecords implicitly
+    via shared (group_id, group_system).
+    """
+    if not _ariadne_guard():
+        return
+
+    from ariadne.core.grouping import (
+        ConformanceDeclaration,
+        compute_conformance_declaration_hash,
+        enforce_semver_format,
+    )
+
+    if not isinstance(declaration, ConformanceDeclaration):
+        raise TypeError(
+            f"expected ConformanceDeclaration, got {type(declaration).__name__}"
+        )
+
+    # SemVer format validation.
+    enforce_semver_format(declaration.declaration_version)
+
+    if not declaration.declaration_hash:
+        declaration.declaration_hash = compute_conformance_declaration_hash(declaration)
+
+    # Serialize capabilities to a string list — same approach as
+    # AriadneEpisodeLink.inference_signals. Full structured capabilities
+    # are reconstructable from the audit chain; the Neo4j property is a
+    # compact representation for index-friendly storage.
+    capabilities_compact = [
+        c.capability_id if c.description is None else f"{c.capability_id}:{c.description}"
+        for c in declaration.capabilities
+    ]
+
+    params = {
+        "declaration_id": str(declaration.declaration_id),
+        "group_id": declaration.group_id,
+        "group_system": declaration.group_system,
+        "declared_at": declaration.declared_at.isoformat(),
+        "declared_by": declaration.declared_by,
+        "declaration_version": declaration.declaration_version,
+        "capabilities": capabilities_compact,
+        "superseded_by": str(declaration.superseded_by) if declaration.superseded_by else None,
+        "declaration_hash": declaration.declaration_hash,
+    }
+
+    with driver.session() as session:
+        session.run(
+            """
+            CREATE (cd:AriadneConformanceDeclaration {
+                declaration_id:      $declaration_id,
+                group_id:            $group_id,
+                group_system:        $group_system,
+                declared_at:         $declared_at,
+                declared_by:         $declared_by,
+                declaration_version: $declaration_version,
+                capabilities:        $capabilities,
+                superseded_by:       $superseded_by,
+                declaration_hash:    $declaration_hash
+            })
+            """,
+            params,
+        )
+
+    logger.info(
+        f"Ariadne: ConformanceDeclaration {str(declaration.declaration_id)[:8]}... "
+        f"for {declaration.group_system}:{declaration.group_id} "
+        f"v{declaration.declaration_version} "
+        f"({len(declaration.capabilities)} capabilities)"
+    )
+
+
+def supersede_conformance_declaration_sync(
+    driver,
+    old_declaration_id: str,
+    new_declaration_id: str,
+) -> None:
+    """Wire a SUPERSEDED_BY edge from old to new and set the forward
+    pointer on the old declaration. Used when a version bump registers
+    a successor declaration.
+
+    The forward pointer is excluded from the old declaration's
+    declaration_hash per §10, so this mutation does NOT invalidate the
+    integrity of the prior declaration.
+    """
+    if not _ariadne_guard():
+        return
+
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (old:AriadneConformanceDeclaration {declaration_id: $old_id})
+            MATCH (new:AriadneConformanceDeclaration {declaration_id: $new_id})
+            MERGE (old)-[:SUPERSEDED_BY]->(new)
+            SET old.superseded_by = $new_id
+            RETURN old.declaration_id AS rid
+            """,
+            {"old_id": old_declaration_id, "new_id": new_declaration_id},
+        ).single()
+        if result is None:
+            raise ValueError(
+                f"Cannot link supersession: one or both declarations not found "
+                f"(old={old_declaration_id}, new={new_declaration_id})"
+            )
+
+    logger.info(
+        f"Ariadne: ConformanceDeclaration {old_declaration_id[:8]} "
+        f"→ superseded by {new_declaration_id[:8]}"
+    )

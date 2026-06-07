@@ -68,6 +68,29 @@ class CognitiveDeltaType(str, Enum):
     ASIDE_CLOSED = "ASIDE_CLOSED"
     SOLILOQUY_INITIATED = "SOLILOQUY_INITIATED"
     SOLILOQUY_CONCLUDED = "SOLILOQUY_CONCLUDED"
+    # Amendment v2.0 — Cross-Episode Linking. LINK_ACCEPTED fires on every
+    # link assertion (whether human-asserted or auto-accepted from
+    # discovery above AUTO_ACCEPT_THRESHOLD). LINK_PROPOSED fires when
+    # discovery surfaces a candidate ≥ DISCOVERY_THRESHOLD for human
+    # review. LINK_REJECTED fires when a human rejects a proposed
+    # candidate. CANDIDATE_REJECTED fires when discovery scores a
+    # candidate BELOW DISCOVERY_THRESHOLD — recorded for calibration
+    # tuning (§1 calibration narrative).
+    LINK_PROPOSED = "LINK_PROPOSED"
+    LINK_ACCEPTED = "LINK_ACCEPTED"
+    LINK_REJECTED = "LINK_REJECTED"
+    CANDIDATE_REJECTED = "CANDIDATE_REJECTED"
+    # Amendment v2.0 — Episode Grouping. Per §11.4 consolidated audit
+    # registry: MEMBERSHIP_RECORD_CREATED fires on every new MembershipRecord
+    # (whether initial or succession). MEMBERSHIP_RECORD_SUPERSEDED fires
+    # additionally when the new record supersedes a prior — both events
+    # describe one operation from different angles. DECLARATION_VERSION_BUMPED
+    # fires on compatible (minor/patch) version bumps; DECLARATION_SUPERSEDED
+    # on breaking (major) version bumps.
+    MEMBERSHIP_RECORD_CREATED = "MEMBERSHIP_RECORD_CREATED"
+    MEMBERSHIP_RECORD_SUPERSEDED = "MEMBERSHIP_RECORD_SUPERSEDED"
+    DECLARATION_VERSION_BUMPED = "DECLARATION_VERSION_BUMPED"
+    DECLARATION_SUPERSEDED = "DECLARATION_SUPERSEDED"
 
 
 class TriggerType(str, Enum):

@@ -43,6 +43,14 @@ from ariadne.core.branching import (
     DEFAULT_ACCESS_POLICIES,
     AccessLevel,
 )
+from ariadne.core.audit_chain import (
+    next_delta_sequence,
+    # Aliased: the local-variable convention in this module is
+    # `prior_audit_hash = ...`, which would shadow the imported function
+    # name. Alias keeps existing call sites working without renaming the
+    # 22+ local variable references.
+    prior_audit_hash as fetch_prior_audit_hash,
+)
 
 logger = logging.getLogger("ariadne.branch_operations")
 
@@ -195,10 +203,10 @@ def create_branch(
         }
 
         # STEP 8: Get next delta sequence
-        delta_sequence = _get_next_delta_sequence(driver, source_episode_id)
+        delta_sequence = next_delta_sequence(driver, source_episode_id)
 
         # Get prior audit hash for chain integrity
-        prior_audit_hash = _get_prior_audit_hash(driver, source_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(driver, source_episode_id)
 
         # Create audit record
         audit = AuditRecord(
@@ -369,8 +377,8 @@ def abandon_branch(
             "clear_abandon_record": str(terminus.terminus_id),
         }
 
-        delta_sequence = _get_next_delta_sequence(driver, episode_id)
-        prior_audit_hash = _get_prior_audit_hash(driver, episode_id)
+        delta_sequence = next_delta_sequence(driver, episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(driver, episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -435,36 +443,10 @@ def abandon_branch(
 # ── Internal Helpers ─────────────────────────────────────────────────────────
 
 
-def _get_next_delta_sequence(driver, episode_id: str) -> int:
-    """Get the next delta sequence number for an episode."""
-    try:
-        with driver.session() as session:
-            result = session.run("""
-                MATCH (ar:AriadneAuditRecord {episode_id: $eid})
-                RETURN max(ar.delta_sequence) AS max_seq
-            """, {"eid": episode_id})
-            record = result.single()
-            current_max = record["max_seq"] if record and record["max_seq"] is not None else 0
-            return current_max + 1
-    except Exception:
-        return 1
-
-
-def _get_prior_audit_hash(driver, episode_id: str) -> str:
-    """Get the hash of the most recent audit record for chain integrity."""
-    try:
-        with driver.session() as session:
-            result = session.run("""
-                MATCH (ar:AriadneAuditRecord {episode_id: $eid})
-                RETURN ar.record_hash AS hash
-                ORDER BY ar.delta_sequence DESC
-                LIMIT 1
-            """, {"eid": episode_id})
-            record = result.single()
-            return record["hash"] if record and record["hash"] else "GENESIS"
-    except Exception:
-        return "GENESIS"
-
+# Audit chain helpers (next_delta_sequence + prior_audit_hash) live in
+# ariadne.core.audit_chain — imported above. The previously-private
+# duplicates in this module have been removed; call sites use the
+# shared helpers via the import.
 
 
 # ============================================================================
@@ -618,8 +600,8 @@ def create_fork(
             "delete_fork_point_ids": fork_point_ids,
         }
 
-        delta_sequence = _get_next_delta_sequence(driver, origin_episode_id)
-        prior_audit_hash = _get_prior_audit_hash(driver, origin_episode_id)
+        delta_sequence = next_delta_sequence(driver, origin_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(driver, origin_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -764,8 +746,8 @@ def resolve_fork(
             "clear_resolution": selected_fork_point_id,
         }
 
-        delta_sequence = _get_next_delta_sequence(driver, origin_episode_id)
-        prior_audit_hash = _get_prior_audit_hash(driver, origin_episode_id)
+        delta_sequence = next_delta_sequence(driver, origin_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(driver, origin_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -1135,8 +1117,8 @@ def execute_merge(
             "restore_target_merkle_root": target_merkle_root_pre,
         }
 
-        delta_sequence = _get_next_delta_sequence(driver, target_episode_id)
-        prior_audit_hash = _get_prior_audit_hash(driver, target_episode_id)
+        delta_sequence = next_delta_sequence(driver, target_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(driver, target_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -1295,8 +1277,8 @@ def _write_merge_failure_audit(
             "outcome": "ABORTED",
             "reason": reason,
         }
-        delta_sequence = _get_next_delta_sequence(driver, target_episode_id)
-        prior_audit_hash = _get_prior_audit_hash(driver, target_episode_id)
+        delta_sequence = next_delta_sequence(driver, target_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(driver, target_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -1424,8 +1406,8 @@ def create_aside(
         }
         reverse_delta = {"delete_aside_id": str(aside.aside_id)}
 
-        delta_sequence = _get_next_delta_sequence(driver, parent_episode_id)
-        prior_audit_hash = _get_prior_audit_hash(driver, parent_episode_id)
+        delta_sequence = next_delta_sequence(driver, parent_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(driver, parent_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -1571,8 +1553,8 @@ def close_aside(
         }
         reverse_delta = {"restore_aside_to_open": aside_id}
 
-        delta_sequence = _get_next_delta_sequence(driver, parent_episode_id)
-        prior_audit_hash = _get_prior_audit_hash(driver, parent_episode_id)
+        delta_sequence = next_delta_sequence(driver, parent_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(driver, parent_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -1735,8 +1717,8 @@ def create_soliloquy(
         }
         reverse_delta = {"delete_soliloquy_id": str(soliloquy.soliloquy_id)}
 
-        delta_sequence = _get_next_delta_sequence(driver, parent_episode_id)
-        prior_audit_hash = _get_prior_audit_hash(driver, parent_episode_id)
+        delta_sequence = next_delta_sequence(driver, parent_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(driver, parent_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -1888,8 +1870,8 @@ def conclude_soliloquy(
         }
         reverse_delta = {"restore_soliloquy_to_active": soliloquy_id}
 
-        delta_sequence = _get_next_delta_sequence(driver, parent_episode_id)
-        prior_audit_hash = _get_prior_audit_hash(driver, parent_episode_id)
+        delta_sequence = next_delta_sequence(driver, parent_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(driver, parent_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,

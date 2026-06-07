@@ -833,3 +833,441 @@ async def get_audit_trail(
             return [dict(record["audit_record"]) for record in result]
 
     return await asyncio.to_thread(_query)
+
+
+# ── Cross-Episode Linking (Amendment v2.0) ──────────────────────────────────
+
+
+async def list_links_for_episode(
+    driver,
+    episode_id: str,
+    direction: str = "outbound",
+    health_filter: Optional[list[str]] = None,
+    link_type_filter: Optional[list[str]] = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Return cross-episode links for an episode — Amendment v2.0 §11.1.6 Pattern.
+
+    Args:
+        episode_id: Episode whose links to fetch.
+        direction: 'outbound' (this episode → others), 'inbound' (others →
+            this episode), or 'both'. Default 'outbound' — matches
+            resumption-loader's primary use case.
+        health_filter: Optional list of LinkHealthState values to include.
+            None = all states. Common values: ['VALID','STALE','FROZEN'] to
+            exclude BROKEN/QUARANTINED from active traversal.
+        link_type_filter: Optional list of LinkType values to include.
+            None = all types. For resumption-loader, callers typically pass
+            ['CONTINUES_FROM','SUPERSEDES','INFORMED_BY'] per §3 isolation
+            rule (REFERENCES is non-loading and excluded).
+        limit: Cap results to prevent unbounded loads.
+
+    Returns: list of dicts with link fields + `direction` ('out'/'in') +
+    `other_episode_id` (the non-self endpoint). Empty list if Ariadne
+    disabled or no matching links.
+    """
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        params: dict[str, Any] = {"episode_id": episode_id, "limit": limit}
+        where_clauses = []
+        if health_filter:
+            where_clauses.append("l.health_state IN $health_filter")
+            params["health_filter"] = health_filter
+        if link_type_filter:
+            where_clauses.append("l.link_type IN $link_type_filter")
+            params["link_type_filter"] = link_type_filter
+        where_sql = ("AND " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        if direction == "outbound":
+            cypher = f"""
+                MATCH (s:AriadneEpisode {{episode_id: $episode_id}})-[r:LINKED_TO]->(t:AriadneEpisode)
+                MATCH (l:AriadneEpisodeLink {{link_id: r.via}})
+                WHERE 1=1 {where_sql}
+                RETURN l {{.*}} AS link, 'out' AS direction, t.episode_id AS other_episode_id
+                ORDER BY l.created_at DESC
+                LIMIT $limit
+            """
+        elif direction == "inbound":
+            cypher = f"""
+                MATCH (s:AriadneEpisode)-[r:LINKED_TO]->(t:AriadneEpisode {{episode_id: $episode_id}})
+                MATCH (l:AriadneEpisodeLink {{link_id: r.via}})
+                WHERE 1=1 {where_sql}
+                RETURN l {{.*}} AS link, 'in' AS direction, s.episode_id AS other_episode_id
+                ORDER BY l.created_at DESC
+                LIMIT $limit
+            """
+        elif direction == "both":
+            cypher = f"""
+                MATCH (self:AriadneEpisode {{episode_id: $episode_id}})
+                MATCH (self)-[r:LINKED_TO]-(other:AriadneEpisode)
+                MATCH (l:AriadneEpisodeLink {{link_id: r.via}})
+                WHERE 1=1 {where_sql}
+                RETURN l {{.*}} AS link,
+                    CASE WHEN l.source_episode = $episode_id THEN 'out' ELSE 'in' END AS direction,
+                    other.episode_id AS other_episode_id
+                ORDER BY l.created_at DESC
+                LIMIT $limit
+            """
+        else:
+            raise ValueError(
+                f"direction must be 'outbound', 'inbound', or 'both' — got {direction!r}"
+            )
+
+        with driver.session() as session:
+            result = session.run(cypher, params)
+            out: list[dict[str, Any]] = []
+            for record in result:
+                row = dict(record["link"])
+                row["direction"] = record["direction"]
+                row["other_episode_id"] = record["other_episode_id"]
+                out.append(row)
+            return out
+
+    return await asyncio.to_thread(_query)
+
+
+async def get_episode_link(driver, link_id: str) -> Optional[dict[str, Any]]:
+    """Fetch a single EpisodeLink by id. Returns None when not found or
+    when Ariadne is disabled."""
+    if not ARIADNE_ENABLED:
+        return None
+
+    def _query():
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (l:AriadneEpisodeLink {link_id: $link_id})
+                RETURN l {.*} AS link
+                """,
+                {"link_id": link_id},
+            )
+            record = result.single()
+            return dict(record["link"]) if record else None
+
+    return await asyncio.to_thread(_query)
+
+
+async def list_pending_link_candidates(
+    driver,
+    episode_id: str,
+    *,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return outstanding `LINK_PROPOSED` candidates for human review.
+
+    A candidate is "pending" when its `LINK_PROPOSED` audit record has
+    NOT been resolved by either:
+      - a `LINK_REJECTED` audit event whose `proposed_audit_event_id`
+        matches the proposal's audit_id, or
+      - a `LINK_ACCEPTED` audit event that asserts the same
+        (source_episode, target_episode, link_type) triple (the
+        proposal was elevated into an actual link by the user).
+
+    The query keys off the source_episode's audit chain — proposals
+    anchor their audit records there (Amendment v2.0 §5).
+
+    Returns: list of dicts with proposal_audit_id, source_episode,
+    target_episode, proposed_link_type, composite_score,
+    inference_signals, threshold values, wall_clock_time, agent_id.
+    Sorted by composite_score DESC so the highest-confidence
+    pending candidates surface first.
+
+    Empty list if Ariadne disabled. forward_delta JSON is decoded in
+    Python (rather than via APOC) to keep the query dependency-free.
+    """
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        import json as _json
+
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (ar:AriadneAuditRecord {episode_id: $episode_id})
+                WHERE ar.delta_type IN ['LINK_PROPOSED', 'LINK_REJECTED', 'LINK_ACCEPTED']
+                RETURN ar.audit_id AS audit_id,
+                       ar.delta_type AS delta_type,
+                       ar.forward_delta AS forward_delta,
+                       ar.agent_id AS agent_id,
+                       ar.wall_clock_time AS wall_clock_time
+                """,
+                {"episode_id": episode_id},
+            )
+
+            proposals: list[dict[str, Any]] = []
+            rejected_proposal_ids: set[str] = set()
+            accepted_triples: set[tuple[str, str, str]] = set()
+
+            for record in result:
+                delta_type = record["delta_type"]
+                try:
+                    forward = _json.loads(record["forward_delta"]) if record["forward_delta"] else {}
+                except (TypeError, ValueError):
+                    forward = {}
+
+                if delta_type == "LINK_PROPOSED":
+                    proposals.append({
+                        "proposal_audit_id": record["audit_id"],
+                        "source_episode": forward.get("source_episode"),
+                        "target_episode": forward.get("target_episode"),
+                        "proposed_link_type": forward.get("proposed_link_type"),
+                        "composite_score": forward.get("composite_score"),
+                        "inference_signals": forward.get("inference_signals", []),
+                        "discovery_threshold_at_creation": forward.get(
+                            "discovery_threshold_at_creation"
+                        ),
+                        "auto_accept_threshold_at_creation": forward.get(
+                            "auto_accept_threshold_at_creation"
+                        ),
+                        "agent_id": record["agent_id"],
+                        "wall_clock_time": record["wall_clock_time"],
+                    })
+                elif delta_type == "LINK_REJECTED":
+                    proposed_id = forward.get("proposed_audit_event_id")
+                    if proposed_id:
+                        rejected_proposal_ids.add(proposed_id)
+                elif delta_type == "LINK_ACCEPTED":
+                    accepted_triples.add((
+                        forward.get("source_episode"),
+                        forward.get("target_episode"),
+                        forward.get("link_type"),
+                    ))
+
+            pending = [
+                p for p in proposals
+                if p["proposal_audit_id"] not in rejected_proposal_ids
+                and (
+                    p["source_episode"],
+                    p["target_episode"],
+                    p["proposed_link_type"],
+                ) not in accepted_triples
+            ]
+
+            pending.sort(
+                key=lambda p: (p["composite_score"] or 0.0),
+                reverse=True,
+            )
+            return pending[:limit]
+
+    return await asyncio.to_thread(_query)
+
+
+# ── Episode Grouping (Amendment v2.0 §7-§8) ─────────────────────────────────
+
+
+async def list_memberships_for_episode(
+    driver,
+    episode_id: str,
+    *,
+    include_superseded: bool = False,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List MembershipRecords for an episode.
+
+    By default returns ACTIVE memberships only (records with no
+    superseded_by_record_id). Set `include_superseded=True` to walk the
+    full history including prior records.
+    """
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        where_extra = "" if include_superseded else "AND m.superseded_by_record_id IS NULL"
+        cypher = f"""
+            MATCH (m:AriadneMembershipRecord {{episode_id: $episode_id}})
+            WHERE 1=1 {where_extra}
+            RETURN m {{.*}} AS record
+            ORDER BY m.asserted_at DESC
+            LIMIT $limit
+        """
+        with driver.session() as session:
+            result = session.run(cypher, {"episode_id": episode_id, "limit": limit})
+            return [dict(r["record"]) for r in result]
+
+    return await asyncio.to_thread(_query)
+
+
+async def list_memberships_for_group(
+    driver,
+    group_id: str,
+    group_system: str,
+    *,
+    membership_roles: Optional[list[str]] = None,
+    include_superseded: bool = False,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List MembershipRecords for a (group_id, group_system) tuple.
+
+    By default returns ACTIVE memberships only. Optional role filter.
+    """
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        params: dict[str, Any] = {
+            "group_id": group_id,
+            "group_system": group_system,
+            "limit": limit,
+        }
+        where_clauses = []
+        if not include_superseded:
+            where_clauses.append("m.superseded_by_record_id IS NULL")
+        if membership_roles:
+            where_clauses.append("m.membership_role IN $membership_roles")
+            params["membership_roles"] = membership_roles
+        where_sql = ("AND " + " AND ".join(where_clauses)) if where_clauses else ""
+        cypher = f"""
+            MATCH (m:AriadneMembershipRecord {{group_id: $group_id, group_system: $group_system}})
+            WHERE 1=1 {where_sql}
+            RETURN m {{.*}} AS record
+            ORDER BY m.asserted_at ASC
+            LIMIT $limit
+        """
+        with driver.session() as session:
+            result = session.run(cypher, params)
+            return [dict(r["record"]) for r in result]
+
+    return await asyncio.to_thread(_query)
+
+
+async def get_active_membership(
+    driver,
+    episode_id: str,
+    group_id: str,
+    group_system: str,
+) -> Optional[dict[str, Any]]:
+    """Get the active (unsuperseded) MembershipRecord for a specific
+    (episode, group_id, group_system) tuple. Returns None if no membership
+    exists or all are superseded (should not happen — succession always
+    creates a new active record)."""
+    if not ARIADNE_ENABLED:
+        return None
+
+    def _query():
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (m:AriadneMembershipRecord {
+                    episode_id: $episode_id,
+                    group_id: $group_id,
+                    group_system: $group_system
+                })
+                WHERE m.superseded_by_record_id IS NULL
+                RETURN m {.*} AS record
+                """,
+                {
+                    "episode_id": episode_id,
+                    "group_id": group_id,
+                    "group_system": group_system,
+                },
+            )
+            record = result.single()
+            return dict(record["record"]) if record else None
+
+    return await asyncio.to_thread(_query)
+
+
+async def list_membership_history(
+    driver,
+    episode_id: str,
+    group_id: str,
+    group_system: str,
+) -> list[dict[str, Any]]:
+    """Return the full succession chain for an (episode, group) tuple,
+    ordered oldest → newest. Used when reconstructing membership role
+    history for audit / display.
+    """
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (m:AriadneMembershipRecord {
+                    episode_id: $episode_id,
+                    group_id: $group_id,
+                    group_system: $group_system
+                })
+                RETURN m {.*} AS record
+                ORDER BY m.asserted_at ASC
+                """,
+                {
+                    "episode_id": episode_id,
+                    "group_id": group_id,
+                    "group_system": group_system,
+                },
+            )
+            return [dict(r["record"]) for r in result]
+
+    return await asyncio.to_thread(_query)
+
+
+async def get_active_conformance_declaration(
+    driver,
+    group_system: str,
+    group_id: str,
+) -> Optional[dict[str, Any]]:
+    """Return the active (unsuperseded) ConformanceDeclaration for a
+    (group_system, group_id) pair. Returns None if no declaration is
+    registered or all are superseded."""
+    if not ARIADNE_ENABLED:
+        return None
+
+    def _query():
+        with driver.session() as session:
+            result = session.run(
+                """
+                MATCH (cd:AriadneConformanceDeclaration {
+                    group_system: $group_system,
+                    group_id: $group_id
+                })
+                WHERE cd.superseded_by IS NULL
+                RETURN cd {.*} AS declaration
+                ORDER BY cd.declared_at DESC
+                LIMIT 1
+                """,
+                {"group_system": group_system, "group_id": group_id},
+            )
+            record = result.single()
+            return dict(record["declaration"]) if record else None
+
+    return await asyncio.to_thread(_query)
+
+
+async def list_conformance_declarations(
+    driver,
+    group_system: Optional[str] = None,
+    *,
+    include_superseded: bool = False,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List ConformanceDeclarations, optionally filtered by group_system.
+    Returns active only by default."""
+    if not ARIADNE_ENABLED:
+        return []
+
+    def _query():
+        params: dict[str, Any] = {"limit": limit}
+        where_clauses = []
+        if group_system:
+            where_clauses.append("cd.group_system = $group_system")
+            params["group_system"] = group_system
+        if not include_superseded:
+            where_clauses.append("cd.superseded_by IS NULL")
+        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        cypher = f"""
+            MATCH (cd:AriadneConformanceDeclaration)
+            {where_sql}
+            RETURN cd {{.*}} AS declaration
+            ORDER BY cd.declared_at DESC
+            LIMIT $limit
+        """
+        with driver.session() as session:
+            result = session.run(cypher, params)
+            return [dict(r["declaration"]) for r in result]
+
+    return await asyncio.to_thread(_query)

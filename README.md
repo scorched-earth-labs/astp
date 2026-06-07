@@ -150,6 +150,18 @@ Not recommended for production use outside of the Ignis OS environment until the
 
 ---
 
+## Amendments
+
+Protocol amendments are recorded as standalone documents alongside `SPEC.md`. They are ratified in a designated Episode of Record and reference the Episode's spine hash for provenance. The Episode of Record is the cryptographic anchor; the document is the human-readable artifact.
+
+| Amendment | Status | Document |
+|-----------|--------|----------|
+| v2.0 — Cross-Episode Linking & Grouping Interface | Ratified; implementation in progress | [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) |
+
+Amendment v2.0 introduces typed cross-episode links, an EpisodeGrouping interface (with `MembershipRecord` as the protocol-owned artifact), succession-chain governance for `MembershipRecord` and `ConformanceDeclaration`, audit-the-decision pattern for behavioral-tier implementation choices (§12), and a three-tier conformance taxonomy (wire / state / behavioral). Schema bump: v2.0.0. Breaking hash preimage changes on three node types — see Appendix A of the amendment for the full breaking-change reference.
+
+---
+
 ## Versioning
 
 Ariadne follows [Semantic Versioning](https://semver.org/) — `MAJOR.MINOR.PATCH`:
