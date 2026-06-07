@@ -4,7 +4,50 @@ All notable changes to the Ariadne protocol. Version numbering follows [VERSIONI
 
 ## [Unreleased]
 
-Working drafts and amendments not yet integrated into a finalized version. See `AMENDMENT-*.md` for in-flight normative work.
+The next change-set queues here. `AMENDMENT-*.md` documents that have not yet been integrated into the SPEC body remain authoritative for the surface they define until the integration pass lands.
+
+## [3.1.0] — 2026-06-07
+
+**MINOR.** Layer 3 Workflow & Execution DAG codification. Additive on top of v3.0.0.
+
+### Added
+- **Layer 3 — Workflow & Execution DAG.** Source: `AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md` (amendment file retains its authoring numeral; canonical SPEC version per `VERSIONING.md` is v3.1.0).
+- New node types: `WorkflowDeclaration`, `ExecutionNode`, `SkillInvocation`. Pydantic implementation in `ariadne/core/workflow_execution.py`.
+- Three-Merkle-layer model formally specified in SPEC §3.4 Persistence Layer Model — Layer 1 Spine, Layer 2 episode content, Layer 3 Workflow & Execution DAG.
+- New `CognitiveDeltaType` variants in `branching.py` for Layer 3 delta records.
+- **Cognitive Implementation Authority (CIA)** — sole-writer pattern per workspace; wire-tier conformance principle. Only the designated CIA may write each Layer 3 node type.
+- 40 new unit tests across the protocol suite.
+
+### Invariants
+- **Layer 3 is cryptographically isolated from Spine integrity.** Layer 3 nodes reference Layers 1/2 by ID only; they MUST NOT participate in Spine hash computation. No future Layer-3 change can retroactively force a MAJOR bump on Spine grounds — structural separation is the guarantee.
+- `ExecutionNode` and `SkillInvocationNode` are immutable after creation. The only mutable Layer 3 field is `WorkflowDeclaration.status` (and `status_updated_at`).
+- Hash byte-form left open at protocol layer per amendment §3 — each conformant implementation may choose its serialization, provided the canonical form is consistent within that implementation.
+
+### Notes
+- Layer 3 is the formal protocol surface for the autonomous-process audit trail; downstream consumers writing here include the Ignis Delegation Runner.
+- The amendment was previously held on a private branch under the Chinese Wall agreement; the wall was lifted 2026-06-07 and the surface is now public.
+
+## [3.0.0] — 2026-06-07
+
+**MAJOR.** Cross-episode linking + grouping interface. Breaking hash preimage changes on three node types.
+
+### Added
+- **Cross-episode linking (Phase 1).** Source: `AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md` (amendment file retains its authoring numeral; canonical SPEC version per `VERSIONING.md` is v3.0.0).
+- `EpisodeLink` schema with `LinkType`, `LinkHealthState`, `Signal`/`SignalType` machinery, and `QuarantineResolution`. Neo4j adapter for cross-episode link reads/writes.
+- `LINK_*` audit events + `assert_episode_link` operation. `LinkAcceptedDelta` for delta-record stream.
+- `LinkGovernanceError` taxonomy for governance-layer failures.
+- **Cross-episode discovery (Phase 2).** Link-proposal primitives + calibration loop for adapter-side discovery against existing episode corpora.
+- **Grouping (Phase 1).** `MembershipRecord` as protocol-owned grouping artifact. `ConformanceDeclaration` for downstream conformance assertions. Succession-chain governance for both. Adapter-level grouping support.
+- **Audit-the-decision pattern** for behavioral-tier implementation choices (SPEC §12 framing).
+- **Three-tier conformance taxonomy** — wire / state / behavioral — formalized in the amendment.
+- Shared core modules: `audit_chain.py`, `hash_canonical.py`, `constants.py` (refactor lifted duplicated helpers).
+
+### Breaking changes (canonical form)
+- Hash preimage changes on `EpisodeLink`, `MembershipRecord`, `ConformanceDeclaration`. Existing v2.x implementations are not wire-conformant against v3.0. See amendment Appendix A for the per-node breaking-change reference.
+
+### Notes
+- The amendment was previously held on a private branch under the Chinese Wall agreement; the wall was lifted 2026-06-07 and the surface is now public.
+- v2.5.0-draft was never finalized as v2.5.0 — main moved directly to the v3.x line. v2.5.x is therefore not a maintenance line going forward; new work targets v3.x.
 
 ## [2.5.0-draft] — 2026-04-21
 
