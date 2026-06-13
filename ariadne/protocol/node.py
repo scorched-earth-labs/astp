@@ -44,6 +44,17 @@ class NodePayload(ABC):
         """Serialize payload to a dictionary for storage."""
         ...
 
+    def compute_content_hash(self) -> str:
+        """SHA3-256 of the canonical payload bytes.
+
+        Concrete default shared by every payload type — derived solely from
+        the subclass's ``to_content_hash_input()``, so the hash is identical
+        whether a subclass uses this default or overrides it the same way.
+        Lets the generic node factory hash any registered type uniformly.
+        """
+        from ariadne.core.schema import sha3_256
+        return sha3_256(self.to_content_hash_input())
+
 
 class CognitiveNode(BaseModel):
     """The universal cognitive node — foundation of the Ariadne protocol.
