@@ -667,3 +667,33 @@ An implementation claiming conformance with Amendment v2.0 MUST:
 
 *Amendment v2.0.0 — Final. Ratified in Episode: Amendment: Cross-Episode Linking.*
 *Incorporates all nine §11 editorial resolutions. Supersedes Amendment v2.0 (Complete) and Amendment v2.0 Section 11 (Complete).*
+
+---
+
+## Errata (post-ratification)
+
+Two internal discrepancies were identified during the SPEC integration
+pass (SPEC v3.1.0 fold, 2026-06-14) and resolved toward the authoritative
+source. The canonical normative surface is now SPEC §20; this amendment is
+retained as the ratified source of record. These corrections are pending
+incorporation in a future amendment patch.
+
+**E-1 — `EpisodeLink` content-hash field set (§2 vs §11.2.2).**
+§2 defines `content_hash` to **exclude** the mutable health fields
+(`health_state`, `health_checked_at`) and the quarantine resolution
+fields (`quarantine_resolved_at`, `quarantine_resolution`). The
+`LINK_INTEGRITY` proof example in §11.2.2 lists `health_state` and
+`health_checked_at` inside its `field_snapshot`, which would require
+hashing mutable fields and break the hash on every health transition.
+**Resolution:** the §2 schema definition is authoritative. A
+`LINK_INTEGRITY` proof recomputes `content_hash` over the §2 hashed field
+set only (SPEC §20.2, §20.9). §11.2.2's snapshot list is the erratum.
+
+**E-2 — Multi-store write order (§11.5.1 vs the write-ordering invariant).**
+§11.5.1 orders the write path Neo4j (synchronous) → Blob (synchronous) →
+QDrant → Redis. This inverts the canonical Ariadne write-ordering
+invariant — Blob (audit truth) is written **first** so that a failure is
+clean — as enforced by the protocol's Write Intent Log (SPEC §12) and
+stated in the Ignis implementation rules. **Resolution:** the canonical
+invariant governs: Blob → structural store → discovery index → working
+cache (SPEC §20.10). §11.5.1's Neo4j-first ordering is the erratum.

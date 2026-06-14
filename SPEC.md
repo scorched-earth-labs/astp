@@ -1,7 +1,7 @@
 # Ariadne State Tree Protocol Specification
 
 **Version:** 3.1.0
-**Status:** Stable. v3.0 (cross-episode linking + grouping) and v3.1 (Layer 3 Workflow & Execution DAG) are normatively defined by their amendment documents until the SPEC integration pass folds them into this document's body. See [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) and [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md). Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
+**Status:** Stable. v3.0 (cross-episode linking + grouping) is folded into this document's body — conformance tiers in §2.6, the cross-episode surface in §20. v3.1 (Layer 3 Workflow & Execution DAG) remains normatively defined by its amendment document until the next integration pass folds it into the body. See [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) (now folded; retained as the ratified source of record — see its Errata section for two post-ratification corrections applied during the fold) and [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) (authoritative pending fold). Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-06-07
 **Supersedes:** SPEC-v1.md (0.1.0-draft)
@@ -84,6 +84,28 @@ Two conforming implementations from different AI architectures MUST be able to:
 3. **Agree on node identity.** `node_id` is a stable, architecture-independent identifier.
 
 Interoperability does NOT require that implementations can read each other's payload content — only that they can verify the integrity and provenance of the node structure.
+
+### 2.6 Conformance Tiers and the Audit-the-Decision Pattern
+
+The Protocol-vs-Implementation boundary of §2.5 is refined into three **conformance tiers**. Every protocol requirement in this specification belongs to exactly one tier, and the tier determines whether conforming implementations may differ. This protocol is a contract about externalities; internal implementation choices are sovereign.
+
+| Tier | What it covers | Conformance |
+|------|----------------|-------------|
+| **Wire** | Node and edge schemas, hash preimages, leaf-hash construction | **Required** |
+| **State** | Lifecycle enums, status state machines, audit event types, consistency SLAs | **Required** |
+| **Behavioral** | Scoring/inference algorithms, embedding choices, threshold tuning, internal indexing, enforcement mechanism | **Not required — sovereign** |
+
+- **Wire-tier** conformance is what makes two implementations interoperable: they can exchange node structures and verify each other's hashes (§2.5.4).
+- **State-tier** conformance makes audit logs comparable across implementations — a third party can verify lifecycle events and consistency guarantees without knowing implementation internals.
+- **Behavioral-tier** choices are sovereign. The protocol does not mandate how a score is computed, which embedding model is used, or how a threshold is tuned.
+
+#### 2.6.1 The Audit-the-Decision Pattern
+
+Where implementation choice is permitted at the behavioral tier, the protocol mandates the **audit record of the choice** — what was computed, with which parameters, by which signal — not the value itself.
+
+> **Audit-the-Decision Principle.** For every behavioral-tier decision a conforming implementation makes, the decision's inputs and outcome MUST be recorded in the audit chain at the time the decision is made. The protocol commits to recording *what was chosen*; it does not constrain *which choice is permitted*.
+
+The audit record is the protocol artifact; the decision is the implementation artifact. This pattern recurs throughout the specification: signal combination and threshold calibration in cross-episode linking (§20.4, §20.1), and — once folded — skill taxonomy and CIA enforcement mechanism in Layer 3 (Amendment v3.0 §6, §12) are all resolved by it.
 
 ## 3. Architecture
 
@@ -1275,7 +1297,340 @@ Scoping notes deliberately left in the implementation layer:
 4. **Access-policy runtime enforcement** (audit on ESCALATION_ONLY reads)
    is spec'd at the coordination layer and left to the application.
 
-## 20. References
+## 20. Cross-Episode Linking & Grouping
+
+This section specifies the node types, taxonomy, state machine, audit
+events, and conformance model that record relationships *between*
+episodes — continuation, supersession, divergence, reference — and
+membership of episodes in groups. It was introduced by Amendment v3.0
+(authoring numeral v2.0; see [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md))
+and is folded here as the canonical normative surface. Like §19, it
+adds new node types on top of the `CognitiveNode` primitive; it does not
+alter Layer 1/2 hashing.
+
+> **Two corrections applied during the fold.** The ratified amendment
+> contained two internal discrepancies, resolved here toward the
+> authoritative source and logged as errata in the amendment's Errata
+> section: (1) the `EpisodeLink` content-hash field set follows the §2
+> schema definition (mutable health fields excluded), not the §11.2.2
+> proof snapshot; (2) the multi-store write order follows the canonical
+> Ariadne write-ordering invariant (Blob → Neo4j → QDrant → Redis;
+> §12 WIL), not the amendment's §11.5.1 Neo4j-first step list.
+
+### 20.1 Protocol Constants
+
+Named constants govern the inference pipeline. These are protocol-level
+**defaults**; calibration is a behavioral-tier decision (§2.6), recorded
+under the audit-the-decision pattern.
+
+```
+DISCOVERY_THRESHOLD    = 0.75   // minimum composite score to surface a candidate for human review
+AUTO_ACCEPT_THRESHOLD  = 0.90   // composite score above which a link may be auto-accepted without review
+```
+
+**Calibration narrative:** begin conservative. The `CANDIDATE_REJECTED`
+audit event (§20.8) is the primary calibration input — a high rejection
+rate at scores near `DISCOVERY_THRESHOLD` indicates the threshold should
+rise; known missed links indicate it should fall. The protocol records
+the threshold value in effect at each inference event; it does not
+mandate the value.
+
+### 20.2 EpisodeLink
+
+A typed, directed relationship between two episodes.
+
+```
+EpisodeLink {
+  // Identity — immutable
+  link_id:               UUID
+  source_episode:        EpisodeID
+  target_episode:        EpisodeID
+  created_at:            Timestamp
+  created_by:            AgentID
+
+  // Semantic characterization
+  link_type:             LinkType          // §20.3
+  link_strength:         Float [0.0, 1.0]  // semantic similarity; 0.0 = none, 1.0 = near-identical
+  is_inferred:           Boolean           // true = system-generated candidate; false = human-asserted
+
+  // Inference provenance — immutable once set
+  inference_signals:     Signal[]          // §20.4
+  inference_threshold:   Float             // DISCOVERY_THRESHOLD value at inference time
+  retroactive:           Boolean           // true = created after source-episode crystallization
+
+  // Health state — mutable
+  health_state:          LinkHealthState   // VALID | STALE | FROZEN | BROKEN | QUARANTINED
+  health_checked_at:     Timestamp
+  source_version:        SemVer            // source-episode version at link creation
+  target_version:        SemVer            // target-episode version at link creation
+
+  // Quarantine
+  quarantine_reason:     Optional<String>
+  quarantined_at:        Optional<Timestamp>
+  quarantine_resolved_at:    Optional<Timestamp>
+  quarantine_resolution:     Optional<QuarantineResolution>  // CONFIRMED | DISSOLVED | ESCALATED
+
+  // Integrity
+  content_hash:          Hash              // SHA-256 over the canonical hashed field set (below)
+}
+```
+
+**Hash preimage (wire tier).** `content_hash` is SHA-256 over the
+immutable provenance field set: `link_id`, `source_episode`,
+`target_episode`, `created_at`, `created_by`, `link_type`,
+`link_strength`, `is_inferred`, `inference_signals`,
+`inference_threshold`, `retroactive`, `source_version`,
+`target_version`, and the quarantine *cause* fields `quarantine_reason`
+and `quarantined_at`. **Excluded:** the mutable health fields
+`health_state` and `health_checked_at`, and the quarantine *resolution*
+fields `quarantine_resolved_at` and `quarantine_resolution` — these
+record lifecycle events after creation, and including them would
+invalidate the hash on every health transition or quarantine close. The
+audit log (§20.8) is the authoritative record of those lifecycle events.
+A `LINK_INTEGRITY` proof recomputes `content_hash` from exactly this
+field set and compares it to the stored value.
+
+### 20.3 Link Type Taxonomy
+
+| Type | Semantics | Mutual Exclusivity |
+|------|-----------|--------------------|
+| `CONTINUES_FROM` | Direct continuation of a prior episode | ⊕ `SUPERSEDES`, ⊕ `BRANCHES_FROM` |
+| `SUPERSEDES` | This episode replaces the target | ⊕ `CONTINUES_FROM` |
+| `BRANCHES_FROM` | Divergent thread from the target | ⊕ `CONTINUES_FROM` |
+| `INFORMED_BY` | Prior-knowledge dependency, not continuation | — |
+| `REFERENCES` | Audit-only citation; non-loading on resumption | — |
+| `SPAWNED_FROM` | Task / sub-episode origin | — |
+| `MERGED_INTO` | Convergence record | — |
+| `PEER_REVIEWED_BY` | Cross-agent review relationship | — |
+
+**Resumption isolation rule (state tier).** On episode resumption, the
+loader MUST follow `CONTINUES_FROM` and `SUPERSEDES` links (spine
+traversal) and MAY follow `INFORMED_BY` and `SPAWNED_FROM` up to one
+hop. `REFERENCES` links are **non-loading** — available for audit, but
+they do not trigger episode-content retrieval.
+
+### 20.4 Inference Signals
+
+Signal combination is a behavioral-tier decision (§2.6). The protocol
+requires only that every signal contributing to a candidate's composite
+score is recorded in `inference_signals` at proposal time.
+
+```
+Signal {
+  signal_type:    SignalType   // SEMANTIC_SIMILARITY | PARTICIPANT_OVERLAP | TEMPORAL_PROXIMITY | EXPLICIT_REFERENCE | SHARED_ARTIFACT
+  signal_weight:  Float        // weight applied in composite-score computation
+  signal_value:   Float        // raw value before weighting
+  computed_at:    Timestamp
+}
+```
+
+Per the audit-the-decision pattern (§2.6.1): the protocol does not
+mandate *how* signals combine; it mandates that the combination — which
+signals, which weights, which threshold — is recorded.
+
+### 20.5 Link Health State Machine
+
+```
+LinkHealthState:
+  VALID        // target exists and version delta within tolerance
+  STALE        // target advanced by minor/patch version since link creation
+  FROZEN       // target crystallized; link anchored to the crystallized version
+  BROKEN       // target unreachable or deleted
+  QUARANTINED  // flagged for integrity review; excluded from active traversal
+```
+
+Transitions:
+
+```
+VALID       → STALE        (target minor/patch advance)
+VALID       → FROZEN       (target crystallizes)
+VALID       → BROKEN       (target deleted/unreachable)
+VALID       → QUARANTINED  (orphan detection or integrity flag)
+STALE       → BROKEN       (target deleted)
+STALE       → QUARANTINED  (orphan detection)
+QUARANTINED → VALID        (quarantine resolved: CONFIRMED)
+QUARANTINED → BROKEN       (quarantine resolved: DISSOLVED)
+QUARANTINED → ESCALATED    (quarantine TTL exceeded; human review required)
+BROKEN      → QUARANTINED  (re-evaluation triggered)
+```
+
+**Major-version advance.** A link whose target has advanced by a *major*
+version since creation MUST be routed to human review. It remains `VALID`
+or `STALE` during review; it does not auto-transition to `BROKEN`.
+
+### 20.6 MembershipRecord
+
+Records an episode's membership in a group. Append-only.
+
+```
+MembershipRecord {
+  // Identity — immutable
+  record_id:             UUID
+  episode_id:            EpisodeID
+  group_id:              GroupID
+  group_system:          String          // "claude_project" | "notion_database" | "ariadne_native" | ...
+  asserted_at:           Timestamp
+  asserted_by:           AgentID
+
+  // Membership characterization — in content_hash
+  membership_role:       MembershipRole  // PRIMARY | SUPPORTING | REFERENCE | ARCHIVED
+
+  // Succession
+  supersedes_record_id:  Optional<UUID>  // prior record this one replaces
+  succession_reason:     Optional<String>
+
+  // Integrity
+  content_hash:          Hash            // SHA-256 of: record_id + episode_id + group_id + group_system + asserted_at + asserted_by + membership_role
+}
+```
+
+**Immutability rule.** MembershipRecords are never modified or deleted.
+A membership change is recorded by creating a *new* record with
+`supersedes_record_id` set to the prior record. The active record for an
+`(episode_id, group_id)` pair is the terminal record in the succession
+chain (the one nothing supersedes).
+
+### 20.7 ConformanceDeclaration
+
+Declares the capabilities a group's host system supports, with explicit
+versioning so downstream consumers can reason about compatibility.
+
+```
+ConformanceDeclaration {
+  // Identity — immutable
+  declaration_id:        UUID
+  group_id:              GroupID
+  group_system:          String
+  declared_at:           Timestamp
+  declared_by:           AgentID
+
+  // Versioning
+  declaration_version:   SemVer          // major.minor.patch
+
+  // Capabilities — in content_hash
+  capabilities:          Capability[]
+
+  // Succession — excluded from content_hash
+  superseded_by:         Optional<UUID>  // declaration_id of successor
+
+  // Integrity
+  declaration_hash:      Hash            // SHA-256 of: declaration_id + group_id + group_system + declared_at + declared_by + declaration_version + capabilities
+}
+```
+
+**Version semantics.**
+
+| Change | Bump | Effect |
+|--------|------|--------|
+| Field rename / type change / removal in a hashed field | Major | Breaking — existing MembershipRecord hashes may need re-verification |
+| New optional field | Minor | Compatible — existing records remain valid |
+| Documentation / threshold change | Patch | Compatible — no schema effect |
+
+**Succession rule.** When a declaration is superseded, the prior
+declaration's `superseded_by` is set to the successor's `declaration_id`.
+`superseded_by` is **excluded** from `declaration_hash` — it is a
+lifecycle annotation, not a content field.
+
+### 20.8 Cross-Episode Audit Event Registry
+
+All events are append-only, hash-chained (`prev_audit_hash`), and stored
+in the Blob audit log (audit truth). They are never modified or deleted.
+
+| Event Type | Trigger | Required Fields |
+|------------|---------|-----------------|
+| `LINK_PROPOSED` | Candidate score ≥ `DISCOVERY_THRESHOLD` | link_id, score, signals, threshold |
+| `LINK_ACCEPTED` | Human confirmation or auto-accept (≥ `AUTO_ACCEPT_THRESHOLD`) | link_id, accepted_by, method |
+| `LINK_REJECTED` | Human rejection of a proposed candidate | link_id, rejected_by, reason |
+| `CANDIDATE_REJECTED` | Candidate below `DISCOVERY_THRESHOLD`, not surfaced | episode_pair, score, threshold |
+| `LINK_HEALTH_CHANGED` | Health-state transition | link_id, prior_state, new_state |
+| `LINK_QUARANTINED` | Link moved to `QUARANTINED` | link_id, reason, ttl_deadline |
+| `LINK_QUARANTINE_RESOLVED` | Quarantine exited (CONFIRMED / DISSOLVED) | link_id, resolution, resolved_by |
+| `QUARANTINE_ESCALATED` | Quarantine TTL exceeded; human review required | link_id, escalation_reason |
+| `MEMBERSHIP_RECORD_CREATED` | New MembershipRecord asserted | record_id, episode_id, group_id |
+| `MEMBERSHIP_RECORD_SUPERSEDED` | Succession recorded | prior_record_id, new_record_id |
+| `DECLARATION_VERSION_BUMPED` | ConformanceDeclaration versioned | declaration_id, prior_version, new_version, classification |
+| `DECLARATION_SUPERSEDED` | Declaration succeeded | prior_declaration_id, new_declaration_id |
+
+`CANDIDATE_REJECTED` is what makes threshold calibration auditable: if
+known-good links were suppressed below threshold, the record proves the
+threshold was too high.
+
+### 20.9 Verification Proof Types
+
+Four proof types are defined (a fifth — non-existence proof — is a known
+gap, deferred):
+
+| Proof Type | Proves | Source |
+|------------|--------|--------|
+| `LINK_INTEGRITY` | `content_hash` matches the §20.2 canonical hashed field set | Structural store |
+| `MEMBERSHIP_CHAIN` | The succession chain is unbroken and each record's hash is valid | Structural store |
+| `DECLARATION_COMPATIBILITY` | A version transition is compatible (minor/patch) or breaking (major) | Structural store |
+| `AUDIT_COMPLETENESS` | All required audit events are present for a lifecycle | Blob audit log |
+
+A `LINK_INTEGRITY` proof recomputes the hash from the §20.2 field set
+only — it MUST NOT include the excluded mutable health/resolution fields
+(the source-amendment proof example listing them is corrected per the
+Errata).
+
+### 20.10 Consistency and Lifecycle Governance
+
+**Write ordering (state tier).** Cross-episode writes follow the
+canonical Ariadne write-ordering invariant (§12 WIL): **Blob (audit
+truth) → structural store (Neo4j or equivalent, primary truth) →
+discovery index → working cache.** Blob is written first so a failure is
+clean. The structural store is the single source of truth for structural
+state (link health, membership, declaration versions); no read may serve
+a response that contradicts it. The discovery index and working cache are
+reconstructable and eventually consistent.
+
+**Consistency-window SLA.** Implementations MUST define a maximum
+propagation window for the discovery index and working cache (reference
+target: typical < 60 s, maximum 5 min) and expose a mechanism for callers
+to determine whether those stores are within the window. Exceeding the
+maximum without a documented exception is non-conforming at the state
+tier.
+
+**Quarantine lifecycle.** An orphan/integrity flag emits
+`LINK_QUARANTINED`, moves the link to `QUARANTINED`, queues it with a TTL
+deadline, and excludes it from active traversal. Before TTL: `CONFIRMED`
+→ `VALID` or `DISSOLVED` → `BROKEN`, each emitting
+`LINK_QUARANTINE_RESOLVED`. On TTL expiry: `QUARANTINE_ESCALATED`; the
+link stays `QUARANTINED` pending human review (no auto-resolution).
+
+**Ordering mechanisms.** Sequence numbers are scoped per-episode and are
+the basis for within-episode completeness proofs (a gap means a missing
+event). Cross-episode ordering uses timestamps, not sequence numbers —
+sequence scopes do not cross episode boundaries. Implementations MUST NOT
+use timestamps as the sole basis for within-episode completeness proofs.
+
+### 20.11 Reference Storage Architecture (Non-Normative)
+
+The Ignis reference implementation realizes the structural store as
+Neo4j, audit truth as a Blob store, the discovery index as QDrant
+(`episode_content_vectors`, 1536-dim cosine; `participant_context_vectors`,
+768-dim cosine), and the working cache as Redis (per-episode quarantine
+queues keyed `ariadne:quarantine:queue:{episode_id}`, calibration state,
+health cache). These bindings are illustrative — adapter choice is
+behavioral-tier (§2.6). The amendment's §11.1 documents this reference
+architecture in full; it is not normative protocol surface.
+
+### 20.12 Conformance Checklist
+
+**Wire tier (required):** implement `EpisodeLink`, `MembershipRecord`,
+and `ConformanceDeclaration` with all fields above; compute `content_hash`
+/ `declaration_hash` over the canonical hashed field sets of §20.2/§20.6/§20.7.
+
+**State tier (required):** implement all `LinkHealthState` values
+(including `QUARANTINED`), all audit events of §20.8, the quarantine
+lifecycle including TTL and escalation, and a published consistency-window
+SLA within §20.10 bounds; use sequence numbers for within-episode
+completeness and timestamps for cross-episode ordering.
+
+**Behavioral tier (sovereign):** signal-combination algorithm, embedding
+model, threshold calibration, internal indexing — each recorded under the
+audit-the-decision pattern (§2.6.1), none mandated.
+
+## 21. References
 
 Internal Scorched Earth Labs design documents that informed the protocol:
 
