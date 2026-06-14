@@ -8,10 +8,9 @@ computing the leaf hash automatically.
 from typing import List, Optional
 from uuid import UUID
 
-from ariadne.core.schema import sha3_256
-from ariadne.protocol.node import CognitiveNode
-from ariadne.protocol.leaf_hash import compute_leaf_hash_from_node
+from ariadne.nodes.factory import create_node
 from ariadne.nodes.episode.payload import EpisodePayload
+from ariadne.protocol.node import CognitiveNode
 
 
 def create_episode_node(
@@ -27,8 +26,10 @@ def create_episode_node(
 ) -> CognitiveNode:
     """Create a CognitiveNode representing an episode.
 
-    Builds the EpisodePayload, computes content_hash and leaf_hash,
-    and returns a fully-formed CognitiveNode ready for persistence.
+    Thin convenience over the generic ``create_node`` factory: builds the
+    EpisodePayload and delegates. Output is identical to hand-assembly —
+    same content_hash and leaf_hash — but now goes through the one governed
+    creation path shared by every node type.
 
     Args:
         agent_id: The agent creating this episode
@@ -52,22 +53,10 @@ def create_episode_node(
         workspace_id=workspace_id,
         participants=participants or [agent_id],
     )
-    payload.validate()
-
-    content_hash = payload.compute_content_hash()
-
-    node = CognitiveNode(
-        node_type="episode",
-        schema_version="2.0.0",
+    return create_node(
+        "episode",
+        agent_id=agent_id,
         sequence_index=sequence_index,
-        tree_leaf_index=sequence_index,  # Initially equal; diverges on rebalance
-        content_hash=content_hash,
-        authored_by=agent_id,
+        payload=payload,
         parent_node_id=parent_node_id,
-        payload=payload.to_dict(),
     )
-
-    # Compute and set the position-binding leaf hash
-    node.leaf_hash = compute_leaf_hash_from_node(node)
-
-    return node
