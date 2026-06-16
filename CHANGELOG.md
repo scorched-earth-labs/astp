@@ -6,6 +6,9 @@ All notable changes to the Ariadne protocol. Version numbering follows [VERSIONI
 
 The next change-set queues here. `AMENDMENT-*.md` documents that have not yet been integrated into the SPEC body remain authoritative for the surface they define until the integration pass lands.
 
+### Clarified (errata — PATCH)
+- **Segment parentage vs. proof-chain parentage.** New §3.4.1 states explicitly that a Segment's `parent_node_id` is its **`EpisodeNode`** (an upward anchor), that segments order by `sequence_index` with no segment→segment edge, and that the canonical materialization is an ordered `(Episode)-[:CONTAINS {sequence_index}]->(Segment)` fan-out (derive next/prev at read time, don't persist a chain). A reciprocal note at §16.5.3 distinguishes this from the proof-chain rule `B.parent_node_id == A.node_id`, which links whole nodes causally (e.g. episode→episode). **No canonical-form change** — this clarifies existing semantics (G-2 reparenting prohibition; §5.2 leaf-hash preimage). Surfaced by a reference-implementation question ([ariadne-samples #1](https://github.com/scorched-earth-labs/ariadne-samples/issues/1)): an adapter graph showed a segment→segment containment chain instead of the canonical episode→segment fan-out.
+
 ## [3.1.0] — 2026-06-07
 
 **MINOR.** Layer 3 Workflow & Execution DAG codification. Additive on top of v3.0.0.

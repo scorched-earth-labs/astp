@@ -133,6 +133,16 @@ The protocol defines three **persistence layers** — distinct from the code-arc
 
 The two three-layer models — code-architecture (§3.1) and persistence (§3.4) — are **orthogonal**. The code-architecture layering governs what can import what (Protocol → Instantiation → Node Type, never reverse). The persistence layering governs what participates in which cryptographic structure. A given node type (e.g., `WorkflowDeclaration`) sits in the Node Type code-architecture layer AND in Persistence Layer 3 simultaneously; the two memberships describe different properties.
 
+#### 3.4.1 Segment parentage is upward (to the episode), never lateral (to a sibling)
+
+A Segment is Layer 2 content anchored to its Layer 1 `EpisodeNode`: a segment's `parent_node_id` is the **episode's** `node_id`. Segments therefore fan out from their episode — one parent reference each — and their relative order is carried entirely by `sequence_index`, which is immutable, part of the leaf-hash preimage (§5.2), and the key the Merkle spine orders by (§5.4).
+
+There is **no segment→segment parent edge**, and none is needed. A `parent_node_id` pointing at the *preceding* segment would (a) bind a sibling, not the node's origin, into the immutable leaf hash — making "ordering" a hash-committed claim that diverges from `sequence_index` after any out-of-order insert, repair, or rebalance; and (b) hard-code a single successor, which a branch or fork cannot honor (a segment may have more than one successor across branches). Ordering already lives, authoritatively and twice, in `sequence_index` (on the node, in the leaf hash) — a parent chain can only ever be a third, un-hashed copy that is redundant-when-right and wrong-when-divergent.
+
+A conforming implementation materializes this as one ordered containment edge per segment — e.g. `(Episode)-[:CONTAINS {sequence_index}]->(Segment)` — i.e. an ordered fan-out, not a linked list. If an explicit next/prev adjacency is wanted (e.g. for a visualization), **derive it at read time** by ordering on `sequence_index`; do not persist it as authoritative state.
+
+> **Do not confuse this with proof-chain parentage (§16.5.3).** The chain-verification rule `B.parent_node_id == A.node_id` links *distinct cognitive nodes* into a causal proof chain (e.g. episode→episode) and is a cross-node construct. It says nothing about how segments order *within* an episode. Within-episode order is `sequence_index`; cross-node causal order is parent/cross-reference. These are two different uses of `parent_node_id` — keep them separate.
+
 ## 4. Data Model
 
 ### 4.1 CognitiveNode
@@ -829,7 +839,7 @@ ProofChain {
 A `ProofChain` is valid if and only if:
 
 1. **Each link is internally valid:** `link.inclusion_proof` verifies against `link.spine_root` using the inclusion proof algorithm from Section 9.2.
-2. **The chain is causally ordered:** For consecutive links (A, B), either `B.parent_node_id == A.node_id` (direct parentage) or a valid cross-reference exists.
+2. **The chain is causally ordered:** For consecutive links (A, B), either `B.parent_node_id == A.node_id` (direct parentage) or a valid cross-reference exists. This causal-ordering rule links **distinct cognitive nodes** (e.g. episode→episode); it does **not** describe how segments order within an episode — a segment's `parent_node_id` is its episode, and segments order by `sequence_index`, not by a parent chain (§3.4.1).
 3. **Logical clock monotonicity:** Ordering is consistent with causal direction. Where chains cross architecture boundaries with independent clocks, transparency log timestamps resolve ordering.
 4. **Chain root integrity:** `chain_root == SHA3-256(links[0].spine_root ‖ links[1].spine_root ‖ ... ‖ links[n].spine_root)` (G-13).
 
