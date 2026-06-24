@@ -29,8 +29,72 @@ from ariadne.core.branching import (
     compute_objective_hash,
     enforce_write_time_fingerprint,
 )
+from ariadne.core.drift_fsm import (
+    DriftDetectionState,
+    advance_drift_fsm,
+)
 
 logger = logging.getLogger("ariadne.coherence")
+
+
+_FSM_TO_DETECTION = {
+    "CANDIDATE": DetectionState.CANDIDATE,
+    "MATERIALIZED": DetectionState.MATERIALIZED,
+    "NOMINAL": DetectionState.NOMINAL,
+    "COOLDOWN": DetectionState.NOMINAL,   # post-detection monitoring
+}
+
+
+def _detect_via_fsm(
+    driver,
+    episode_id: str,
+    segment_id: str,
+    sequence_index: int,
+    drift_from_spine: float,
+    fsm_state: DriftDetectionState,
+) -> DetectionResult:
+    """Derivative+hysteresis FSM path for detect_branch_candidate (Clotho v4).
+
+    Pure transition (no fingerprint read) except the materialized-recommendation
+    lookup, which mirrors the legacy path. The new FSM state is returned on
+    `new_fsm_state` for the caller to persist in Redis.
+    """
+    res = advance_drift_fsm(fsm_state, drift_from_spine, sequence_index)
+
+    if res.materialized:
+        new_state = DetectionState.MATERIALIZED
+    else:
+        new_state = _FSM_TO_DETECTION.get(res.fsm_state, DetectionState.NOMINAL)
+
+    recommendation = None
+    if res.materialized:
+        registry = CoherenceFingerprintRegistry(driver)
+        last_nominal = registry.last_nominal_segment(episode_id)
+        recommendation = compute_materialized_recommendation(
+            episode_id=episode_id,
+            segment_id=segment_id,
+            last_nominal_segment_id=last_nominal,
+            drift_from_spine=drift_from_spine,
+        )
+        logger.warning(
+            f"Drift FSM MATERIALIZED for episode {episode_id[:8]}... "
+            f"segment {segment_id[:8]}... drift={drift_from_spine:.3f} "
+            f"Δ={res.delta_drift:.3f} → recommending RETROACTIVE branch from "
+            f"segment {(last_nominal or segment_id)[:8]}..."
+        )
+
+    return DetectionResult(
+        episode_id=episode_id,
+        segment_id=segment_id,
+        prior_state=_FSM_TO_DETECTION.get(fsm_state.fsm_state, DetectionState.NOMINAL),
+        new_state=new_state,
+        consecutive_drift_count=res.new_state.sustained_count,
+        drift_from_spine=drift_from_spine,
+        materialized_recommendation=recommendation,
+        new_fsm_state=res.new_state,
+        delta_drift=res.delta_drift,
+        triggered_on_derivative=res.triggered_on_derivative,
+    )
 
 
 # ============================================================================
@@ -80,6 +144,7 @@ def detect_branch_candidate(
     intent_class: IntentClass = IntentClass.CONTINUE,
     objective_hash: str = "",
     thresholds: DetectionThresholds = DEFAULT_DETECTION_THRESHOLDS,
+    fsm_state: Optional["DriftDetectionState"] = None,
 ) -> DetectionResult:
     """Active detection: compute new state from prior fingerprint + observation.
 
@@ -88,7 +153,20 @@ def detect_branch_candidate(
 
     When new_state advances to MATERIALIZED, a retroactive-branch
     recommendation is attached to the result.
+
+    Detection model:
+      - `fsm_state is None` (default): the legacy streak-based
+        `advance_detection_state` — unchanged, fully backward-compatible.
+      - `fsm_state` provided: the derivative+hysteresis FSM (Clotho v4). The
+        caller (ignis-os) owns the Redis-persisted DriftDetectionState and
+        passes it in; the new state comes back on `result.new_fsm_state`.
     """
+    if fsm_state is not None:
+        return _detect_via_fsm(
+            driver, episode_id, segment_id, sequence_index,
+            drift_from_spine, fsm_state,
+        )
+
     registry = CoherenceFingerprintRegistry(driver)
     last = registry.last(episode_id)
 
@@ -160,6 +238,7 @@ def intercept_segment_write(
     drift_from_spine: float = 0.0,
     intent_class: IntentClass = IntentClass.CONTINUE,
     thresholds: DetectionThresholds = DEFAULT_DETECTION_THRESHOLDS,
+    fsm_state: Optional["DriftDetectionState"] = None,
 ) -> DetectionResult:
     """Write Intercept: runs AS a segment is written.
 
@@ -185,6 +264,7 @@ def intercept_segment_write(
         intent_class=intent_class,
         objective_hash=objective_hash,
         thresholds=thresholds,
+        fsm_state=fsm_state,
     )
 
     fingerprint = CoherenceFingerprint(

@@ -23,6 +23,8 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
+from ariadne.core.drift_fsm import DriftDetectionState
+
 from pydantic import BaseModel, Field
 
 from ariadne.core.schema import sha3_256, AriadneGovernanceError, ARIADNE_SCHEMA_VERSION
@@ -1342,7 +1344,7 @@ DEFAULT_DETECTION_THRESHOLDS = DetectionThresholds()
 
 
 class DetectionResult(BaseModel):
-    """Outcome of advance_detection_state()."""
+    """Outcome of advance_detection_state() / the derivative+hysteresis FSM."""
     episode_id: str
     segment_id: str
     prior_state: DetectionState
@@ -1352,6 +1354,13 @@ class DetectionResult(BaseModel):
     materialized_recommendation: Optional[Dict[str, Any]] = None
     # Populated when new_state == MATERIALIZED — a recommendation to
     # create_branch(declaration_type=RETROACTIVE) at the last nominal point.
+
+    # Derivative+hysteresis FSM (populated only when detect_branch_candidate is
+    # given an fsm_state). The caller (ignis-os) persists `new_fsm_state` to
+    # Redis between turns. All None/False on the legacy streak path.
+    new_fsm_state: Optional[DriftDetectionState] = None
+    delta_drift: Optional[float] = None
+    triggered_on_derivative: bool = False
 
 
 # ============================================================================

@@ -1,0 +1,153 @@
+"""ACI drift detection — derivative + hysteresis state machine (pure logic).
+
+Implements Clotho's v4 detection model (Episode e87b60f0, artifact "Ariadne ACI
+Drift: Derivative + Hysteresis Detection State Machine — v4"). Absolute per-turn
+drift is not thresholdable (EWM centroid chasing + compressed embedding space);
+the signal lives in the *rate of change* (derivative) plus *sustained elevation*,
+with a *hysteresis cooldown* to suppress re-fires.
+
+This module is PURE: no Neo4j, no Redis, no I/O. `DriftDetectionState` is the
+working state; the caller (ignis-os) persists it in Redis between turns
+(`ariadne::drift_fsm_state::{episode_id}`) — ariadne-protocol has no Redis of its
+own. `advance_drift_fsm` is the single transition step; it mirrors the validated
+reference simulator (`ignis-os/scripts/aci_fsm_sim.py`).
+
+Calibration (locked): DELTA_THRESHOLD=0.055, N=2, M=4, ELEVATION_FLOOR=mean+0.5σ
+over scored turns, first-content warm-up turn ignored. Source episodes:
+8b2a37e4 (α-experiment → 0.055), 7b6e79d0 (N=2), bf6c3143 (M cooldown), 615c639e
+(agent-solo filter — applied UPSTREAM in ignis-os; AGENT_WORK batches never reach
+this FSM, so every call here is an EXCHANGE turn and M counts exchanges only).
+"""
+from __future__ import annotations
+
+import math
+from typing import Literal, Optional, Tuple
+
+from pydantic import BaseModel, Field
+
+FSMState = Literal["NOMINAL", "CANDIDATE", "MATERIALIZED", "COOLDOWN"]
+
+
+class DriftFSMThresholds(BaseModel):
+    """Locked Phase-A thresholds (overridable for Phase-B tuning)."""
+    delta_threshold: float = 0.055     # derivative trigger
+    n_sustained: int = 2               # turns of elevation to confirm a pivot
+    m_cooldown: int = 4                # post-materialize suppression (EXCHANGE turns)
+    floor_sigma: float = 0.5           # ELEVATION_FLOOR = mean + k·σ
+
+
+DEFAULT_DRIFT_FSM_THRESHOLDS = DriftFSMThresholds()
+
+
+class DriftDetectionState(BaseModel):
+    """Per-episode FSM working state. Caller serializes to/from Redis.
+
+    Holds everything the transition needs across turns — it cannot be
+    reconstructed from a single drift value. Running stats (`drift_sum`,
+    `drift_sq_sum`, `scored_turns`) accumulate over scored EXCHANGE turns to
+    compute the episode-relative ELEVATION_FLOOR online.
+    """
+    fsm_state: FSMState = "NOMINAL"
+    candidate_turn: Optional[int] = None
+    candidate_drift: Optional[float] = None
+    max_delta_since_trigger: float = 0.0
+    sustained_count: int = 0
+    cooldown_remaining: int = 0
+    prev_drift: Optional[float] = None      # drift[t-1]; None => first turn
+    warmed: bool = False                    # first computable delta ignored
+    # Online mean/variance over scored turns (the 0→first-content turn excluded).
+    drift_sum: float = 0.0
+    drift_sq_sum: float = 0.0
+    scored_turns: int = 0
+
+    def elevation_floor(self, floor_sigma: float) -> float:
+        """mean + floor_sigma·σ over scored turns; mean only until σ is defined."""
+        if self.scored_turns < 1:
+            return 0.0
+        mean = self.drift_sum / self.scored_turns
+        if self.scored_turns < 2:
+            return mean
+        var = max(0.0, (self.drift_sq_sum / self.scored_turns) - mean * mean)
+        return mean + floor_sigma * math.sqrt(var)
+
+
+class DriftFSMResult(BaseModel):
+    """What one transition produced (the caller maps this onto DetectionResult)."""
+    new_state: DriftDetectionState
+    fsm_state: FSMState
+    delta_drift: Optional[float] = None
+    triggered_on_derivative: bool = False
+    materialized: bool = False            # True only on the turn it confirms a pivot
+
+
+def advance_drift_fsm(
+    state: DriftDetectionState,
+    drift: float,
+    sequence_index: int,
+    thresholds: DriftFSMThresholds = DEFAULT_DRIFT_FSM_THRESHOLDS,
+) -> DriftFSMResult:
+    """One FSM step for one scored (EXCHANGE) turn. Returns a new state.
+
+    Pure: does not mutate `state`. Mirrors aci_fsm_sim.simulate exactly —
+      - warm-up: first turn (prev None) and the first computable delta are ignored
+      - NOMINAL → CANDIDATE on Δdrift > delta_threshold
+      - CANDIDATE → MATERIALIZED on drift > floor for N turns; → NOMINAL if it decays
+      - MATERIALIZED → COOLDOWN for M turns, suppressing all triggers
+    """
+    s = state.model_copy(deep=True)
+    delta = None if s.prev_drift is None else drift - s.prev_drift
+    materialized = False
+    triggered = False
+
+    # ── First turn: no derivative yet (the 0→drift baseline). ───────────────
+    if delta is None:
+        s.prev_drift = drift
+        return DriftFSMResult(new_state=s, fsm_state=s.fsm_state, delta_drift=None)
+
+    # ── Scored turn: accrue running stats for the floor (post-baseline). ────
+    s.drift_sum += drift
+    s.drift_sq_sum += drift * drift
+    s.scored_turns += 1
+    floor = s.elevation_floor(thresholds.floor_sigma)
+
+    in_cooldown = s.cooldown_remaining > 0
+    if in_cooldown:
+        # Suppress any trigger inside the cooldown window (M EXCHANGE turns).
+        s.cooldown_remaining -= 1
+        if s.cooldown_remaining <= 0:
+            s.fsm_state = "NOMINAL"
+    elif not s.warmed:
+        # First computable delta is the 0→first-content jump — a guaranteed
+        # artifact. Skip it; live FSM begins next turn.
+        s.warmed = True
+    elif s.fsm_state == "CANDIDATE":
+        s.max_delta_since_trigger = max(s.max_delta_since_trigger, delta)
+        if drift > floor:
+            s.sustained_count += 1
+            if s.sustained_count >= thresholds.n_sustained:
+                s.fsm_state = "COOLDOWN"
+                s.cooldown_remaining = thresholds.m_cooldown
+                materialized = True
+        else:
+            # Decayed before sustaining — false alarm.
+            s.fsm_state = "NOMINAL"
+            s.candidate_turn = None
+            s.candidate_drift = None
+            s.sustained_count = 0
+            s.max_delta_since_trigger = 0.0
+    elif delta > thresholds.delta_threshold:
+        s.fsm_state = "CANDIDATE"
+        s.candidate_turn = sequence_index
+        s.candidate_drift = drift
+        s.max_delta_since_trigger = delta
+        s.sustained_count = 1 if drift > floor else 0
+        triggered = True
+
+    s.prev_drift = drift
+    return DriftFSMResult(
+        new_state=s,
+        fsm_state=s.fsm_state,
+        delta_drift=delta,
+        triggered_on_derivative=triggered,
+        materialized=materialized,
+    )
