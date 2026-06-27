@@ -133,3 +133,51 @@ def test_detect_branch_candidate_fsm_path_returns_new_state():
     assert res.new_fsm_state is not None
     assert res.delta_drift is not None
     assert res.new_state in (DetectionState.NOMINAL, DetectionState.CANDIDATE)
+
+
+# ── Pre-pivot anchor: jump-and-park (Clotho's ruling, Episode 839c5f91) ──────
+#
+# The S3 calibration failure: a pivot jumps, the live (EWM) centroid chases it,
+# so the next turn on the SAME parked topic reads as decayed live-drift and the
+# sustain gate resets. drift_vs_anchor measures the parked turn against the
+# pre-pivot centroid, where it stays elevated — so a jump-and-park materializes.
+# Drifts chosen so the live floor sits ~0.53 at the sustain turn: live 0.40
+# (below) vs anchor 0.60 (above).
+
+_JUMP_PARK = [
+    (2, 0.00),   # baseline (prev None)
+    (4, 0.50),   # warm-up (skipped)
+    (6, 0.58),   # Δ+0.08 > 0.055 → CANDIDATE, sustain 1
+    (8, 0.40),   # live drift collapses (centroid chased); anchor stays high
+]
+
+
+def _run_with_anchor(seq_drift, anchors):
+    """Replay (seq, drift) with a parallel anchors dict {seq: drift_vs_anchor}."""
+    s = DriftDetectionState()
+    out = []
+    for seq, d in seq_drift:
+        r = advance_drift_fsm(s, d, seq, drift_vs_anchor=anchors.get(seq))
+        s = r.new_state
+        out.append((seq, r))
+    return out
+
+
+def test_anchor_sustains_jump_and_park():
+    # With the pre-pivot anchor high (0.60) on the parked turn, sustain holds → materialize.
+    out = _run_with_anchor(_JUMP_PARK, {8: 0.60})
+    by = {seq: r for seq, r in out}
+    assert by[6].fsm_state == "CANDIDATE"
+    assert by[8].materialized is True
+    assert by[8].fsm_state == "COOLDOWN"
+    assert by[8].drift_vs_anchor == 0.60   # echoed for telemetry
+
+
+def test_without_anchor_jump_and_park_decays():
+    # Same drifts, no anchor → live-drift collapse resets the candidate (the old
+    # broken behavior; confirms back-compat when drift_vs_anchor is absent).
+    out = _run_with_anchor(_JUMP_PARK, {})  # no anchors
+    by = {seq: r for seq, r in out}
+    assert by[6].fsm_state == "CANDIDATE"
+    assert by[8].materialized is False
+    assert by[8].fsm_state == "NOMINAL"    # decayed → reset
