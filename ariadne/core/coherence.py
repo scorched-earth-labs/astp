@@ -52,14 +52,20 @@ def _detect_via_fsm(
     sequence_index: int,
     drift_from_spine: float,
     fsm_state: DriftDetectionState,
+    drift_vs_anchor: Optional[float] = None,
 ) -> DetectionResult:
     """Derivative+hysteresis FSM path for detect_branch_candidate (Clotho v4).
 
     Pure transition (no fingerprint read) except the materialized-recommendation
     lookup, which mirrors the legacy path. The new FSM state is returned on
     `new_fsm_state` for the caller to persist in Redis.
+
+    `drift_vs_anchor` (caller-supplied, the pre-pivot centroid snapshot) is the
+    sustain-gate input; None falls back to live drift.
     """
-    res = advance_drift_fsm(fsm_state, drift_from_spine, sequence_index)
+    res = advance_drift_fsm(
+        fsm_state, drift_from_spine, sequence_index, drift_vs_anchor=drift_vs_anchor
+    )
 
     if res.materialized:
         new_state = DetectionState.MATERIALIZED
@@ -145,6 +151,7 @@ def detect_branch_candidate(
     objective_hash: str = "",
     thresholds: DetectionThresholds = DEFAULT_DETECTION_THRESHOLDS,
     fsm_state: Optional["DriftDetectionState"] = None,
+    drift_vs_anchor: Optional[float] = None,
 ) -> DetectionResult:
     """Active detection: compute new state from prior fingerprint + observation.
 
@@ -164,7 +171,7 @@ def detect_branch_candidate(
     if fsm_state is not None:
         return _detect_via_fsm(
             driver, episode_id, segment_id, sequence_index,
-            drift_from_spine, fsm_state,
+            drift_from_spine, fsm_state, drift_vs_anchor=drift_vs_anchor,
         )
 
     registry = CoherenceFingerprintRegistry(driver)
@@ -239,6 +246,7 @@ def intercept_segment_write(
     intent_class: IntentClass = IntentClass.CONTINUE,
     thresholds: DetectionThresholds = DEFAULT_DETECTION_THRESHOLDS,
     fsm_state: Optional["DriftDetectionState"] = None,
+    drift_vs_anchor: Optional[float] = None,
 ) -> DetectionResult:
     """Write Intercept: runs AS a segment is written.
 
@@ -265,6 +273,7 @@ def intercept_segment_write(
         objective_hash=objective_hash,
         thresholds=thresholds,
         fsm_state=fsm_state,
+        drift_vs_anchor=drift_vs_anchor,
     )
 
     fingerprint = CoherenceFingerprint(

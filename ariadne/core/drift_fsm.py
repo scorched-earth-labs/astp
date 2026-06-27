@@ -76,6 +76,7 @@ class DriftFSMResult(BaseModel):
     new_state: DriftDetectionState
     fsm_state: FSMState
     delta_drift: Optional[float] = None
+    drift_vs_anchor: Optional[float] = None  # echoed for telemetry (sustain-gate input)
     triggered_on_derivative: bool = False
     materialized: bool = False            # True only on the turn it confirms a pivot
 
@@ -85,14 +86,23 @@ def advance_drift_fsm(
     drift: float,
     sequence_index: int,
     thresholds: DriftFSMThresholds = DEFAULT_DRIFT_FSM_THRESHOLDS,
+    drift_vs_anchor: Optional[float] = None,
 ) -> DriftFSMResult:
     """One FSM step for one scored (EXCHANGE) turn. Returns a new state.
 
     Pure: does not mutate `state`. Mirrors aci_fsm_sim.simulate exactly —
       - warm-up: first turn (prev None) and the first computable delta are ignored
       - NOMINAL → CANDIDATE on Δdrift > delta_threshold
-      - CANDIDATE → MATERIALIZED on drift > floor for N turns; → NOMINAL if it decays
+      - CANDIDATE → MATERIALIZED on sustain-drift > floor for N turns; → NOMINAL if it decays
       - MATERIALIZED → COOLDOWN for M turns, suppressing all triggers
+
+    `drift` is always vs the live (EWM) centroid — it drives the derivative
+    trigger and the running floor. `drift_vs_anchor` (caller-supplied, the pre-pivot
+    "where we were" centroid — Clotho's ruling, Episode 839c5f91) is used for the
+    SUSTAIN gate only, so a jump-and-park pivot doesn't read as decayed when the
+    live centroid chases it. None → sustain falls back to `drift` (back-compat).
+    The protocol stays embedding-agnostic: the caller owns the centroid snapshot
+    and the cosine; the FSM only sees the two scalars.
     """
     s = state.model_copy(deep=True)
     delta = None if s.prev_drift is None else drift - s.prev_drift
@@ -122,7 +132,11 @@ def advance_drift_fsm(
         s.warmed = True
     elif s.fsm_state == "CANDIDATE":
         s.max_delta_since_trigger = max(s.max_delta_since_trigger, delta)
-        if drift > floor:
+        # Sustain gate measures against the pre-pivot anchor when the caller
+        # supplies it (so the chasing live centroid can't make a parked pivot
+        # look decayed); falls back to live drift otherwise.
+        sustain_drift = drift_vs_anchor if drift_vs_anchor is not None else drift
+        if sustain_drift > floor:
             s.sustained_count += 1
             if s.sustained_count >= thresholds.n_sustained:
                 s.fsm_state = "COOLDOWN"
@@ -148,6 +162,7 @@ def advance_drift_fsm(
         new_state=s,
         fsm_state=s.fsm_state,
         delta_drift=delta,
+        drift_vs_anchor=drift_vs_anchor,
         triggered_on_derivative=triggered,
         materialized=materialized,
     )
