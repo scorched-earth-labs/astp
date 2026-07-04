@@ -86,6 +86,8 @@ class FakeStore:
         self.branch_points: Dict[str, Dict[str, Any]] = {}
         self.branch_terminuses: List[Dict[str, Any]] = []
         self.fork_points: Dict[str, Dict[str, Any]] = {}
+        self.departure_points: Dict[str, Dict[str, Any]] = {}  # Phase D
+        self.fork_returns: Dict[str, Dict[str, Any]] = {}       # Phase D
         self.merge_points: Dict[str, Dict[str, Any]] = {}
         self.audit_records: List[Dict[str, Any]] = []
         self.intents: Dict[str, Dict[str, Any]] = {}  # by idempotency_key
@@ -265,6 +267,58 @@ class FakeStore:
                     fd = a.get("forward_delta", "")
                     if mid in str(fd):
                         return FakeResult([{"fd": fd}])
+            return FakeResult([])
+
+        # Create DepartureForkPoint (Phase D)
+        if "MERGE (fp:AriadneDepartureForkPoint" in q and "fork_point_id: $fork_point_id" in q:
+            self.departure_points[params.get("fork_point_id")] = dict(params)
+            return FakeResult([])
+
+        # Create departure-fork Episode node (Phase D — MERGE with ON CREATE SET)
+        if "MERGE (e:AriadneEpisode {episode_id: $episode_id}" in q and "fork_status" in q:
+            self.episodes[params.get("episode_id")] = dict(params)
+            return FakeResult([])
+
+        # Read departure fork status by episode_id
+        if "MATCH (e:AriadneEpisode {episode_id: $eid})" in q and "RETURN e.episode_id AS eid, e.fork_status AS st" in q:
+            ep = self.episodes.get(params.get("eid"))
+            if not ep:
+                return FakeResult([])
+            return FakeResult([{"eid": params.get("eid"), "st": ep.get("fork_status")}])
+
+        # Read departure fork status by fork_id
+        if "MATCH (e:AriadneEpisode {fork_id: $fid})" in q and "RETURN e.episode_id AS eid, e.fork_status AS st" in q:
+            fid = params.get("fid")
+            for eid, ep in self.episodes.items():
+                if str(ep.get("fork_id")) == str(fid):
+                    return FakeResult([{"eid": eid, "st": ep.get("fork_status")}])
+            return FakeResult([])
+
+        # Update departure fork status
+        if "MATCH (e:AriadneEpisode {episode_id: $episode_id})" in q and "SET e.fork_status" in q:
+            ep = self.episodes.get(params.get("episode_id"))
+            if ep is not None:
+                ep["fork_status"] = params.get("status")
+            return FakeResult([])
+
+        # Set fork_return_type on the fork episode
+        if "MATCH (e:AriadneEpisode {episode_id: $eid})" in q and "SET e.fork_return_type" in q:
+            ep = self.episodes.get(params.get("eid"))
+            if ep is not None:
+                ep["fork_return_type"] = params.get("rt")
+            return FakeResult([])
+
+        # Create ForkReturnNode (Phase D)
+        if "MERGE (fr:AriadneForkReturn {fork_return_id: $fork_return_id})" in q:
+            self.fork_returns[params.get("fork_return_id")] = dict(params)
+            return FakeResult([])
+
+        # Prior ForkReturn check by fork_id
+        if "MATCH (fr:AriadneForkReturn {fork_id: $fid})" in q and "RETURN fr.fork_return_id" in q:
+            fid = params.get("fid")
+            for fr in self.fork_returns.values():
+                if str(fr.get("fork_id")) == str(fid):
+                    return FakeResult([{"id": fr.get("fork_return_id")}])
             return FakeResult([])
 
         # Catch-all: edges / WIL / other merges — silently succeed
@@ -674,3 +728,183 @@ class TestAuditChainContinuity:
         assert audits[1]["delta_sequence"] == 2
         # Chain link: second record's prior_audit_hash == first's record_hash
         assert audits[1]["prior_audit_hash"] == audits[0]["record_hash"]
+
+
+class TestCreateDepartureFork:
+    """Phase D — the single directional departure fork (origin continues)."""
+
+    def test_creates_episode_point_and_audit(self):
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])
+        driver = FakeDriver(store)
+
+        result = branch_operations.create_departure_fork(
+            driver,
+            origin_episode_id=oid,
+            origin_segment_id="seg-1",
+            fork_objective="Explore the DAG tangent",
+            fork_creation_trigger="TOPIC_SHIFT",
+            initiator="clotho",
+            fork_title="DAG tangent",
+        )
+
+        assert result is not None
+        assert result.fork_id and result.fork_point_id and result.fork_episode_id
+        # single departure point written (no siblings)
+        assert len(store.departure_points) == 1
+        dp = store.departure_points[result.fork_point_id]
+        assert dp["fork_creation_trigger"] == "TOPIC_SHIFT"
+        # the fork episode was created ACTIVE with provenance
+        fe = store.episodes[result.fork_episode_id]
+        assert fe["fork_status"] == "ACTIVE"
+        assert fe["fork_origin_episode_id"] == oid
+        # DEPARTURE_FORK_CREATED audit written
+        dep_audits = [a for a in store.audit_records
+                      if a.get("delta_type") == "DEPARTURE_FORK_CREATED"]
+        assert len(dep_audits) == 1
+        assert dep_audits[0]["record_hash"]
+
+    def test_backdating_integrity_invariant(self):
+        """spine_tip_hash_at_departure (point) == fork_origin_spine_tip_hash (episode)."""
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])
+        driver = FakeDriver(store)
+        result = branch_operations.create_departure_fork(
+            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            fork_objective="obj", fork_creation_trigger="PARALLEL_THREAD", initiator="x",
+        )
+        dp = store.departure_points[result.fork_point_id]
+        fe = store.episodes[result.fork_episode_id]
+        assert dp["spine_tip_hash_at_departure"] == fe["fork_origin_spine_tip_hash"]
+        assert result.spine_tip_hash_at_departure == dp["spine_tip_hash_at_departure"]
+
+    def test_origin_episode_continues_untouched(self):
+        """A departure does NOT resolve or alter the origin — it continues."""
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])
+        driver = FakeDriver(store)
+        branch_operations.create_departure_fork(
+            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            fork_objective="obj", fork_creation_trigger="EXPLICIT_FORK", initiator="x",
+        )
+        assert store.episodes[oid]["status"] == "ACTIVE"  # origin unchanged
+
+    def test_agent_escalation_requires_trigger_segment(self):
+        from ariadne.core.schema import AriadneGovernanceError
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])
+        driver = FakeDriver(store)
+        # missing fork_trigger_segment_id → governance error
+        try:
+            branch_operations.create_departure_fork(
+                driver, origin_episode_id=oid, origin_segment_id="seg-1",
+                fork_objective="obj", fork_creation_trigger="AGENT_ESCALATION", initiator="aci",
+            )
+            assert False, "expected AriadneGovernanceError"
+        except AriadneGovernanceError:
+            pass
+        # with the trigger segment → succeeds
+        result = branch_operations.create_departure_fork(
+            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            fork_objective="obj", fork_creation_trigger="AGENT_ESCALATION",
+            initiator="aci", fork_trigger_segment_id="seg-trigger",
+        )
+        assert result is not None
+
+    def test_idempotent_on_repeat(self):
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])
+        driver = FakeDriver(store)
+        kw = dict(origin_episode_id=oid, origin_segment_id="seg-1",
+                  fork_objective="same obj", fork_creation_trigger="TOPIC_SHIFT", initiator="x")
+        r1 = branch_operations.create_departure_fork(driver, **kw)
+        r2 = branch_operations.create_departure_fork(driver, **kw)
+        assert r1 is not None and r2 is not None
+        # second call short-circuits on the COMPLETE intent — no second departure point
+        assert len(store.departure_points) == 1
+
+
+class TestDepartureForkFSM:
+    """Phase D FSM ops: complete / abandon / declare_fork_return."""
+
+    def _make_active_fork(self, store):
+        oid = str(uuid4())
+        store.episodes[oid] = {"status": "ACTIVE", "spine_hash": f"spine-{oid[:8]}"}
+        driver = FakeDriver(store)
+        res = branch_operations.create_departure_fork(
+            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            fork_objective="tangent", fork_creation_trigger="TOPIC_SHIFT", initiator="a",
+        )
+        return oid, res, driver
+
+    def test_complete_transitions_active_to_completed(self):
+        store = FakeStore()
+        _oid, res, driver = self._make_active_fork(store)
+        ok = branch_operations.complete_departure_fork(driver, res.fork_episode_id, actor="fork-agent")
+        assert ok is True
+        assert store.episodes[res.fork_episode_id]["fork_status"] == "COMPLETED"
+        assert any(a.get("delta_type") == "DEPARTURE_FORK_COMPLETED" for a in store.audit_records)
+
+    def test_abandon_transitions_active_to_abandoned(self):
+        store = FakeStore()
+        _oid, res, driver = self._make_active_fork(store)
+        ok = branch_operations.abandon_departure_fork(driver, res.fork_episode_id, actor="origin-agent")
+        assert ok is True
+        assert store.episodes[res.fork_episode_id]["fork_status"] == "ABANDONED"
+        assert any(a.get("delta_type") == "DEPARTURE_FORK_ABANDONED" for a in store.audit_records)
+
+    def test_cannot_abandon_a_completed_fork(self):
+        store = FakeStore()
+        _oid, res, driver = self._make_active_fork(store)
+        branch_operations.complete_departure_fork(driver, res.fork_episode_id)
+        ok = branch_operations.abandon_departure_fork(driver, res.fork_episode_id)
+        assert ok is False  # COMPLETED forks return, they are not abandoned
+        assert store.episodes[res.fork_episode_id]["fork_status"] == "COMPLETED"
+
+    def test_declare_return_requires_completed(self):
+        from ariadne.core.schema import AriadneGovernanceError
+        store = FakeStore()
+        oid, res, driver = self._make_active_fork(store)
+        # fork is ACTIVE — return must be blocked
+        try:
+            branch_operations.declare_fork_return(
+                driver, fork_id=res.fork_id, origin_episode_id=oid,
+                return_type="INCORPORATED", returned_by="origin-agent",
+            )
+            assert False, "expected AriadneGovernanceError"
+        except AriadneGovernanceError:
+            pass
+
+    def test_declare_return_writes_return_node_and_audit(self):
+        store = FakeStore()
+        oid, res, driver = self._make_active_fork(store)
+        branch_operations.complete_departure_fork(driver, res.fork_episode_id)
+        result = branch_operations.declare_fork_return(
+            driver, fork_id=res.fork_id, origin_episode_id=oid,
+            return_type="INCORPORATED", returned_by="origin-agent",
+            synthesis_summary="took the DAG insight",
+        )
+        assert result is not None
+        assert result.return_type == "INCORPORATED"
+        assert len(store.fork_returns) == 1
+        assert any(a.get("delta_type") == "DEPARTURE_FORK_RETURNED" for a in store.audit_records)
+        # return_type recorded on the fork episode
+        assert store.episodes[res.fork_episode_id].get("fork_return_type") == "INCORPORATED"
+
+    def test_no_double_return(self):
+        from ariadne.core.schema import AriadneGovernanceError
+        store = FakeStore()
+        oid, res, driver = self._make_active_fork(store)
+        branch_operations.complete_departure_fork(driver, res.fork_episode_id)
+        branch_operations.declare_fork_return(
+            driver, fork_id=res.fork_id, origin_episode_id=oid,
+            return_type="ACKNOWLEDGED", returned_by="origin-agent",
+        )
+        try:
+            branch_operations.declare_fork_return(
+                driver, fork_id=res.fork_id, origin_episode_id=oid,
+                return_type="INCORPORATED", returned_by="origin-agent",
+            )
+            assert False, "expected AriadneGovernanceError (double return)"
+        except AriadneGovernanceError:
+            pass

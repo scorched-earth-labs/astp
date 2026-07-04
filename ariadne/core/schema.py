@@ -171,6 +171,21 @@ class EpisodeNode(BaseModel):
     episode_type: Optional[str] = None  # Taxonomy: exploration, technical_review, planning, etc.
     initiated_by: Optional[str] = None  # User ID who created the episode
     episode_mode: str = "directed"  # "directed" (user drives) | "collaborative" (agents contribute unprompted)
+    # --- Departure-fork provenance (Phase D) ---------------------------------
+    # Set once, immutably, when this episode is created via create_departure_fork().
+    # Null on non-fork episodes. Provenance metadata ("how did this come to exist"),
+    # not identity — a departure fork IS an episode. (Ariadne BFM Phase D.)
+    fork_origin_episode_id: Optional[UUID] = None      # episode this departed from
+    fork_anchor_index: Optional[int] = None            # sequence_index of the DepartureForkPointNode in the origin spine
+    fork_id: Optional[UUID] = None                     # shared id linking the fork point to this episode
+    fork_created_at: Optional[datetime] = None         # the mechanical fork event time
+    fork_creation_trigger: Optional[str] = None        # ForkCreationTrigger value
+    fork_trigger_confidence: Optional[float] = None    # ACI confidence, if automated
+    fork_trigger_segment_id: Optional[str] = None      # origin segment that precipitated the fork (required for AGENT_ESCALATION)
+    fork_origin_spine_tip_hash: Optional[str] = None   # origin spine tip hash at departure (== DepartureForkPointNode.spine_tip_hash_at_departure)
+    fork_origin_active_branch_ids: Optional[list] = None  # [{branch_id, spine_tip_hash}] snapshot at fork time
+    fork_status: Optional[str] = None                  # DepartureForkStatus: ACTIVE | COMPLETED | ABANDONED
+    fork_return_type: Optional[str] = None             # ForkReturnType (set on declare_fork_return): INCORPORATED | ACKNOWLEDGED | SUPERSEDED
 
 
 class RetentionTier(str, Enum):
