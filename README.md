@@ -152,12 +152,12 @@ Not recommended for production use outside of the Ignis OS environment until the
 
 ## Amendments
 
-Protocol amendments are recorded as standalone documents alongside `SPEC.md`. They are ratified in a designated Episode of Record and reference the Episode's spine hash for provenance. The Episode of Record is the cryptographic anchor; the document is the human-readable artifact. Amendment documents retain their authoring numerals; the canonical SPEC version per [`VERSIONING.md`](./VERSIONING.md) is shown alongside.
+Protocol amendments are ratified in a designated Episode of Record and reference the Episode's spine hash for provenance. The Episode of Record is the cryptographic anchor; the document is the human-readable artifact. As of the **v3.2.1 integration pass**, both prior amendments are folded into the SPEC body — the amendment documents are retained for provenance only and are no longer normative. Amendment documents retain their authoring numerals; the canonical SPEC version per [`VERSIONING.md`](./VERSIONING.md) is shown alongside.
 
-| Amendment | SPEC version | Status | Document |
-|-----------|--------------|--------|----------|
-| v2.0 — Cross-Episode Linking & Grouping Interface | v3.0.0 | Merged into main; normative pending integration pass | [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) |
-| v3.0 — Layer 3 Workflow & Execution DAG Codification | v3.1.0 | Merged into main; normative pending integration pass | [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) |
+| Amendment | SPEC version | Status | Now in SPEC | Document (historical) |
+|-----------|--------------|--------|-------------|-----------------------|
+| v2.0 — Cross-Episode Linking & Grouping Interface | v3.0.0 | Integrated into SPEC body (v3.2.1) | [§20](./SPEC.md) | [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) |
+| v3.0 — Layer 3 Workflow & Execution DAG Codification | v3.1.0 | Integrated into SPEC body (v3.2.1) | [§21](./SPEC.md) | [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) |
 
 **SPEC v3.0.0 (cross-episode linking, MAJOR)** introduces typed cross-episode links, an EpisodeGrouping interface (with `MembershipRecord` as the protocol-owned artifact), succession-chain governance for `MembershipRecord` and `ConformanceDeclaration`, audit-the-decision pattern for behavioral-tier implementation choices (§12), and a three-tier conformance taxonomy (wire / state / behavioral). Breaking hash preimage changes on three node types — see Appendix A of the amendment for the full breaking-change reference.
 

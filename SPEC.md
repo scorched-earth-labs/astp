@@ -1,7 +1,7 @@
 # Ariadne State Tree Protocol Specification
 
-**Version:** 3.2.0
-**Status:** Stable. The Phase D departure-fork lifecycle (v3.2.0) is defined in-body at §19.3.5–19.3.6. v3.0 (cross-episode linking + grouping) and v3.1 (Layer 3 Workflow & Execution DAG) are normatively defined by their amendment documents until the SPEC integration pass folds them into this document's body. See [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) and [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md). Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
+**Version:** 3.2.1
+**Status:** Stable. The full normative protocol is defined in this document's body. The Phase D departure-fork lifecycle (v3.2.0) is at §19.3.5–19.3.6; cross-episode linking + grouping (v3.0.0) at §20; the Layer 3 Workflow & Execution DAG (v3.1.0) at §21. The v3.2.1 integration pass folded the former standalone amendments into the SPEC body — editorial only, no normative change. The historical amendment documents ([`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) → §20, [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) → §21) are retained for provenance only. Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-06-07
 **Supersedes:** SPEC-v1.md (0.1.0-draft)
@@ -926,6 +926,7 @@ This test should be run bidirectionally (A→B and B→A).
 | 3.0.0 | 2026-06-07 | **MAJOR** — Cross-episode linking + grouping. Source: [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md). Typed `EpisodeLink` with `LinkType`, `LinkHealthState`, `Signal`/`SignalType` machinery. `EpisodeGrouping` interface (`MembershipRecord` as protocol-owned artifact; `ConformanceDeclaration` for downstream conformance). Succession-chain governance for membership/conformance. Audit-the-decision pattern for behavioral-tier implementation choices (§12). Three-tier conformance taxonomy: wire / state / behavioral. **Breaking hash preimage changes on `EpisodeLink`, `MembershipRecord`, `ConformanceDeclaration`** — see amendment Appendix A for the full breaking-change reference. `LINK_*` audit events + `assert_episode_link` operation. Phase 2 discovery primitives (link proposals + calibration loop). Audit-chain + canonical-hash helpers lifted into shared core modules. |
 | 3.1.0 | 2026-06-07 | **MINOR** — Layer 3 Workflow & Execution DAG. Source: [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md). New node types: `WorkflowDeclaration`, `ExecutionNode`, `SkillInvocation`. Three-Merkle-layer model formalized: Layer 1 Spine, Layer 2 episode content, Layer 3 Workflow & Execution DAG. **Layer 3 is cryptographically isolated from Spine integrity** — references Layers 1/2 by ID only; never hash-linked into the Spine; no future Layer-3 change can force a MAJOR bump on Spine grounds. Cognitive Implementation Authority (CIA) — sole-writer guarantee as wire-tier conformance principle. New `CognitiveDeltaType` variants. `ExecutionNode` and `SkillInvocationNode` immutable after creation; only mutable Layer 3 field is `WorkflowDeclaration.status` (and `status_updated_at`). Hash byte-form left open at protocol layer per amendment §3. |
 | 3.2.0 | 2026-07-04 | **MINOR** — Phase D departure-fork lifecycle, defined in-body (§19.3.5–19.3.6). `create_departure_fork()`: a single directional departure into a new (continuing) Episode, distinct from the speculative `create_fork()`. New nodes `DepartureForkPointNode` (domain `DEPARTURE_FORK_POINT:`) and `ForkReturnNode` (domain `FORK_RETURN:`). Backdating integrity invariant (G-30): `spine_tip_hash_at_departure` == the fork Episode's `fork_origin_spine_tip_hash`. Lifecycle FSM `ACTIVE → COMPLETED \| ABANDONED` (`complete_departure_fork` / `abandon_departure_fork` / `declare_fork_return`); resumption is a non-event. **Declarative** return (`INCORPORATED`/`ACKNOWLEDGED`/`SUPERSEDED`), never the branch's structural merge. Immutable Episode fork provenance (§19.3.6). New `CognitiveDeltaType` variants `DEPARTURE_FORK_CREATED`/`_COMPLETED`/`_ABANDONED`/`_RETURNED`; new edges `FORK_RETURN`, `RETURNED_FROM`. Governance G-30 through G-35. **Additive — no breaking changes.** |
+| 3.2.1 | 2026-07-04 | **PATCH** — SPEC integration pass. Folded the two former standalone amendments into this document's body: cross-episode linking + grouping (was `AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`) → **§20**; Layer 3 Workflow & Execution DAG (was `AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`) → **§21**; References moved to §22. The amendment's CIA conformance rule was renumbered from its authoring numeral G-19 (which collided with BFM's G-19) to **G-36**. Amendment files retained for provenance only (historical-reference banners). **Editorial only — no normative change.** |
 
 ## 19. Branch/Fork/Merge Taxonomy
 
@@ -1355,7 +1356,1121 @@ build on:
 4. **Access-policy runtime enforcement** (audit on ESCALATION_ONLY reads)
    is spec'd at the coordination layer and left to the application.
 
-## 20. References
+## 20. Cross-Episode Linking & Grouping
+
+This section defines cross-episode linking and grouping — how Episodes connect and relate across time (continuation, supersession, branching, informing, references, spawning). It integrates the normative content first published as **Amendment v2.0** (SPEC v3.0.0); that amendment file is now historical-reference only. The internal §1–§12 numbering below is the amendment's original scheme, scoped within §20.
+
+### Part I — Cross-Episode Linking
+
+#### §1 Protocol Constants
+
+Named constants replace magic numbers throughout the inference pipeline. These values are protocol-level defaults; calibration is implementation-side (see §12 — behavioral tier).
+
+```
+DISCOVERY_THRESHOLD    = 0.75   // minimum composite score to surface a candidate to human review
+AUTO_ACCEPT_THRESHOLD  = 0.90   // composite score above which a link may be auto-accepted without human review
+```
+
+**Calibration narrative:** Begin conservative. The rejection signal produced by `CANDIDATE_REJECTED` audit events (§5) is the primary input for threshold tuning. A high rejection rate at scores near `DISCOVERY_THRESHOLD` indicates the threshold should be raised; a low proposal rate with known missed links indicates it should be lowered. Threshold adjustment is an implementation decision (§12 behavioral tier); the protocol records the threshold value at the time of each inference event (§12 audit-the-decision pattern).
+
+---
+
+#### §2 `EpisodeLink` Node — Amended Schema
+
+```
+EpisodeLink {
+  // Identity — immutable
+  link_id:               UUID
+  source_episode:        EpisodeID
+  target_episode:        EpisodeID
+  created_at:            Timestamp
+  created_by:            AgentID
+
+  // Semantic characterization — GAP 1
+  link_type:             LinkType              // see §3
+  link_strength:         Float [0.0, 1.0]      // semantic similarity score; 0.0 = no semantic relationship, 1.0 = near-identical
+  is_inferred:           Boolean               // true = system-generated candidate; false = human-asserted
+
+  // Inference provenance — immutable once set
+  inference_signals:     Signal[]              // see §4
+  inference_threshold:   Float                 // value of DISCOVERY_THRESHOLD at inference time
+  retroactive:           Boolean               // true = link created after source episode crystallization
+
+  // Health state — mutable
+  health_state:          LinkHealthState        // VALID | STALE | FROZEN | BROKEN | QUARANTINED
+  health_checked_at:     Timestamp
+  source_version:        SemVer                // version of source episode at link creation
+  target_version:        SemVer                // version of target episode at link creation
+
+  // Quarantine — GAP 4
+  quarantine_reason:     Optional<String>
+  quarantined_at:        Optional<Timestamp>
+  quarantine_resolved_at:    Optional<Timestamp>    // set when quarantine exits
+  quarantine_resolution:     Optional<QuarantineResolution>  // CONFIRMED | DISSOLVED | ESCALATED
+
+  // Integrity
+  content_hash:          Hash                  // SHA-256 of canonical field set (excludes health_state, health_checked_at, quarantine_resolved_at, quarantine_resolution)
+}
+```
+
+**Hash preimage note:** `quarantine_resolved_at` and `quarantine_resolution` are excluded from `content_hash`. Resolution fields record lifecycle events after link creation; including them would invalidate the hash on every quarantine close. The audit log (§5) is the authoritative record of quarantine resolution events.
+
+---
+
+#### §3 Link Type Taxonomy
+
+| Type | Semantics | Mutual Exclusivity |
+|------|-----------|-------------------|
+| `CONTINUES_FROM` | Direct continuation of prior episode | ⊕ `SUPERSEDES`, ⊕ `BRANCHES_FROM` |
+| `SUPERSEDES` | This episode replaces target | ⊕ `CONTINUES_FROM` |
+| `BRANCHES_FROM` | Divergent thread from target | ⊕ `CONTINUES_FROM` |
+| `INFORMED_BY` | Prior knowledge dependency, not continuation | — |
+| `REFERENCES` | Audit-only citation; non-loading on resumption | — |
+| `SPAWNED_FROM` | Task/sub-episode origin | — |
+| `MERGED_INTO` | Convergence record | — |
+| `PEER_REVIEWED_BY` | Cross-agent review relationship | — |
+
+**Resumption isolation rule:** On episode resumption, the loader MUST follow `CONTINUES_FROM` and `SUPERSEDES` links (spine traversal) and MAY follow `INFORMED_BY` and `SPAWNED_FROM` links up to one hop. `REFERENCES` links are non-loading — they are available for audit but do not trigger episode content retrieval.
+
+---
+
+#### §4 Inference Signal Specification
+
+Signal combination is implementation-side (§12 behavioral tier). The protocol requires that all signals contributing to a candidate's composite score be recorded in `inference_signals` at the time of candidate proposal.
+
+```
+Signal {
+  signal_type:    SignalType    // SEMANTIC_SIMILARITY | PARTICIPANT_OVERLAP | TEMPORAL_PROXIMITY | EXPLICIT_REFERENCE | SHARED_ARTIFACT
+  signal_weight:  Float         // weight applied to this signal in composite score computation
+  signal_value:   Float         // raw signal value before weighting
+  computed_at:    Timestamp
+}
+```
+
+**Audit-the-decision pattern (§12):** The protocol does not mandate how signals are combined. It mandates that the combination — which signals, which weights, which threshold — is recorded. This record is the basis for calibration and retrospective audit.
+
+---
+
+#### §5 Audit Event Types — Cross-Episode Linking
+
+```
+AuditEventType (linking):
+  LINK_PROPOSED          // inference candidate surfaced; score >= DISCOVERY_THRESHOLD
+  LINK_ACCEPTED          // human-confirmed or auto-accepted (score >= AUTO_ACCEPT_THRESHOLD)
+  LINK_REJECTED          // human-rejected candidate — GAP 5
+  CANDIDATE_REJECTED     // inference candidate below threshold, not surfaced — GAP 5
+  LINK_HEALTH_CHANGED    // health state transition recorded
+  LINK_QUARANTINED       // link moved to QUARANTINED state — GAP 4
+  LINK_QUARANTINE_RESOLVED   // quarantine exited (CONFIRMED | DISSOLVED | ESCALATED) — GAP 4
+  QUARANTINE_ESCALATED   // quarantine escalated to human review after TTL — Chronos §11.3.3
+```
+
+**`CANDIDATE_REJECTED` note:** This event fires when an inference candidate is computed but falls below `DISCOVERY_THRESHOLD` and is therefore not surfaced for human review. Recording it enables retrospective analysis of the threshold calibration — if known-good links were suppressed, the threshold was too high.
+
+---
+
+#### §6 Link Health State Machine
+
+```
+LinkHealthState:
+  VALID        // target episode exists and version delta is within tolerance
+  STALE        // target episode has advanced by minor/patch version since link creation
+  FROZEN       // target episode is crystallized; link is permanently anchored to crystallized version
+  BROKEN       // target episode unreachable or deleted
+  QUARANTINED  // link flagged for integrity review; excluded from active traversal — GAP 4
+```
+
+**State transitions:**
+
+```
+VALID       → STALE        (target minor/patch version advance)
+VALID       → FROZEN       (target episode crystallizes)
+VALID       → BROKEN       (target episode deleted or unreachable)
+VALID       → QUARANTINED  (orphan detection or integrity flag)
+STALE       → BROKEN       (target episode deleted)
+STALE       → QUARANTINED  (orphan detection)
+QUARANTINED → VALID        (quarantine resolved: CONFIRMED)
+QUARANTINED → BROKEN       (quarantine resolved: DISSOLVED — link invalid)
+QUARANTINED → ESCALATED    (quarantine TTL exceeded; human review required — §11.3.3)
+BROKEN      → QUARANTINED  (re-evaluation triggered)
+```
+
+**Major version advance:** A link where the target episode has advanced by a major version since link creation MUST be routed to human review. The link remains `VALID` or `STALE` during review; it does not automatically transition to `BROKEN`.
+
+---
+
+### Part II — Episode Grouping Interface
+
+#### §7 `MembershipRecord` Node — Amended Schema
+
+```
+MembershipRecord {
+  // Identity — immutable
+  record_id:             UUID
+  episode_id:            EpisodeID
+  group_id:              GroupID
+  group_system:          String           // "claude_project" | "notion_database" | "ariadne_native" | ...
+  asserted_at:           Timestamp
+  asserted_by:           AgentID
+
+  // Membership characterization — GAP 6; included in content_hash
+  membership_role:       MembershipRole   // PRIMARY | SUPPORTING | REFERENCE | ARCHIVED
+
+  // Succession — GAP 6
+  supersedes_record_id:  Optional<UUID>   // prior MembershipRecord this record replaces
+  succession_reason:     Optional<String> // why this record supersedes the prior
+
+  // Integrity — immutable once set
+  content_hash:          Hash             // SHA-256 of: record_id + episode_id + group_id + group_system + asserted_at + asserted_by + membership_role
+}
+```
+
+**Immutability rule:** `MembershipRecord` nodes are append-only. Membership changes are recorded by creating a new `MembershipRecord` with `supersedes_record_id` pointing to the prior record. The prior record is never modified or deleted. The active record for a `(episode_id, group_id)` pair is the record with no `superseded_by_record_id` in the succession chain.
+
+---
+
+#### §8 `ConformanceDeclaration` Node — Amended Schema
+
+```
+ConformanceDeclaration {
+  // Identity — immutable
+  declaration_id:        UUID
+  group_id:              GroupID
+  group_system:          String
+  declared_at:           Timestamp
+  declared_by:           AgentID
+
+  // Versioning — GAP 7
+  declaration_version:   SemVer           // major.minor.patch
+
+  // Capabilities — included in content_hash
+  capabilities:          Capability[]
+
+  // Succession — GAP 7; excluded from content_hash
+  superseded_by:         Optional<UUID>   // declaration_id of successor
+
+  // Integrity
+  declaration_hash:      Hash             // SHA-256 of: declaration_id + group_id + group_system + declared_at + declared_by + declaration_version + capabilities
+}
+```
+
+**Version semantics — GAP 7:**
+
+| Change type | Version bump | Effect |
+|-------------|-------------|--------|
+| Field rename, type change, removal | Major | Breaking — existing `MembershipRecord` hashes may be invalid; re-verification required |
+| New optional field | Minor | Compatible — existing records remain valid |
+| Documentation, threshold change | Patch | Compatible — no schema effect |
+
+**Succession rule:** When a `ConformanceDeclaration` is superseded, the prior declaration is updated with `superseded_by` pointing to the new declaration. The `superseded_by` field is excluded from `declaration_hash` — it is a lifecycle annotation, not a content field.
+
+---
+
+#### §9 Phase Label Scoping — GAP 8
+
+Phase labels in this amendment are scoped to their document. There is no global phase namespace.
+
+- **Cross-Episode Linking phases** are labeled: Linking Phase 1, Linking Phase 2, etc.
+- **Grouping Interface phases** are labeled: Grouping Phase 1, Grouping Phase 2, etc.
+
+Implementations referencing phases in documentation or tooling MUST use scoped labels. Bare phase numbers (e.g., "Phase 3") without document scope are non-conforming in any context where ambiguity is possible.
+
+---
+
+### Part III — Implementation Coordination, Verification & Lifecycle Governance
+
+#### §11 Implementation Architecture
+
+> This section is normative. §11.1–§11.3 specify storage architecture, verification requirements, and lifecycle governance that implementations must honor to claim conformance with Amendment v2.0. §11.4 is the canonical audit event registry. §11.5 specifies consistency requirements.
+
+---
+
+#### §11.1 Storage Architecture
+
+##### 11.1.1 Consistency Model
+
+The Ariadne storage layer is a four-tier distributed system. The consistency hierarchy is:
+
+```
+PRIMARY TRUTH:   Neo4j       (structural ground truth — synchronous writes)
+AUDIT TRUTH:     Blob        (append-only audit history — authoritative for event log)
+DISCOVERY:       QDrant      (semantic search — eventually consistent with Neo4j)
+WORKING STATE:   Redis       (ephemeral cache and queues — always reconstructable)
+```
+
+**Neo4j is the single source of truth for structural state.** No read operation on structural data (link health, membership records, declaration versions) may serve a response that contradicts Neo4j. QDrant and Redis divergence from Neo4j is a consistency error, not an alternative view.
+
+##### 11.1.2 Neo4j Schema (Structural Memory)
+
+New node types and relationships introduced in Amendment v2.0:
+
+```cypher
+// Node types
+(:EpisodeLink {
+  link_id,
+  link_strength,              // Float [0.0, 1.0] — Gap 1
+  is_inferred,                // Boolean — Gap 1
+  health_state,               // LinkHealthState enum — Gap 4
+  quarantine_reason,          // Optional<String>
+  quarantined_at,             // Optional<Timestamp>
+  quarantine_resolved_at,     // Optional<Timestamp> — Gap 4 closure
+  quarantine_resolution       // Optional<QuarantineResolution> — Gap 4 closure
+})
+
+(:MembershipRecord {
+  record_id,
+  membership_role,            // included in content_hash — Gap 6
+  content_hash,
+  supersedes_record_id        // Optional — Gap 6 succession
+})
+
+(:ConformanceDeclaration {
+  declaration_id,
+  declaration_version,        // SemVer — Gap 7
+  declaration_hash,
+  superseded_by               // Optional — Gap 7 succession; excluded from hash
+})
+
+// Relationships
+(e1:Episode)-[:LINKED_TO {via: link_id}]->(e2:Episode)
+(mr:MembershipRecord)-[:SUPERSEDES]->(mr_prev:MembershipRecord)
+(cd:ConformanceDeclaration)-[:SUPERSEDED_BY]->(cd_new:ConformanceDeclaration)
+(ep:Episode)-[:MEMBER_OF {record_id}]->(eg:EpisodeGroup)
+```
+
+**Active-record index:** Implementations MUST maintain a materialized index for the active `MembershipRecord` per `(episode_id, group_id)` pair — defined as the record with no `superseded_by_record_id`. This is a storage-layer obligation, not a protocol mandate on query strategy.
+
+##### 11.1.3 QDrant Schema (Semantic Discovery)
+
+**Collection: `episode_content_vectors`**
+
+> **Naming note (§11 pushback #1):** This collection was previously named `episode_link_candidates`. That name was a misnomer — candidates are the result of a similarity query, not stored objects. The collection stores per-episode content vectors; candidates emerge at query time.
+
+```json
+{
+  "collection": "episode_content_vectors",
+  "vector_size": 1536,
+  "distance": "Cosine",
+  "payload_schema": {
+    "episode_id": "keyword",
+    "spine_version": "keyword",
+    "indexed_at": "datetime",
+    "discovery_threshold_at_index": "float",
+    "auto_accept_threshold_at_index": "float"
+  }
+}
+```
+
+**Threshold payload fields:** `discovery_threshold_at_index` and `auto_accept_threshold_at_index` record the protocol threshold values in effect at the time this vector was indexed. This enables retrospective comparison — if thresholds were recalibrated between index time and query time, the stored values allow an auditor to determine whether a link would have been proposed under the prior regime. This is an audit-the-decision application (§12).
+
+**Collection: `participant_context_vectors`**
+
+```json
+{
+  "collection": "participant_context_vectors",
+  "vector_size": 768,
+  "distance": "Cosine",
+  "payload_schema": {
+    "episode_id": "keyword",
+    "participant_id": "keyword",
+    "context_type": "keyword"
+  }
+}
+```
+
+**Vector dimension note (§11 pushback #2):** `episode_content_vectors` uses 1536 dimensions (text-embedding-3-large or equivalent); `participant_context_vectors` uses 768 dimensions. The asymmetry is intentional — participant identity signals occupy a smaller semantic space than full episode content, and a reduced-dimension model is appropriate. Implementations MUST NOT mix embeddings from different model families within the same collection.
+
+##### 11.1.4 Redis Schema (Working State)
+
+```
+// Quarantine queue — per-Episode
+ariadne:quarantine:queue:{episode_id}    ZSET  // score = quarantine_deadline (Unix timestamp)
+ariadne:quarantine:ttl                   STRING // default TTL in seconds (implementation-configurable)
+
+// Threshold calibration state
+ariadne:calibration:thresholds           HASH  // current DISCOVERY_THRESHOLD, AUTO_ACCEPT_THRESHOLD
+ariadne:calibration:history:{date}       LIST  // daily calibration snapshots
+
+// Link health cache
+ariadne:link:health:{link_id}            HASH  // cached health_state + checked_at; always reconstructable from Neo4j
+```
+
+**Quarantine queue scope (§11 pushback #3):** The quarantine queue is keyed per-Episode (`ariadne:quarantine:queue:{episode_id}`). A single global queue across all Episodes would create scaling problems and scope confusion — a quarantine event in one Episode would be processed in the context of another. Implementations using a global key are non-conforming.
+
+**Redis is always reconstructable.** All Redis state can be rebuilt from Neo4j and Blob. Redis failure does not constitute data loss; it constitutes a consistency window until reconstruction completes.
+
+---
+
+#### §11.2 Verification Architecture
+
+##### 11.2.1 Proof Types
+
+Four proof types are defined for this amendment. A fifth (non-existence proof) is flagged as a known gap.
+
+| Proof Type | What It Proves | Primary Storage |
+|------------|---------------|-----------------|
+| `LINK_INTEGRITY` | `content_hash` matches canonical field set | Neo4j |
+| `MEMBERSHIP_CHAIN` | Succession chain is unbroken and hashes are valid | Neo4j |
+| `DECLARATION_COMPATIBILITY` | Version transition is compatible (minor/patch) or breaking (major) | Neo4j |
+| `AUDIT_COMPLETENESS` | All required audit events are present for a lifecycle | Blob |
+
+**Known gap — non-existence proof (§11 pushback #4):** Proof that no `EpisodeLink` exists between Episode A and Episode B is not specified in this amendment. This is a meaningful proof type — "we never connected these two episodes" is an auditable claim — but specifying it requires additional Merkle commitments not introduced here. Implementations requiring negative-space proofs should treat this as a future amendment item.
+
+##### 11.2.2 `LINK_INTEGRITY` Proof
+
+```
+Proof {
+  proof_type:     LINK_INTEGRITY
+  link_id:        UUID
+  claimed_hash:   Hash           // hash stored in EpisodeLink.content_hash
+  computed_hash:  Hash           // hash recomputed from canonical fields at proof time
+  field_snapshot: {              // canonical fields at proof time
+    link_id, source_episode, target_episode, created_at, created_by,
+    link_type, link_strength, is_inferred, inference_signals,
+    inference_threshold, retroactive, health_state, health_checked_at,
+    source_version, target_version, quarantine_reason, quarantined_at
+  }
+  verified_at:    Timestamp
+  verified_by:    AgentID
+  result:         VALID | INVALID
+}
+```
+
+##### 11.2.3 `MEMBERSHIP_CHAIN` Proof
+
+```
+Proof {
+  proof_type:       MEMBERSHIP_CHAIN
+  episode_id:       EpisodeID
+  group_id:         GroupID
+  chain_length:     Integer        // number of MembershipRecord nodes in succession chain
+  chain_hashes:     Hash[]         // content_hash of each record, oldest first
+  active_record_id: UUID           // record_id of the active (terminal) record
+  verified_at:      Timestamp
+  verified_by:      AgentID
+  result:           VALID | INVALID | BROKEN_CHAIN
+}
+```
+
+##### 11.2.4 `DECLARATION_COMPATIBILITY` Proof
+
+```
+Proof {
+  proof_type:          DECLARATION_COMPATIBILITY
+  prior_version:       SemVer
+  new_version:         SemVer
+  change_classification: COMPATIBLE | BREAKING
+  affected_records:    UUID[]      // MembershipRecord IDs requiring re-verification if BREAKING
+  verified_at:         Timestamp
+  verified_by:         AgentID
+  result:              VALID | INVALID
+}
+```
+
+##### 11.2.5 `AUDIT_COMPLETENESS` Proof
+
+```
+Proof {
+  proof_type:       AUDIT_COMPLETENESS
+  subject_id:       UUID           // link_id or record_id
+  subject_type:     EPISODE_LINK | MEMBERSHIP_RECORD
+  required_events:  AuditEventType[]
+  present_events:   AuditEventType[]
+  missing_events:   AuditEventType[]
+  verified_at:      Timestamp
+  verified_by:      AgentID
+  result:           COMPLETE | INCOMPLETE
+}
+```
+
+##### 11.2.6 Human Ratification Verification
+
+Human ratification of a link or membership record is verified against the crystallization chain entry in the Episode of Record.
+
+**Session record definition:** The session record is the crystallization chain entry in the Episode of Record — the sealed spine position produced by the ratifying agent's ratification commit, verifiable against the Episode's Merkle root. For Devin's approvals within this amendment's Episode, the session record is the sealed spine position at the crystallization event, counter-signed by Devin's approval key.
+
+##### 11.2.7 Encryption at Rest
+
+`MembershipRecord` content is encrypted at rest with a per-Episode key.
+
+**Key derivation dependency:** Per-Episode encryption key derivation is not fully specified in this amendment. Implementations should treat key derivation as a future amendment item; this clause is aspirational pending that specification. The encryption-at-rest requirement stands; the key derivation mechanism is deferred.
+
+---
+
+#### §11.3 Lifecycle Governance
+
+##### 11.3.1 Quarantine Lifecycle
+
+```
+Quarantine entry:
+  1. Orphan detection OR integrity flag triggers LINK_QUARANTINED audit event
+  2. EpisodeLink.health_state → QUARANTINED
+  3. Link added to ariadne:quarantine:queue:{episode_id} with deadline = now() + ariadne:quarantine:ttl
+  4. Link excluded from active traversal during quarantine
+
+Quarantine resolution (before TTL):
+  CONFIRMED:  Link validated; health_state → VALID; quarantine_resolved_at + quarantine_resolution set; LINK_QUARANTINE_RESOLVED audit event
+  DISSOLVED:  Link invalid; health_state → BROKEN; quarantine_resolved_at + quarantine_resolution set; LINK_QUARANTINE_RESOLVED audit event
+
+Quarantine escalation (TTL exceeded — §11.3.3):
+  ESCALATED:  health_state remains QUARANTINED; QUARANTINE_ESCALATED audit event; human review required
+```
+
+**Reverse delta for `SECTION_SUPERSESSION` (§11 pushback #7):** Forward deltas are stored as diffs from the prior version. Reverse delta derivation for `SECTION_SUPERSESSION` requires the prior section text — this cannot be derived from the `supersedes_clause` identifier alone. The prior section text is stored at the superseded version's Blob path. The `supersedes_clause` identifies the path; the content is retrieved from Blob, not recomputed. Implementations MUST store prior section content in Blob before recording a supersession.
+
+##### 11.3.2 MembershipRecord Succession Lifecycle
+
+```
+Succession entry:
+  1. New MembershipRecord created with supersedes_record_id = prior record_id
+  2. Prior record updated: superseded_by_record_id = new record_id (lifecycle annotation only; excluded from content_hash)
+  3. Active-record index updated to point to new record
+  4. Audit event recorded
+
+Succession is irreversible. Prior records are never deleted.
+```
+
+##### 11.3.3 Quarantine Escalation — Chronos Addition
+
+```
+AuditEvent: QUARANTINE_ESCALATED {
+  link_id:           UUID
+  episode_id:        EpisodeID
+  quarantined_at:    Timestamp
+  ttl_deadline:      Timestamp
+  escalated_at:      Timestamp
+  escalation_reason: String      // "TTL_EXCEEDED" | "INTEGRITY_UNRESOLVABLE" | "HUMAN_REQUIRED"
+}
+```
+
+Escalated links remain in `QUARANTINED` state. They are not auto-resolved. Human review is required to transition to `CONFIRMED` or `DISSOLVED`.
+
+---
+
+#### §11.4 Audit Event Registry
+
+Complete registry of all audit events introduced in Amendment v2.0:
+
+| Event Type | Trigger | Required Fields | Storage |
+|------------|---------|-----------------|---------|
+| `LINK_PROPOSED` | Candidate score >= DISCOVERY_THRESHOLD | link_id, score, signals, threshold | Blob |
+| `LINK_ACCEPTED` | Human confirmation or auto-accept | link_id, accepted_by, method | Blob |
+| `LINK_REJECTED` | Human rejection of proposed candidate | link_id, rejected_by, reason | Blob |
+| `CANDIDATE_REJECTED` | Candidate below DISCOVERY_THRESHOLD | episode_pair, score, threshold | Blob |
+| `LINK_HEALTH_CHANGED` | Health state transition | link_id, prior_state, new_state | Blob |
+| `LINK_QUARANTINED` | Link moved to QUARANTINED | link_id, reason, ttl_deadline | Blob |
+| `LINK_QUARANTINE_RESOLVED` | Quarantine exited | link_id, resolution, resolved_by | Blob |
+| `QUARANTINE_ESCALATED` | Quarantine TTL exceeded | link_id, escalation_reason | Blob |
+| `MEMBERSHIP_RECORD_CREATED` | New MembershipRecord asserted | record_id, episode_id, group_id | Blob |
+| `MEMBERSHIP_RECORD_SUPERSEDED` | Succession recorded | prior_record_id, new_record_id | Blob |
+| `DECLARATION_VERSION_BUMPED` | ConformanceDeclaration versioned | declaration_id, prior_version, new_version, classification | Blob |
+| `DECLARATION_SUPERSEDED` | Declaration succeeded | prior_declaration_id, new_declaration_id | Blob |
+
+All audit events are append-only and stored in Blob. Audit events are never modified or deleted.
+
+---
+
+#### §11.5 Consistency Requirements
+
+##### 11.5.1 Write Path
+
+```
+1. Write to Neo4j (synchronous — must succeed before continuing)
+2. Append to Blob audit log (synchronous — must succeed before continuing)
+3. Propagate to QDrant (asynchronous — within consistency window)
+4. Update Redis cache/queues (asynchronous — within consistency window)
+```
+
+Steps 1 and 2 are atomic from the protocol's perspective. A write that succeeds in Neo4j but fails in Blob is a partial write and MUST be retried or rolled back.
+
+##### 11.5.2 Consistency Window SLA (§11 pushback #9)
+
+Implementations MUST define a maximum consistency window for QDrant and Redis propagation.
+
+**Required SLA:**
+- Typical propagation: < 60 seconds
+- Maximum propagation: 5 minutes
+
+Implementations exceeding the maximum propagation window without a documented exception are non-conforming at the state tier (§12). Implementations MUST expose a consistency status endpoint or mechanism that allows callers to determine whether QDrant/Redis state is within the consistency window.
+
+##### 11.5.3 Sequence Numbers and Timestamps (§11 pushback #8)
+
+Two ordering mechanisms are used in this amendment. They are complementary, not redundant:
+
+- **Sequence numbers** are scoped per-Episode and are the basis for completeness proofs within an Episode. A sequence gap within an Episode's audit log indicates a missing event.
+- **Chronos-assigned timestamps** are the basis for ordering across Episodes. Cross-Episode temporal ordering uses timestamps, not sequence numbers, because sequence scopes do not extend across Episode boundaries.
+
+Implementations MUST NOT use sequence numbers for cross-Episode ordering. Implementations MUST NOT use timestamps as the sole basis for within-Episode completeness proofs.
+
+---
+
+### §12 Protocol Scope and Conformance Boundaries
+
+#### 12.1 The Three-Tier Taxonomy
+
+This protocol is a contract about externalities. Internal implementation choices are sovereign.
+
+| Tier | What it covers | Conformance |
+|------|---------------|-------------|
+| **Wire tier** | Schemas, edge types, hash preimages | **Required** |
+| **State tier** | Lifecycle enums, audit event types, consistency SLAs | **Required** |
+| **Behavioral tier** | Scoring algorithms, embedding choices, threshold tuning, internal indexing | **Not required** |
+
+**Wire tier** conformance makes two implementations interoperable — they can exchange `EpisodeLink`, `MembershipRecord`, and `ConformanceDeclaration` structures and verify each other's hashes.
+
+**State tier** conformance makes audit logs comparable across implementations — a third party can verify lifecycle events and consistency guarantees without knowing implementation internals.
+
+**Behavioral tier** is sovereign. The protocol does not mandate how signals are combined, which embedding model is used, or how thresholds are tuned. These are implementation decisions.
+
+#### 12.2 The Audit-the-Decision Pattern
+
+Where implementation choice is permitted at the behavioral tier, the protocol mandates the audit record — what was computed, with which threshold, by which signal — not the value.
+
+This pattern resolves all behavioral-tier questions in this amendment:
+
+| Question | Resolution |
+|----------|-----------|
+| How are signals combined? | Implementation-side. Record: which signals, which weights, which composite score. |
+| Which embedding model? | Implementation-side. Record: model identifier at index time. |
+| What threshold values? | Implementation-side. Record: threshold values at inference time. |
+| When to recalibrate? | Implementation-side. Record: prior and new threshold values, calibration event. |
+
+**The audit record is the protocol artifact.** The decision is the implementation artifact.
+
+#### 12.3 Future Amendment Guidance
+
+Gaps deferred from this amendment that future amendments should address:
+
+1. **Non-existence proofs** — Proof that no `EpisodeLink` exists between two Episodes (§11.2.1)
+2. **Per-Episode encryption key derivation** — Key derivation mechanism for `MembershipRecord` encryption at rest (§11.2.7)
+3. **Behavioral tier calibration protocol** — Optional (non-required) standard for threshold calibration reporting, enabling cross-implementation comparison without mandating algorithm
+
+---
+
+### Appendix A — Breaking Change Reference
+
+Changes that constitute major version bumps to `ConformanceDeclaration`:
+
+- Renaming any field in `EpisodeLink`, `MembershipRecord`, or `ConformanceDeclaration` that appears in a `content_hash` preimage
+- Changing the type of any such field
+- Removing any such field
+- Changing the hash algorithm or canonical serialization format
+
+Changes that constitute minor version bumps:
+
+- Adding a new optional field to any schema node
+- Adding a new `LinkType` value
+- Adding a new `AuditEventType`
+- Adding a new `LinkHealthState` value
+
+Changes that constitute patch version bumps:
+
+- Documentation corrections
+- Threshold default value changes (behavioral tier)
+- Editorial clarifications with no schema effect
+
+---
+
+### Appendix B — Conformance Checklist
+
+An implementation claiming conformance with Amendment v2.0 MUST:
+
+**Wire tier:**
+- [ ] Implement `EpisodeLink` with all fields in §2, including `link_strength`, `is_inferred`, quarantine fields
+- [ ] Implement `MembershipRecord` with `membership_role` in content_hash and succession fields
+- [ ] Implement `ConformanceDeclaration` with `declaration_version` and succession fields
+- [ ] Compute `content_hash` and `declaration_hash` using specified canonical field sets
+
+**State tier:**
+- [ ] Implement all `LinkHealthState` values including `QUARANTINED`
+- [ ] Implement all `AuditEventType` values in §11.4
+- [ ] Implement quarantine lifecycle including TTL and escalation (§11.3.1, §11.3.3)
+- [ ] Key Redis quarantine queue per-Episode: `ariadne:quarantine:queue:{episode_id}`
+- [ ] Define and publish consistency window SLA within bounds specified in §11.5.2
+- [ ] Use sequence numbers for within-Episode completeness proofs; Chronos timestamps for cross-Episode ordering
+
+**Behavioral tier (sovereign — no conformance requirement):**
+- Signal combination algorithm
+- Embedding model selection
+- Threshold calibration strategy
+- Internal indexing implementation
+
+
+## 21. Layer 3 — Workflow & Execution DAG
+
+This section defines **Layer 3** — the Workflow & Execution DAG, the provenance record of *how* an Episode's cognition was carried out (workflow declarations, execution steps, skill invocations). Layer 3 is cryptographically isolated from the Spine: it references Layers 1/2 by ID only and never participates in Spine hashing. It integrates the normative content first published as **Amendment v3.0** (SPEC v3.1.0); that amendment file is now historical-reference only. The CIA Declaration conformance rule (originally numbered G-19, which collided with the §19 Branch/Fork/Merge taxonomy) is **renumbered G-36** here. The internal §1–§13 numbering below is the amendment's original scheme, scoped within §21.
+
+### Part I — Layer 3 Architecture
+
+#### §1 Three-Layer Cognitive Model
+
+The Ariadne protocol now defines **three layers** of cryptographic persistence, each owned by a distinct authority and each isolated from the others' hash integrity:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  LAYER 1 — Merkle Spine (kernel-owned, hash-chained)         │
+│  EpisodeNode, IntentionNode, BeliefNode, SignalNode, …       │
+│  → Authoritative cognitive record. Owned by the protocol     │
+│    kernel implementation. Hash-chained. Witness-signable.    │
+└────────────────────────┬─────────────────────────────────────┘
+                         │ referenced by ID only
+┌────────────────────────▼─────────────────────────────────────┐
+│  LAYER 2 — Episode Content (Adaptive Merkle Tree)            │
+│  Segments, BranchPoints, HITLEventNodes                      │
+│  → Episode body. Adaptive tree under the Spine.              │
+└────────────────────────┬─────────────────────────────────────┘
+                         │ referenced by ID only
+┌────────────────────────▼─────────────────────────────────────┐
+│  LAYER 3 — Workflow & Execution DAG (CIA-owned)              │
+│  WorkflowDeclaration, ExecutionNode, SkillInvocation         │
+│  → What was done. Written by the workspace's Cognitive       │
+│    Implementation Authority. Hash-isolated from Spine.       │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Layer 3's purpose** is to answer the questions that Layers 1 and 2 cannot:
+
+- *What did the agent (or its delegates) actually do to act on this intention?*
+- *Which discrete steps composed that execution?*
+- *Which skills were invoked, by whom, with what parameters, with what result?*
+- *Where did execution fail, and what state preceded that failure?*
+
+These questions are forensic; their answers must survive arbitrary failure modes (process kill, partial writes, retries) without contaminating the cognitive record above them.
+
+#### §2 Layer Isolation and the Spine Firewall
+
+The defining invariant of Layer 3 is **isolation from Spine hash computation**:
+
+> **Invariant L3-I1 (Spine Isolation).** No field of any Layer 3 node, and no field of any Layer 3 edge, shall be included in the preimage of any Layer 1 or Layer 2 hash. Layer 3 nodes reference Layer 1/2 nodes by `node_id` (UUID) only. Layer 1/2 nodes shall not contain references to Layer 3 `node_id` values in their hash preimage.
+
+This invariant has three consequences that conforming implementations MUST guarantee:
+
+1. **No write to Layer 3, under any circumstance, can invalidate any Spine hash.** The kernel may freeze, the Spine may seal, the Spine fingerprint may be witness-signed — none of these states are altered by Layer 3 activity.
+2. **A workspace whose Layer 3 is entirely absent or entirely corrupt remains a valid Ariadne workspace** at Layers 1 and 2. Layer 3 is a strict augmentation, never a dependency.
+3. **Layer 3 verification is performed against its own audit chain** (§11), not by walking the Spine. Verification at Layer 3 confirms execution-record integrity; verification at Layer 1 confirms cognitive integrity. The two verifications are independent.
+
+The protocol layer makes no claim about whether Layer 3 storage and Layer 1/2 storage share infrastructure. They MAY share a database, a blob store, an index. Adapter choices are unconstrained. What is constrained is the **hash preimage** — never crosses the layer boundary.
+
+#### §3 The Sole-Writer Principle — Cognitive Implementation Authority (CIA)
+
+A second invariant governs **who** may write Layer 3:
+
+> **Invariant L3-I2 (Sole Writer).** For each Layer 3 node type within a workspace, exactly one entity — the **Cognitive Implementation Authority** (CIA) for that node type in that workspace — is authorized to issue creation writes. Writes from any other source MUST be rejected at the wire tier.
+
+A CIA is a protocol-level role, not a specific implementation technology. The CIA for `WorkflowDeclaration` in a workspace may be:
+
+- An MCP server (the Ignis reference implementation),
+- An in-process module of a single-process implementation,
+- A network-attached daemon with cryptographic identity,
+- Any other entity that the workspace's `ConformanceDeclaration` names.
+
+What matters is that **the CIA is unique** for a given (workspace, node type) pair, and that the implementation demonstrates enforcement. Enforcement may take any of the following forms (this list is illustrative, not exhaustive):
+
+- Database-level access control (only the CIA's principal has INSERT on the relevant tables/collections).
+- Application-layer guards (all write paths route through the CIA, no parallel ingestion).
+- Cryptographic identity (writes are signed by the CIA's key; non-CIA writes fail signature verification).
+- Audit-detection (writes by non-CIA principals are admitted but flagged in the audit chain as `WIRE_VIOLATION`, which conforming verifiers reject).
+
+A workspace MAY designate **the same CIA for all three Layer 3 node types**, and the reference implementation does so. A workspace MAY also designate **distinct CIAs per node type** — for example, one authority writes WorkflowDeclarations under organizational policy review, while another writes ExecutionNodes from a high-throughput operational substrate. The protocol permits either; the audit chain records which CIA wrote each record (§11).
+
+> **Conformance G-36 (CIA Declaration).** Every conforming workspace's `ConformanceDeclaration` MUST name the CIA for each Layer 3 node type, identify the enforcement mechanism, and commit to the chosen mechanism in the wire tier. Changes to CIA assignment are protocol events that MUST be recorded in the audit chain (event type: `CIA_DESIGNATION_CHANGED`, deferred to a future amendment if/when CIA changes prove non-rare).
+
+The sole-writer principle is what makes verifiable cognition extend across the execution layer. Without it, an attacker (or an unaware sibling process) could inject forged execution records whose audit chain would still verify cryptographically. The CIA designation is the protocol's commitment that *only one principal* could have written a given record, and the audit chain's job is to prove the chain of those writes is unbroken.
+
+---
+
+### Part II — Data Model
+
+#### §4 WorkflowDeclaration
+
+A `WorkflowDeclaration` is the intent-record for a discrete autonomous agentic workflow. It is created at workflow initiation — before any execution step writes — and it persists independently of whether execution completes. A WorkflowDeclaration with zero child ExecutionNodes is a valid forensic state ("workflow declared but never started"), and the protocol assigns it no different treatment from a fully-executed workflow.
+
+```
+WorkflowDeclaration {
+  // Identity
+  node_id            UUID            [primary key, immutable]
+  node_type          "WorkflowDeclaration"  [literal, immutable]
+  schema_version     String          [semver, immutable]
+
+  // Spine References (Layer 1, by ID only)
+  episode_id         UUID            [→ EpisodeNode, REQUIRED, immutable]
+  intention_id       UUID            [→ IntentionNode, NULLABLE, immutable]
+
+  // Mandate Provenance — see §13 for Mandate's deferred protocol surface
+  mandate_id         UUID            [→ Mandate, NULLABLE, immutable]
+
+  // Declaration Content
+  workflow_name      String          [human-readable identifier, immutable]
+  workflow_version   String          [semver, default "1.0.0", immutable]
+  declared_by        String          [agent or CIA identifier, immutable]
+  declared_at        ISO8601         [immutable]
+
+  // Execution Parameters
+  input_context      JSON            [parameters at declaration, immutable]
+  expected_outputs   JSON            [success criteria, NULLABLE, immutable]
+  timeout_ms         Integer         [NULLABLE — absent = no timeout, immutable]
+
+  // Mutable Terminal State (the only mutation surface in Layer 3)
+  status             WorkflowStatus  [DECLARED | IN_PROGRESS | COMPLETED | FAILED | INTERRUPTED]
+  status_updated_at  ISO8601         [updated on every status transition]
+  error_detail       JSON            [NULLABLE, populated on FAILED/INTERRUPTED close]
+
+  // Integrity
+  content_hash       String          [hash of all IMMUTABLE fields; see §8]
+}
+```
+
+**Immutability**: every field above is immutable after creation **except** `status`, `status_updated_at`, and `error_detail`. The mutable trio constitutes the controlled mutation surface; no other mutation is permitted. The state machine governing valid `status` transitions is given in §10.
+
+**Hash preimage note (§8 governs the byte form):** `status`, `status_updated_at`, `error_detail`, and `content_hash` itself are **excluded** from the preimage. `mandate_id` and `intention_id`, though nullable, are **included** — they are immutable provenance fields, and their nullability is itself part of the immutable record. A WorkflowDeclaration declared with `mandate_id = null` produces a different hash than one declared with a non-null `mandate_id`, even if no other field differs.
+
+#### §5 ExecutionNode
+
+An `ExecutionNode` is the atomic record of one discrete execution step within a workflow. **ExecutionNodes are terminal-on-write**: the `status` field is final at the moment of creation, and no update path exists. A failed step that is retried produces a *new* ExecutionNode with the same `step_name`, a new `node_id`, and a new `sequence_index`; the original failed node is preserved unchanged. This guarantees that the failure trace is a permanent forensic record, not erasable by retry.
+
+```
+ExecutionNode {
+  // Identity
+  node_id            UUID            [primary key, immutable]
+  node_type          "ExecutionNode" [literal, immutable]
+  schema_version     String          [semver, immutable]
+
+  // Workflow & Episode References (Layer 3 and Layer 1, by ID only)
+  workflow_id        UUID            [→ WorkflowDeclaration, REQUIRED, immutable]
+  episode_id         UUID            [→ EpisodeNode, REQUIRED, immutable; denormalized for query speed]
+
+  // Sequence
+  sequence_index     Integer         [0-based position in workflow, immutable]
+  step_name          String          [human-readable step identifier, immutable]
+
+  // Execution Record
+  agent_id           String          [executing agent identifier, immutable]
+  executed_at        ISO8601         [immutable]
+  duration_ms        Integer         [NULLABLE if interrupted, immutable]
+
+  // Input / Output State
+  input_state        JSON            [REQUIRED — may be {}, immutable]
+  output_state       JSON            [NULLABLE if failed or interrupted, immutable]
+
+  // Terminal Status (written once, never updated)
+  status             ExecutionStatus [COMPLETED | FAILED | INTERRUPTED]
+  error_detail       JSON            [NULLABLE — populated when status ≠ COMPLETED]
+  error_type         ErrorType       [NULLABLE — required when status ≠ COMPLETED]
+
+  // Integrity
+  content_hash       String          [hash of all fields except content_hash; see §8]
+}
+```
+
+**Immutability**: every field is immutable. There is no write-after-create path of any kind.
+
+**Hash preimage note:** all fields except `content_hash` itself contribute to the preimage. Unlike WorkflowDeclaration, `status` is **included** in the ExecutionNode hash — because it is terminal-on-write, never mutated, and forensically meaningful (the hash binds the agent's record of *what status was written*, not just *what data*).
+
+**The retry pattern is a protocol commitment, not an adapter choice.** If an implementation provides a "retry" surface that mutates the prior ExecutionNode, it is non-conforming. Retry creates a new node.
+
+#### §6 SkillInvocation
+
+A `SkillInvocation` records a single skill invocation performed within an ExecutionNode. It is the protocol surface for capturing what skills (in any sense the workspace's CIA defines that term — markdown-driven, capability-registry-resolved, tool-call-style, model-context-protocol-tool, or otherwise) were invoked in service of a step. SkillInvocation is **optional**: an ExecutionNode may complete without any SkillInvocation children (a step that consists entirely of native agent reasoning, for instance).
+
+```
+SkillInvocation {
+  // Identity
+  node_id            UUID            [primary key, immutable]
+  node_type          "SkillInvocation" [literal, immutable]
+  schema_version     String          [semver, immutable]
+
+  // Parent References (Layer 3 and Layer 1, by ID only)
+  execution_node_id  UUID            [→ ExecutionNode, REQUIRED, immutable]
+  workflow_id        UUID            [→ WorkflowDeclaration, REQUIRED, immutable; denormalized]
+  episode_id         UUID            [→ EpisodeNode, REQUIRED, immutable; denormalized]
+
+  // Skill Identity — open behavioral-tier surface (§12)
+  skill_id           String          [implementation-defined string, immutable]
+  skill_source       String          [implementation-defined enum value, immutable]
+  skill_version      String          [NULLABLE, implementation-defined, immutable]
+
+  // Invocation Record
+  invoked_by         String          [agent or CIA identifier, immutable]
+  invoked_at         ISO8601         [immutable]
+  duration_ms        Integer         [NULLABLE, immutable]
+
+  // Parameters & Result
+  input_parameters   JSON            [REQUIRED — may be {}, immutable]
+  output_result      JSON            [NULLABLE if failed, immutable]
+
+  // Terminal Status
+  status             SkillStatus     [COMPLETED | FAILED | INTERRUPTED]
+  error_detail       JSON            [NULLABLE, immutable]
+
+  // Reserved — Skill Registry bridge (deferred; see §13)
+  registry_id        UUID            [NULLABLE, EXCLUDED from content_hash]
+
+  // Integrity
+  content_hash       String          [hash of all fields except content_hash and registry_id; see §8]
+}
+```
+
+**Immutability**: all fields immutable except `registry_id` (a deferred field; see §13). `registry_id` may be populated later by a backfill operation **without** invalidating `content_hash`, because it is excluded from the preimage by design.
+
+**Hash preimage note:** `registry_id` is the **only** Layer 3 field excluded from a content hash for reasons other than mutation. Its exclusion is a forward-compatibility provision (see §13).
+
+**On `skill_id` and `skill_source`:** these fields are deliberately open. The protocol does not constrain what counts as a "skill," what counts as a "source," or how implementations choose between sources. The protocol's commitment is that *whatever the implementation chose, it is recorded immutably and contributes to the content hash.* This is the **audit-the-decision pattern** (§12) applied to skill taxonomy.
+
+#### §7 Cross-Layer References
+
+All Layer 3 → Layer 1/2 references are by `node_id` (UUID). No Layer 3 field is embedded by value in any Layer 1/2 hash. The seven edges introduced by this amendment are:
+
+| Edge | From | To | Cardinality | Required? | Purpose |
+|------|------|-----|-------------|-----------|---------|
+| `DECLARED_WITHIN` | `WorkflowDeclaration` | `EpisodeNode` | many-to-one | REQUIRED | Workflow's episode anchor |
+| `SERVES_INTENTION` | `WorkflowDeclaration` | `IntentionNode` | many-to-one | OPTIONAL | BDI-spawned workflow's intention link |
+| `SPAWNED_BY_MANDATE` | `WorkflowDeclaration` | `Mandate` | many-to-one | OPTIONAL | Faculty-delegation provenance |
+| `EXECUTES_WITHIN` | `ExecutionNode` | `WorkflowDeclaration` | many-to-one | REQUIRED | Step's workflow parent |
+| `PRECEDES` | `ExecutionNode` | `ExecutionNode` | flexible | OPTIONAL | Sequence ordering (absent on first step) |
+| `INVOKED_WITHIN` | `SkillInvocation` | `ExecutionNode` | many-to-one | REQUIRED | Skill's step parent |
+| `SKILL_PRECEDES` | `SkillInvocation` | `SkillInvocation` | one-to-one | OPTIONAL | Skill chaining within a step |
+
+The edge **names** above are normative at the protocol level. Edge **storage format** is adapter-defined: implementations using a graph database MAY store them as native edges; implementations using a relational database MAY store them as foreign keys; implementations using a document store MAY store them as embedded reference arrays. Whatever the storage, conforming implementations MUST expose query paths equivalent to the seven edges (see Appendix A for reference patterns).
+
+**Edge property normativity.** Edge property *names* are normative where given (e.g., `PRECEDES` carries `sequence_gap: Integer` and `edge_type: SEQUENTIAL | CONDITIONAL | PARALLEL`). Edge property *types* are normative. Additional implementation-specific edge properties are permitted but MUST NOT alter the semantics of the seven core edges.
+
+---
+
+### Part III — Integrity and Lifecycle
+
+#### §8 Hash Preimages — Deterministic Serialization Requirement
+
+The protocol does not lock Layer 3 implementations to a specific byte-form for hash preimages. It does, however, impose three normative requirements:
+
+> **Conformance W-L3-1 (Determinism).** Each Layer 3 node type's `content_hash` MUST be computed from a deterministic byte serialization of its immutable-and-hashable field set. The same field values MUST always produce the same hash, on any conforming implementation.
+
+> **Conformance W-L3-2 (Field Inclusion).** The byte serialization MUST include every field marked immutable-and-hashable in §4, §5, and §6 exactly once. It MUST exclude every field marked excluded-from-hash. No additional fields may contribute to the hash.
+
+> **Conformance W-L3-3 (Documentation).** The implementation MUST document its chosen byte serialization in its `ConformanceDeclaration`, in sufficient detail that an independent verifier can reproduce any node's hash from its field values.
+
+Two valid byte-serialization forms are illustrated here:
+
+**Form A — Length-prefixed concatenation (Spine-style, SHA3-256), modeled on SPEC.md §5.2:**
+
+```
+preimage = (
+  node_id                              (16 bytes, UUID)
+  len(node_type).to_bytes(4, "big")    (4 bytes, length prefix)
+  node_type                            (variable, UTF-8)
+  len(schema_version).to_bytes(4, "big")
+  schema_version                       (variable, UTF-8)
+  …                                    (remaining immutable fields, in declared order)
+)
+content_hash = SHA3-256(preimage).hex()
+```
+
+**Form B — Canonical JSON (SHA-256), used by the Ignis reference implementation:**
+
+```
+payload = {field: value for every immutable-and-hashable field}
+canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+content_hash = SHA256(canonical).hex()
+```
+
+Both forms satisfy W-L3-1, W-L3-2, and W-L3-3. An implementation choosing Form A and an implementation choosing Form B will produce **different hashes for the same field values** — this is intentional and acceptable. Cross-implementation hash equivalence is not a protocol requirement at Layer 3; cross-implementation *verifiability* is, and is achieved via the documented serialization, not via a single canonical hash function.
+
+**Excluded fields** (per §4–§6, summarized):
+
+| Node | Excluded from `content_hash` |
+|------|------------------------------|
+| `WorkflowDeclaration` | `status`, `status_updated_at`, `error_detail`, `content_hash` itself |
+| `ExecutionNode` | `content_hash` itself |
+| `SkillInvocation` | `registry_id`, `content_hash` itself |
+
+#### §9 Immutability Invariants
+
+> **Invariant L3-I3 (Terminal-on-Write).** `ExecutionNode` and `SkillInvocation` are fully immutable after creation. No field of either type may be altered. Implementations MUST reject any update operation.
+
+> **Invariant L3-I4 (WorkflowDeclaration Mutation Surface).** The only mutable fields on `WorkflowDeclaration` are `status`, `status_updated_at`, and `error_detail`. Any mutation to any other field is a wire-tier violation. Mutations to the permitted three are constrained by the state machine of §10.
+
+> **Invariant L3-I5 (Retry-by-New-Node).** A retried execution step MUST produce a new `ExecutionNode` with a new `node_id` and a new `sequence_index`. The prior `ExecutionNode` is preserved unchanged. Implementations MUST NOT provide a "retry" surface that mutates a prior node.
+
+#### §10 Workflow Status State Machine
+
+`WorkflowDeclaration.status` follows this transition graph:
+
+```
+                                    ┌─────────────┐
+            ┌─────────────────────► │ INTERRUPTED │  (process killed before
+            │                       └─────────────┘   any ExecutionNode written)
+            │
+   ┌──────────────┐  first ExecutionNode write   ┌─────────────┐
+   │   DECLARED   │ ───────────────────────────► │ IN_PROGRESS │
+   └──────────────┘                              └──────┬──────┘
+                                                        │
+                                                        ▼
+                                       ┌──────────────────────────────┐
+                                       │  close_workflow(COMPLETED)   │ ──► COMPLETED
+                                       │  close_workflow(FAILED)      │ ──► FAILED
+                                       │  close_workflow(INTERRUPTED) │ ──► INTERRUPTED
+                                       └──────────────────────────────┘
+```
+
+**Auto-transition rule:** the first creation of an `ExecutionNode` with a given `workflow_id` MUST transition that workflow's `status` from `DECLARED` to `IN_PROGRESS` atomically with the ExecutionNode write. The transition is a wire-tier guarantee: a workspace whose `WorkflowDeclaration.status` is `DECLARED` while ExecutionNodes for it exist is non-conforming.
+
+**Terminal states:** `COMPLETED`, `FAILED`, and `INTERRUPTED` are terminal. No transition out of these states is permitted. A workflow in any terminal state is closed permanently.
+
+**Two distinct `INTERRUPTED` states are observable**, both valid:
+- WorkflowDeclaration with `status = INTERRUPTED` and zero ExecutionNodes — declared, never started.
+- WorkflowDeclaration with `status = INTERRUPTED` and one or more ExecutionNodes (the last of which may itself have status `INTERRUPTED`) — started, terminated mid-execution.
+
+Neither is a schema violation. Conforming verifiers MUST distinguish them in forensic output.
+
+#### §11 Audit Event Registry
+
+Layer 3 writes are anchored to the protocol's audit chain by four new `CognitiveDeltaType` values:
+
+| Event Type | Trigger | Required Fields | Storage |
+|------------|---------|-----------------|---------|
+| `WORKFLOW_DECLARED` | `WorkflowDeclaration` creation | `workflow_id`, `episode_id`, `intention_id` (nullable), `mandate_id` (nullable), `declared_by`, `declared_at`, `content_hash`, `cia_identifier` | Blob, append-only |
+| `EXECUTION_RECORDED` | `ExecutionNode` creation | `execution_node_id`, `workflow_id`, `episode_id`, `sequence_index`, `agent_id`, `status`, `executed_at`, `content_hash`, `cia_identifier` | Blob, append-only |
+| `SKILL_INVOKED` | `SkillInvocation` creation | `skill_invocation_id`, `execution_node_id`, `workflow_id`, `episode_id`, `skill_id`, `skill_source`, `invoked_by`, `invoked_at`, `status`, `content_hash`, `cia_identifier` | Blob, append-only |
+| `WORKFLOW_CLOSED` | `ignis_close_workflow`-equivalent operation | `workflow_id`, `final_status`, `status_updated_at`, `error_detail` (nullable), `cia_identifier` | Blob, append-only |
+
+**Audit chain integrity.** Each Layer 3 audit event is hash-chained per the existing protocol convention: each record carries `prev_audit_hash` pointing at the preceding record in its chain, and records form an append-only sequence per workspace (or per chain-key as the implementation declares). The chain key for Layer 3 events MAY be the `episode_id` (Ignis reference choice) or any other declared key, provided the implementation documents the choice in its `ConformanceDeclaration` and is consistent within a workspace.
+
+**`cia_identifier` is mandatory in every Layer 3 audit event.** The principal that performed the write — the workspace's designated CIA for that node type — MUST be recorded. This is what makes the sole-writer principle (§3) verifiable: a verifier walking the audit chain can confirm that every L3 write was performed by the declared CIA, and that no other principal contributed.
+
+**Conformance W-L3-4 (Audit Emission).** Every Layer 3 node creation and every `WorkflowDeclaration.status` mutation MUST emit the corresponding audit event into the chain **before** the operation is considered durable. Implementations MAY use the existing protocol convention of Blob → Adapter → Index write ordering, in which case the audit-event blob write precedes the node creation in the adapter store.
+
+---
+
+### Part IV — Conformance and Governance
+
+#### §12 Three-Tier Conformance
+
+This amendment slots into the conformance taxonomy established by Amendment v2.0 §12:
+
+| Tier | What Layer 3 covers at this tier | Required? |
+|------|----------------------------------|-----------|
+| **Wire** | Node schemas (§4–§6), edge names (§7), hash preimage rules (§8), immutability invariants (§9), state machine (§10), audit event types and required fields (§11), CIA sole-writer enforcement (§3) | **REQUIRED** |
+| **State** | Status transition semantics, retry-by-new-node, distinction between the two `INTERRUPTED` states | **REQUIRED** |
+| **Behavioral** | Hash byte-form choice (Form A / Form B / other), `skill_id` and `skill_source` vocabularies, CIA enforcement mechanism, audit-chain chain-key choice, edge storage representation, denormalization choices | **NOT REQUIRED** — but the audit-the-decision pattern applies: the choice MUST be documented in the `ConformanceDeclaration`. |
+
+**Audit-the-decision pattern applied to Layer 3:**
+
+| Question | Where the protocol commits | Where the implementation chooses |
+|----------|---------------------------|----------------------------------|
+| What hash algorithm? | Result MUST be deterministic | Implementation picks (SHA3-256 / SHA-256 / other) |
+| What byte form? | Field inclusion is fixed | Implementation picks (concatenation / canonical JSON / other) |
+| What `skill_source` values are valid? | Field is recorded immutably | Implementation defines its enum |
+| Who is the CIA? | Sole-writer principle | Workspace names the entity in its `ConformanceDeclaration` |
+| How is CIA enforcement implemented? | Enforcement at wire tier required | Implementation picks (DB ACL / app guard / signing / audit-detection) |
+| What is the audit chain key? | Append-only, hash-chained, per-chain-key | Implementation picks the key dimension |
+
+#### §13 Deferred Items
+
+Three protocol surfaces touched by this amendment are explicitly deferred to future amendments:
+
+1. **Mandate — full protocol surface.** This amendment introduces `mandate_id` as an optional, immutable, hash-included field on `WorkflowDeclaration`, and the `SPAWNED_BY_MANDATE` edge to a `Mandate` node. The `Mandate` node type itself — its fields, its hash preimage, its lifecycle, its position in the layer hierarchy (Mandate is most naturally a Layer 1 or Layer 2 cognitive primitive, not Layer 3) — is **not specified by this amendment**. Conforming implementations MAY treat `Mandate` as an opaque reference for the purposes of Layer 3 conformance. A future amendment (provisional designation: **v3.1.0 — Mandate Codification**) will define the full Mandate surface.
+
+2. **Skill Registry.** The `SkillInvocation.registry_id` field is reserved for a future protocol surface that catalogues skills as first-class addressable entities. Until that surface is defined, conforming implementations MUST leave `registry_id` null. The field's exclusion from `content_hash` is a deliberate forward-compatibility provision: when the Skill Registry amendment ships, a backfill operation MAY populate `registry_id` on existing `SkillInvocation` records without invalidating their content hashes.
+
+3. **SkillInvocation as Spine-resident node.** Some implementations may eventually want SkillInvocation to participate in Spine hashing — turning skill invocation into a cryptographically-anchored cognitive primitive for ecosystems where agent cognition is substantially composed of skill chains rather than native reasoning. This amendment **declines** that promotion: SkillInvocation remains a Layer 3 node. A future major amendment (provisional designation: **v4.0.0 — SkillInvocation Spine Promotion**) may revisit this decision once production usage of Layer 3 has informed the design.
+
+---
+
+### Appendix A — Reference Adapter Notes (Non-Normative)
+
+The following notes derive from the reference implementation in the Ignis OS. They are non-normative: conforming implementations need not adopt them. They are included to illustrate one complete adapter path and to inform implementers considering similar designs.
+
+#### A.1 Neo4j edge vocabulary
+
+The reference implementation stores Layer 3 edges as native Neo4j relationships with the names given in §7:
+
+```cypher
+(:WorkflowDeclaration)-[:DECLARED_WITHIN {declared_at}]->(:EpisodeNode)
+(:WorkflowDeclaration)-[:SERVES_INTENTION {declared_at}]->(:IntentionNode)
+(:WorkflowDeclaration)-[:SPAWNED_BY_MANDATE {declared_at}]->(:Mandate)
+(:ExecutionNode)-[:EXECUTES_WITHIN {sequence_index}]->(:WorkflowDeclaration)
+(:ExecutionNode)-[:PRECEDES {sequence_gap, edge_type}]->(:ExecutionNode)
+(:SkillInvocation)-[:INVOKED_WITHIN {invoked_at}]->(:ExecutionNode)
+(:SkillInvocation)-[:SKILL_PRECEDES {sequence_index}]->(:SkillInvocation)
+```
+
+#### A.2 Suggested indexes
+
+```cypher
+CREATE INDEX workflow_episode_idx FOR (w:WorkflowDeclaration) ON (w.episode_id);
+CREATE INDEX workflow_mandate_idx FOR (w:WorkflowDeclaration) ON (w.mandate_id);
+CREATE INDEX workflow_status_idx FOR (w:WorkflowDeclaration) ON (w.status);
+CREATE INDEX execution_workflow_idx FOR (e:ExecutionNode) ON (e.workflow_id);
+CREATE INDEX execution_status_idx FOR (e:ExecutionNode) ON (e.status);
+CREATE INDEX execution_agent_status_idx FOR (e:ExecutionNode) ON (e.agent_id, e.status);
+CREATE INDEX skill_execution_idx FOR (s:SkillInvocation) ON (s.execution_node_id);
+CREATE INDEX skill_id_idx FOR (s:SkillInvocation) ON (s.skill_id);
+CREATE CONSTRAINT workflow_node_id_unique FOR (w:WorkflowDeclaration) REQUIRE w.node_id IS UNIQUE;
+CREATE CONSTRAINT execution_node_id_unique FOR (e:ExecutionNode) REQUIRE e.node_id IS UNIQUE;
+CREATE CONSTRAINT skill_node_id_unique FOR (s:SkillInvocation) REQUIRE s.node_id IS UNIQUE;
+```
+
+#### A.3 Reference forensic query patterns
+
+**"What led to this failure?"**
+```cypher
+MATCH (w:WorkflowDeclaration {node_id: $workflow_id})
+OPTIONAL MATCH (w)<-[:EXECUTES_WITHIN]-(e:ExecutionNode)
+OPTIONAL MATCH (e)<-[:INVOKED_WITHIN]-(s:SkillInvocation)
+RETURN w.workflow_name, w.status, e.step_name, e.status, e.error_type,
+       e.error_detail, s.skill_id, s.status, s.error_detail
+ORDER BY e.sequence_index, s.invoked_at
+```
+
+**"Full provenance chain: intention → mandate → workflow → execution"**
+```cypher
+MATCH (i:IntentionNode {node_id: $intention_id})
+OPTIONAL MATCH (i)<-[:SERVES_INTENTION]-(w:WorkflowDeclaration)
+OPTIONAL MATCH (w)-[:SPAWNED_BY_MANDATE]->(m:Mandate)
+OPTIONAL MATCH (w)<-[:EXECUTES_WITHIN]-(e:ExecutionNode)
+RETURN i, m, w, collect(e) AS executions
+```
+
+#### A.4 Reference CIA implementation
+
+The Ignis reference implementation designates a single MCP server (the `ignis_mcp_server`) as the CIA for all three Layer 3 node types in the SEL workspace. Enforcement is achieved through:
+
+- **Application-layer guard:** no other process holds Neo4j credentials with INSERT privileges on the Layer 3 labels.
+- **MCP-tool surface:** the four write tools (`ignis_declare_workflow`, `ignis_record_execution_step`, `ignis_record_skill_invocation`, `ignis_close_workflow`) are the only authorized write paths.
+- **Database constraint:** `node_id` uniqueness constraints (above) prevent accidental duplicate writes from any source.
+
+The `cia_identifier` value emitted in audit events for this implementation is `ignis_mcp_server@<workspace_id>`.
+
+---
+
+### Appendix B — Conformance Checklist
+
+A conforming Layer 3 implementation MUST:
+
+- [ ] Implement `WorkflowDeclaration`, `ExecutionNode`, and `SkillInvocation` with the fields specified in §4–§6, respecting all immutability constraints.
+- [ ] Support all seven edge types named in §7 (storage form is unconstrained).
+- [ ] Compute `content_hash` from a documented deterministic serialization per §8, including only the fields marked immutable-and-hashable and excluding all fields marked excluded-from-hash.
+- [ ] Enforce the immutability invariants of §9 — reject all mutation attempts on ExecutionNode and SkillInvocation; permit only `status`, `status_updated_at`, `error_detail` mutations on WorkflowDeclaration.
+- [ ] Enforce the WorkflowDeclaration state machine of §10, including the atomic auto-transition `DECLARED → IN_PROGRESS` on first ExecutionNode write.
+- [ ] Emit `WORKFLOW_DECLARED`, `EXECUTION_RECORDED`, `SKILL_INVOKED`, `WORKFLOW_CLOSED` audit events per §11, with `cia_identifier` populated, into a documented append-only hash-chained audit log.
+- [ ] Designate, in its `ConformanceDeclaration`, exactly one Cognitive Implementation Authority per Layer 3 node type, identify the enforcement mechanism, and demonstrate enforcement at the wire tier (§3, §12).
+- [ ] Document its chosen hash byte serialization in sufficient detail that an independent verifier can reproduce any Layer 3 node's hash from its field values (§8, W-L3-3).
+- [ ] Document its `skill_source` vocabulary, its audit chain-key dimension, and its CIA enforcement mechanism in its `ConformanceDeclaration` (§12, audit-the-decision pattern).
+- [ ] Leave `SkillInvocation.registry_id` null pending the future Skill Registry amendment (§13.2).
+
+A conforming Layer 3 implementation MUST NOT:
+
+- [ ] Include any Layer 3 field in the preimage of any Layer 1 or Layer 2 hash (§2, L3-I1).
+- [ ] Mutate any field of an `ExecutionNode` or `SkillInvocation` after creation (§9, L3-I3).
+- [ ] Mutate any field of a `WorkflowDeclaration` other than the three permitted (§9, L3-I4).
+- [ ] Provide a "retry" surface that updates a prior `ExecutionNode` (§9, L3-I5).
+- [ ] Admit Layer 3 writes from any principal other than the designated CIA for the relevant node type (§3, L3-I2).
+- [ ] Populate `SkillInvocation.registry_id` until the future Skill Registry amendment defines its semantics (§13.2).
+
+---
+
+*Amendment v3.0.0 — Working Draft. Episode of Record: `615b41e2-33cf-49e4-8491-b8a3f2e4cd75` (Autonomous Agentic Workflows and Skills). Pending ratification in a sealing episode.*
+
+## 22. References
 
 Internal Scorched Earth Labs design documents that informed the protocol:
 
