@@ -1286,6 +1286,89 @@ def write_departure_fork_point_sync(driver, fp) -> None:
         logger.warning(f"Ariadne: Failed to write DepartureForkPoint: {e}")
 
 
+def mark_departure_fork_status_sync(driver, fork_episode_id: str, status: str) -> None:
+    """Update a departure-fork Episode's fork_status (ACTIVE -> COMPLETED | ABANDONED)."""
+    if not _ariadne_guard():
+        return
+    try:
+        from datetime import datetime, timezone
+        with driver.session() as session:
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $episode_id})
+                SET e.fork_status = $status, e.fork_status_updated_at = $ts
+            """, {
+                "episode_id": str(fork_episode_id),
+                "status": status,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            })
+        logger.info(f"Ariadne: DepartureFork {str(fork_episode_id)[:8]}... -> {status}")
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to update departure-fork status: {e}")
+
+
+def write_fork_return_node_sync(driver, frn) -> None:
+    """Write a ForkReturnNode to the ORIGIN spine + FORK_RETURN edge (origin -> return
+    node) + RETURNED_FROM edge (return node -> fork episode). Declarative return."""
+    if not _ariadne_guard():
+        return
+    try:
+        from ariadne.core.schema import ARIADNE_SCHEMA_VERSION
+        with driver.session() as session:
+            session.run("""
+                MERGE (fr:AriadneForkReturn {fork_return_id: $fork_return_id})
+                ON CREATE SET
+                  fr.fork_id                    = $fork_id,
+                  fr.fork_episode_id            = $fork_episode_id,
+                  fr.origin_episode_id          = $origin_episode_id,
+                  fr.return_type                = $return_type,
+                  fr.synthesis_summary          = $synthesis_summary,
+                  fr.fork_final_spine_tip_hash  = $fork_final_spine_tip_hash,
+                  fr.returned_by                = $returned_by,
+                  fr.content_hash               = $content_hash,
+                  fr.parent_hash                = $parent_hash,
+                  fr.timestamp_utc              = $timestamp_utc,
+                  fr.schema_version             = $schema_version
+            """, {
+                "fork_return_id": str(frn.fork_return_id),
+                "fork_id": str(frn.fork_id),
+                "fork_episode_id": str(frn.fork_episode_id),
+                "origin_episode_id": str(frn.origin_episode_id),
+                "return_type": frn.return_type.value,
+                "synthesis_summary": frn.synthesis_summary,
+                "fork_final_spine_tip_hash": frn.fork_final_spine_tip_hash,
+                "returned_by": frn.returned_by,
+                "content_hash": frn.content_hash,
+                "parent_hash": frn.parent_hash,
+                "timestamp_utc": frn.timestamp_utc.isoformat(),
+                "schema_version": ARIADNE_SCHEMA_VERSION,
+            })
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $origin_episode_id})
+                MATCH (fr:AriadneForkReturn {fork_return_id: $fork_return_id})
+                MERGE (e)-[:FORK_RETURN {fork_id: $fork_id, created_at: $timestamp_utc}]->(fr)
+            """, {
+                "origin_episode_id": str(frn.origin_episode_id),
+                "fork_return_id": str(frn.fork_return_id),
+                "fork_id": str(frn.fork_id),
+                "timestamp_utc": frn.timestamp_utc.isoformat(),
+            })
+            session.run("""
+                MATCH (fr:AriadneForkReturn {fork_return_id: $fork_return_id})
+                MATCH (fe:AriadneEpisode {episode_id: $fork_episode_id})
+                MERGE (fr)-[:RETURNED_FROM {return_type: $return_type}]->(fe)
+            """, {
+                "fork_return_id": str(frn.fork_return_id),
+                "fork_episode_id": str(frn.fork_episode_id),
+                "return_type": frn.return_type.value,
+            })
+        logger.info(
+            f"Ariadne: ForkReturn {str(frn.fork_return_id)[:8]}... "
+            f"[{frn.return_type.value}] (fork={str(frn.fork_id)[:8]}...)"
+        )
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write ForkReturn: {e}")
+
+
 def mark_fork_point_status_sync(driver, fork_point_id: str, status: str) -> None:
     """Update a ForkPoint's fork_status — used by resolve_fork.
 

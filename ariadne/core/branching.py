@@ -67,6 +67,8 @@ class CognitiveDeltaType(str, Enum):
     MERGE_EXECUTED = "MERGE_EXECUTED"
     # Phase D — Departure Fork Lifecycle (single directional departure, origin continues)
     DEPARTURE_FORK_CREATED = "DEPARTURE_FORK_CREATED"
+    DEPARTURE_FORK_COMPLETED = "DEPARTURE_FORK_COMPLETED"
+    DEPARTURE_FORK_ABANDONED = "DEPARTURE_FORK_ABANDONED"
     DEPARTURE_FORK_RETURNED = "DEPARTURE_FORK_RETURNED"
     # Phase 3 — Social/Internal Primitives
     ASIDE_OPENED = "ASIDE_OPENED"
@@ -896,6 +898,60 @@ def compute_departure_fork_point_hash(
         f"{spine_tip_hash_at_departure}:{initiator}:{timestamp}:{parent_hash}"
     )
     return sha3_256(b"DEPARTURE_FORK_POINT:" + preimage.encode())
+
+
+class ForkReturnNode(BaseModel):
+    """Written to the ORIGINATING episode's spine by declare_fork_return() when a
+    COMPLETED departure fork's work is formally brought back. DECLARATIVE (the origin
+    asserts incorporation across two independent spines) — never the branch's
+    structural merge. Only written on an explicit return; resumption writes nothing.
+    (Ariadne BFM Phase D.)"""
+    fork_return_id: UUID = Field(default_factory=uuid4)
+    fork_id: UUID                                     # the returned departure fork
+    fork_episode_id: UUID                             # the (COMPLETED) fork episode
+    origin_episode_id: UUID                           # the episode being returned to
+    return_type: ForkReturnType                       # INCORPORATED | ACKNOWLEDGED | SUPERSEDED
+    synthesis_summary: str = ""                       # what the origin takes from the fork
+    fork_final_spine_tip_hash: str = ""               # fork episode's tip at return (integrity)
+    returned_by: str                                  # the originating agent (authority)
+    content_hash: str = ""
+    parent_hash: str = ""
+    timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    schema_version: str = ARIADNE_SCHEMA_VERSION
+
+
+class ForkReturnResult(BaseModel):
+    """Return value of declare_fork_return()."""
+    fork_return_id: str
+    fork_id: str
+    origin_episode_id: str
+    return_type: str
+    delta_id: str
+    audit_record_id: str
+
+
+def compute_fork_return_hash(
+    fork_return_id: str,
+    fork_id: str,
+    fork_episode_id: str,
+    origin_episode_id: str,
+    return_type: str,
+    synthesis_summary: str,
+    fork_final_spine_tip_hash: str,
+    returned_by: str,
+    timestamp: str,
+    parent_hash: str,
+) -> str:
+    """Compute the content hash of a ForkReturnNode.
+
+    Domain separation prefix: FORK_RETURN: (distinct from FORK_POINT: / MERGE_POINT:).
+    """
+    preimage = (
+        f"{fork_return_id}:{fork_id}:{fork_episode_id}:{origin_episode_id}:"
+        f"{return_type}:{synthesis_summary}:{fork_final_spine_tip_hash}:"
+        f"{returned_by}:{timestamp}:{parent_hash}"
+    )
+    return sha3_256(b"FORK_RETURN:" + preimage.encode())
 
 
 def compute_merge_point_hash(

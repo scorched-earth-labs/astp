@@ -850,6 +850,216 @@ def create_departure_fork(
         return None
 
 
+def _get_departure_fork_episode(driver, fork_episode_id=None, fork_id=None):
+    """Return (episode_id, fork_status) for a departure fork, or (None, None)."""
+    with driver.session() as session:
+        if fork_episode_id:
+            r = session.run(
+                "MATCH (e:AriadneEpisode {episode_id: $eid}) "
+                "RETURN e.episode_id AS eid, e.fork_status AS st",
+                {"eid": str(fork_episode_id)},
+            ).single()
+        else:
+            r = session.run(
+                "MATCH (e:AriadneEpisode {fork_id: $fid}) "
+                "RETURN e.episode_id AS eid, e.fork_status AS st",
+                {"fid": str(fork_id)},
+            ).single()
+    if not r:
+        return (None, None)
+    return (r["eid"], r["st"])
+
+
+def _audit_departure_transition(driver, episode_id, delta_type, actor, reason, caught_by="HUMAN"):
+    """Write an audit record for a departure-fork status transition on its own chain."""
+    from ariadne.core.branching import (
+        AuditRecord, TriggerType, compute_audit_record_hash,
+    )
+    from ariadne.adapters.neo4j.writer import write_audit_record_sync
+    forward = {"episode_id": str(episode_id), "actor": actor, "reason": reason,
+               "transition": delta_type.value}
+    reverse = {"note": "departure-fork status transition"}
+    ds = next_delta_sequence(driver, episode_id)
+    prior = fetch_prior_audit_hash(driver, episode_id)
+    audit = AuditRecord(
+        delta_sequence=ds, agent_id=actor, session_id=f"departure-status-{episode_id}",
+        delta_type=delta_type, forward_delta=forward, reverse_delta=reverse,
+        affected_nodes=[str(episode_id)], trigger_context=TriggerType.HUMAN_EXPLICIT,
+        explicit_reason=reason or delta_type.value, prior_audit_hash=prior,
+        caught_by=caught_by, episode_id=str(episode_id),
+    )
+    audit.record_hash = compute_audit_record_hash(
+        str(audit.audit_id), audit.delta_sequence, audit.delta_type.value,
+        audit.agent_id, audit.wall_clock_time.isoformat(),
+        json.dumps(forward, default=str), prior,
+    )
+    write_audit_record_sync(driver, audit)
+    return audit
+
+
+def complete_departure_fork(driver, fork_episode_id, actor="system", note="") -> bool:
+    """ACTIVE -> COMPLETED. First-person declaration by the fork episode's own agent
+    ("the work I came here to do is done"). Guards the fork is ACTIVE. (Phase D FSM.)"""
+    from ariadne.core.branching import CognitiveDeltaType, DepartureForkStatus
+    from ariadne.adapters.neo4j.writer import mark_departure_fork_status_sync
+    try:
+        eid, status = _get_departure_fork_episode(driver, fork_episode_id=fork_episode_id)
+        if not eid:
+            logger.error(f"Departure fork episode {fork_episode_id} not found")
+            return False
+        if status != DepartureForkStatus.ACTIVE.value:
+            logger.error(f"Cannot complete departure fork in status {status} (must be ACTIVE)")
+            return False
+        mark_departure_fork_status_sync(driver, eid, DepartureForkStatus.COMPLETED.value)
+        _audit_departure_transition(
+            driver, eid, CognitiveDeltaType.DEPARTURE_FORK_COMPLETED, actor, note
+        )
+        logger.info(f"Departure fork completed: {str(eid)[:8]}...")
+        return True
+    except Exception as e:
+        logger.error(f"complete_departure_fork failed: {e}", exc_info=True)
+        return False
+
+
+def abandon_departure_fork(driver, fork_episode_id, actor="system", reason="") -> bool:
+    """ACTIVE -> ABANDONED (terminal). The originating agent's judgment that the thread
+    isn't worth pursuing (or system cleanup of a never-entered stub). Guards ACTIVE —
+    a COMPLETED fork returns, it is not abandoned. (Phase D FSM.)"""
+    from ariadne.core.branching import CognitiveDeltaType, DepartureForkStatus
+    from ariadne.adapters.neo4j.writer import mark_departure_fork_status_sync
+    try:
+        eid, status = _get_departure_fork_episode(driver, fork_episode_id=fork_episode_id)
+        if not eid:
+            logger.error(f"Departure fork episode {fork_episode_id} not found")
+            return False
+        if status != DepartureForkStatus.ACTIVE.value:
+            logger.error(f"Cannot abandon departure fork in status {status} (must be ACTIVE)")
+            return False
+        mark_departure_fork_status_sync(driver, eid, DepartureForkStatus.ABANDONED.value)
+        _audit_departure_transition(
+            driver, eid, CognitiveDeltaType.DEPARTURE_FORK_ABANDONED, actor, reason
+        )
+        logger.info(f"Departure fork abandoned: {str(eid)[:8]}...")
+        return True
+    except Exception as e:
+        logger.error(f"abandon_departure_fork failed: {e}", exc_info=True)
+        return False
+
+
+def declare_fork_return(
+    driver, fork_id, origin_episode_id, return_type, returned_by,
+    synthesis_summary="", fork_episode_id=None,
+):
+    """Formally bring a COMPLETED departure fork's work back to the origin — DECLARATIVE
+    (the origin asserts incorporation across two independent spines), never the branch's
+    structural merge. Writes a ForkReturnNode on the ORIGIN spine (+ edges) and a
+    DEPARTURE_FORK_RETURNED audit on the origin chain. Authority: the originating agent.
+
+    Guards: fork must be COMPLETED; no prior return declaration for this fork_id.
+    Returns ForkReturnResult, or None. (Phase D FSM.)"""
+    from ariadne.core.branching import (
+        ForkReturnNode, ForkReturnResult, ForkReturnType, DepartureForkStatus,
+        AuditRecord, CognitiveDeltaType, TriggerType,
+        compute_fork_return_hash, compute_audit_record_hash,
+    )
+    from ariadne.adapters.neo4j.writer import (
+        write_fork_return_node_sync, write_audit_record_sync,
+    )
+    from uuid import UUID
+
+    try:
+        if not isinstance(return_type, ForkReturnType):
+            return_type = ForkReturnType(return_type)
+
+        # Guard: fork must be COMPLETED
+        f_eid, status = _get_departure_fork_episode(
+            driver, fork_episode_id=fork_episode_id, fork_id=fork_id
+        )
+        if not f_eid:
+            logger.error(f"Departure fork {fork_id} not found")
+            return None
+        if status != DepartureForkStatus.COMPLETED.value:
+            raise AriadneGovernanceError(
+                f"declare_fork_return requires a COMPLETED fork (got {status})"
+            )
+
+        # Guard: no prior return declaration for this fork
+        with driver.session() as session:
+            prior_ret = session.run(
+                "MATCH (fr:AriadneForkReturn {fork_id: $fid}) "
+                "RETURN fr.fork_return_id AS id LIMIT 1",
+                {"fid": str(fork_id)},
+            ).single()
+        if prior_ret:
+            raise AriadneGovernanceError(
+                f"Departure fork {fork_id} already has a return declaration"
+            )
+
+        fork_tip = fetch_prior_audit_hash(driver, f_eid)  # fork episode's spine tip at return
+        frn = ForkReturnNode(
+            fork_id=UUID(str(fork_id)),
+            fork_episode_id=UUID(str(f_eid)),
+            origin_episode_id=UUID(str(origin_episode_id)),
+            return_type=return_type,
+            synthesis_summary=synthesis_summary,
+            fork_final_spine_tip_hash=fork_tip,
+            returned_by=returned_by,
+        )
+        frn.content_hash = compute_fork_return_hash(
+            str(frn.fork_return_id), str(frn.fork_id), str(frn.fork_episode_id),
+            str(frn.origin_episode_id), return_type.value, synthesis_summary,
+            fork_tip, returned_by, frn.timestamp_utc.isoformat(), frn.parent_hash,
+        )
+        write_fork_return_node_sync(driver, frn)
+
+        # Record the return outcome on the fork episode
+        with driver.session() as session:
+            session.run(
+                "MATCH (e:AriadneEpisode {episode_id: $eid}) SET e.fork_return_type = $rt",
+                {"eid": str(f_eid), "rt": return_type.value},
+            )
+
+        # Audit on the ORIGIN chain
+        forward = {
+            "fork_id": str(fork_id), "fork_episode_id": str(f_eid),
+            "origin_episode_id": str(origin_episode_id), "return_type": return_type.value,
+            "fork_return_id": str(frn.fork_return_id),
+        }
+        reverse = {"delete_fork_return_id": str(frn.fork_return_id)}
+        ds = next_delta_sequence(driver, origin_episode_id)
+        prior = fetch_prior_audit_hash(driver, origin_episode_id)
+        audit = AuditRecord(
+            delta_sequence=ds, agent_id=returned_by, session_id=f"fork-return-{fork_id}",
+            delta_type=CognitiveDeltaType.DEPARTURE_FORK_RETURNED,
+            forward_delta=forward, reverse_delta=reverse,
+            affected_nodes=[str(frn.fork_return_id)],
+            trigger_context=TriggerType.HUMAN_EXPLICIT,
+            explicit_reason=f"fork return: {return_type.value}",
+            prior_audit_hash=prior, caught_by="HUMAN", episode_id=str(origin_episode_id),
+        )
+        audit.record_hash = compute_audit_record_hash(
+            str(audit.audit_id), audit.delta_sequence, audit.delta_type.value,
+            audit.agent_id, audit.wall_clock_time.isoformat(),
+            json.dumps(forward, default=str), prior,
+        )
+        write_audit_record_sync(driver, audit)
+
+        logger.info(
+            f"Departure fork returned: {str(fork_id)[:8]}... "
+            f"[{return_type.value}] to origin {str(origin_episode_id)[:8]}..."
+        )
+        return ForkReturnResult(
+            fork_return_id=str(frn.fork_return_id), fork_id=str(fork_id),
+            origin_episode_id=str(origin_episode_id), return_type=return_type.value,
+            delta_id=str(audit.audit_id), audit_record_id=str(audit.audit_id),
+        )
+    except AriadneGovernanceError:
+        raise
+    except Exception as e:
+        logger.error(f"declare_fork_return failed: {e}", exc_info=True)
+        return None
+
+
 def resolve_fork(
     driver,
     fork_id: str,
