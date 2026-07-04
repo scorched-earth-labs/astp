@@ -65,6 +65,9 @@ class CognitiveDeltaType(str, Enum):
     FORK_CREATED = "FORK_CREATED"
     FORK_RESOLVED = "FORK_RESOLVED"
     MERGE_EXECUTED = "MERGE_EXECUTED"
+    # Phase D — Departure Fork Lifecycle (single directional departure, origin continues)
+    DEPARTURE_FORK_CREATED = "DEPARTURE_FORK_CREATED"
+    DEPARTURE_FORK_RETURNED = "DEPARTURE_FORK_RETURNED"
     # Phase 3 — Social/Internal Primitives
     ASIDE_OPENED = "ASIDE_OPENED"
     ASIDE_CLOSED = "ASIDE_CLOSED"
@@ -147,6 +150,7 @@ class IntentType(str, Enum):
     """Types of intents that can be acquired."""
     CREATE_BRANCH = "CREATE_BRANCH"
     CREATE_FORK = "CREATE_FORK"
+    CREATE_DEPARTURE_FORK = "CREATE_DEPARTURE_FORK"
     MERGE = "MERGE"
     ABANDON_BRANCH = "ABANDON_BRANCH"
 
@@ -782,6 +786,116 @@ def compute_fork_point_hash(
         f"{timestamp}:{parent_hash}"
     )
     return sha3_256(b"FORK_POINT:" + preimage.encode())
+
+
+# ============================================================================
+# Phase D — Departure Fork Lifecycle
+#
+# A DEPARTURE fork is distinct from the speculative fork above. It is a single
+# directional departure: one topic diverges into one new episode while the
+# originating episode CONTINUES uninterrupted. There are no siblings and no
+# resolve/promote/discard — "fork is a verb, not a noun; if not abandoned it IS
+# an episode." (Ariadne BFM Phase D, Episode 49372907, Clotho + Devin.)
+# ============================================================================
+
+
+class ForkCreationTrigger(str, Enum):
+    """What precipitated a departure fork. EXPLORATORY_THREAD routes to the
+    speculative create_fork(), not create_departure_fork()."""
+    TOPIC_SHIFT = "TOPIC_SHIFT"            # distinct new topic diverged (ACI or human)
+    PARALLEL_THREAD = "PARALLEL_THREAD"    # a parallel line of inquiry opened
+    EXPLICIT_FORK = "EXPLICIT_FORK"        # human/agent explicitly requested a fork
+    AGENT_ESCALATION = "AGENT_ESCALATION"  # ACI-detected escalation (trigger segment required)
+
+
+class DepartureForkStatus(str, Enum):
+    """Lifecycle status of a departure-fork episode. Distinct vocabulary from the
+    speculative fork's PROMOTED/DISCARDED — an ABANDONED departure is not a
+    DISCARDED alternative. ACTIVE covers both in-progress and parked (resumed)."""
+    ACTIVE = "ACTIVE"          # available for work (in-progress OR parked)
+    COMPLETED = "COMPLETED"    # the fork's own work is done (guards formal return)
+    ABANDONED = "ABANDONED"    # never developed / no longer pursued (terminal)
+
+
+class ForkReturnType(str, Enum):
+    """How a completed departure fork's work is brought back to the origin. A
+    fork return is DECLARATIVE (cross-episode assertion), never the branch's
+    STRUCTURAL MERGED (shared spine) — hence INCORPORATED, not MERGED."""
+    INCORPORATED = "INCORPORATED"    # origin incorporates the fork's work
+    ACKNOWLEDGED = "ACKNOWLEDGED"    # noted, not incorporated
+    SUPERSEDED = "SUPERSEDED"        # origin moved past it; informational
+
+
+class DepartureForkPointNode(BaseModel):
+    """Written to the ORIGINATING episode's spine by create_departure_fork() —
+    the single departure marker. Distinct label/hash-domain from the speculative
+    ForkPointNode. `spine_tip_hash_at_departure` must equal the fork episode's
+    `fork_origin_spine_tip_hash` (cross-verifiable integrity invariant)."""
+    fork_point_id: UUID = Field(default_factory=uuid4)
+    fork_id: UUID                                     # shared with the fork episode's provenance
+    fork_episode_id: UUID                             # the created (continuing) fork episode
+    origin_episode_id: UUID                           # episode the departure left from
+    origin_segment_id: str                            # provenance anchor (departure point)
+    fork_objective: str                               # the fork episode's objective
+    fork_creation_trigger: ForkCreationTrigger
+    fork_title_snapshot: str = ""                     # fork title at creation (display)
+    spine_tip_hash_at_departure: str                  # origin spine tip hash at departure
+    initiator: str
+    content_hash: str = ""
+    parent_hash: str = ""
+    timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    schema_version: str = ARIADNE_SCHEMA_VERSION
+
+
+class DepartureForkResult(BaseModel):
+    """Return value of create_departure_fork()."""
+    fork_id: str
+    fork_point_id: str
+    fork_episode_id: str
+    origin_episode_id: str
+    origin_segment_id: str
+    spine_tip_hash_at_departure: str
+    delta_id: str
+    audit_record_id: str
+
+
+class DepartureForkCreatedDelta(BaseModel):
+    """Forward + reverse delta for DEPARTURE_FORK_CREATED."""
+    origin_episode_id: str
+    origin_segment_id: str
+    fork_id: str
+    fork_episode_id: str
+    fork_objective: str
+    fork_creation_trigger: str
+    spine_tip_hash_at_departure: str
+    reverse_delete_fork_id: str
+    reverse_delete_fork_point_id: str
+    reverse_delete_fork_episode_id: str
+
+
+def compute_departure_fork_point_hash(
+    fork_point_id: str,
+    fork_id: str,
+    fork_episode_id: str,
+    origin_episode_id: str,
+    origin_segment_id: str,
+    fork_objective: str,
+    fork_creation_trigger: str,
+    spine_tip_hash_at_departure: str,
+    initiator: str,
+    timestamp: str,
+    parent_hash: str,
+) -> str:
+    """Compute the content hash of a DepartureForkPointNode.
+
+    Domain separation prefix: DEPARTURE_FORK_POINT: (distinct from FORK_POINT:).
+    """
+    preimage = (
+        f"{fork_point_id}:{fork_id}:{fork_episode_id}:{origin_episode_id}:"
+        f"{origin_segment_id}:{fork_objective}:{fork_creation_trigger}:"
+        f"{spine_tip_hash_at_departure}:{initiator}:{timestamp}:{parent_hash}"
+    )
+    return sha3_256(b"DEPARTURE_FORK_POINT:" + preimage.encode())
 
 
 def compute_merge_point_hash(

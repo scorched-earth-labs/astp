@@ -86,6 +86,7 @@ class FakeStore:
         self.branch_points: Dict[str, Dict[str, Any]] = {}
         self.branch_terminuses: List[Dict[str, Any]] = []
         self.fork_points: Dict[str, Dict[str, Any]] = {}
+        self.departure_points: Dict[str, Dict[str, Any]] = {}  # Phase D
         self.merge_points: Dict[str, Dict[str, Any]] = {}
         self.audit_records: List[Dict[str, Any]] = []
         self.intents: Dict[str, Dict[str, Any]] = {}  # by idempotency_key
@@ -265,6 +266,16 @@ class FakeStore:
                     fd = a.get("forward_delta", "")
                     if mid in str(fd):
                         return FakeResult([{"fd": fd}])
+            return FakeResult([])
+
+        # Create DepartureForkPoint (Phase D)
+        if "MERGE (fp:AriadneDepartureForkPoint" in q and "fork_point_id: $fork_point_id" in q:
+            self.departure_points[params.get("fork_point_id")] = dict(params)
+            return FakeResult([])
+
+        # Create departure-fork Episode node (Phase D — MERGE with ON CREATE SET)
+        if "MERGE (e:AriadneEpisode {episode_id: $episode_id}" in q and "fork_status" in q:
+            self.episodes[params.get("episode_id")] = dict(params)
             return FakeResult([])
 
         # Catch-all: edges / WIL / other merges — silently succeed
@@ -674,3 +685,97 @@ class TestAuditChainContinuity:
         assert audits[1]["delta_sequence"] == 2
         # Chain link: second record's prior_audit_hash == first's record_hash
         assert audits[1]["prior_audit_hash"] == audits[0]["record_hash"]
+
+
+class TestCreateDepartureFork:
+    """Phase D — the single directional departure fork (origin continues)."""
+
+    def test_creates_episode_point_and_audit(self):
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])
+        driver = FakeDriver(store)
+
+        result = branch_operations.create_departure_fork(
+            driver,
+            origin_episode_id=oid,
+            origin_segment_id="seg-1",
+            fork_objective="Explore the DAG tangent",
+            fork_creation_trigger="TOPIC_SHIFT",
+            initiator="clotho",
+            fork_title="DAG tangent",
+        )
+
+        assert result is not None
+        assert result.fork_id and result.fork_point_id and result.fork_episode_id
+        # single departure point written (no siblings)
+        assert len(store.departure_points) == 1
+        dp = store.departure_points[result.fork_point_id]
+        assert dp["fork_creation_trigger"] == "TOPIC_SHIFT"
+        # the fork episode was created ACTIVE with provenance
+        fe = store.episodes[result.fork_episode_id]
+        assert fe["fork_status"] == "ACTIVE"
+        assert fe["fork_origin_episode_id"] == oid
+        # DEPARTURE_FORK_CREATED audit written
+        dep_audits = [a for a in store.audit_records
+                      if a.get("delta_type") == "DEPARTURE_FORK_CREATED"]
+        assert len(dep_audits) == 1
+        assert dep_audits[0]["record_hash"]
+
+    def test_backdating_integrity_invariant(self):
+        """spine_tip_hash_at_departure (point) == fork_origin_spine_tip_hash (episode)."""
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])
+        driver = FakeDriver(store)
+        result = branch_operations.create_departure_fork(
+            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            fork_objective="obj", fork_creation_trigger="PARALLEL_THREAD", initiator="x",
+        )
+        dp = store.departure_points[result.fork_point_id]
+        fe = store.episodes[result.fork_episode_id]
+        assert dp["spine_tip_hash_at_departure"] == fe["fork_origin_spine_tip_hash"]
+        assert result.spine_tip_hash_at_departure == dp["spine_tip_hash_at_departure"]
+
+    def test_origin_episode_continues_untouched(self):
+        """A departure does NOT resolve or alter the origin — it continues."""
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])
+        driver = FakeDriver(store)
+        branch_operations.create_departure_fork(
+            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            fork_objective="obj", fork_creation_trigger="EXPLICIT_FORK", initiator="x",
+        )
+        assert store.episodes[oid]["status"] == "ACTIVE"  # origin unchanged
+
+    def test_agent_escalation_requires_trigger_segment(self):
+        from ariadne.core.schema import AriadneGovernanceError
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])
+        driver = FakeDriver(store)
+        # missing fork_trigger_segment_id → governance error
+        try:
+            branch_operations.create_departure_fork(
+                driver, origin_episode_id=oid, origin_segment_id="seg-1",
+                fork_objective="obj", fork_creation_trigger="AGENT_ESCALATION", initiator="aci",
+            )
+            assert False, "expected AriadneGovernanceError"
+        except AriadneGovernanceError:
+            pass
+        # with the trigger segment → succeeds
+        result = branch_operations.create_departure_fork(
+            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            fork_objective="obj", fork_creation_trigger="AGENT_ESCALATION",
+            initiator="aci", fork_trigger_segment_id="seg-trigger",
+        )
+        assert result is not None
+
+    def test_idempotent_on_repeat(self):
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])
+        driver = FakeDriver(store)
+        kw = dict(origin_episode_id=oid, origin_segment_id="seg-1",
+                  fork_objective="same obj", fork_creation_trigger="TOPIC_SHIFT", initiator="x")
+        r1 = branch_operations.create_departure_fork(driver, **kw)
+        r2 = branch_operations.create_departure_fork(driver, **kw)
+        assert r1 is not None and r2 is not None
+        # second call short-circuits on the COMPLETE intent — no second departure point
+        assert len(store.departure_points) == 1

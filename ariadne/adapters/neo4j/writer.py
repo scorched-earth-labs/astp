@@ -1156,6 +1156,136 @@ def write_fork_point_sync(driver, fork_point) -> None:
         logger.warning(f"Ariadne: Failed to write ForkPoint: {e}")
 
 
+def write_departure_fork_episode_sync(driver, episode) -> None:
+    """Write the new departure-fork AriadneEpisode node (ACTIVE) with its immutable
+    fork provenance. Sync counterpart of create_episode_node, extended with the
+    Phase-D fork_* provenance fields so episode + provenance land atomically inside
+    create_departure_fork(). (Ariadne BFM Phase D.)"""
+    if not _ariadne_guard():
+        return
+    try:
+        with driver.session() as session:
+            session.run("""
+                MERGE (e:AriadneEpisode {episode_id: $episode_id})
+                ON CREATE SET
+                  e.schema_version              = $schema_version,
+                  e.agent_id                    = $agent_id,
+                  e.opened_at                   = $opened_at,
+                  e.episode_status              = $episode_status,
+                  e.participants                = $participants,
+                  e.title                       = $title,
+                  e.context_note                = $context_note,
+                  e.episode_type                = $episode_type,
+                  e.initiated_by                = $initiated_by,
+                  e.episode_mode                = $episode_mode,
+                  e.spine_hash                  = null,
+                  e.signal_manifest_hash        = null,
+                  e.episode_root_hash           = null,
+                  e.sealed_at                   = null,
+                  e.archived_at                 = null,
+                  e.fork_origin_episode_id      = $fork_origin_episode_id,
+                  e.fork_anchor_index           = $fork_anchor_index,
+                  e.fork_id                     = $fork_id,
+                  e.fork_created_at             = $fork_created_at,
+                  e.fork_creation_trigger       = $fork_creation_trigger,
+                  e.fork_trigger_confidence     = $fork_trigger_confidence,
+                  e.fork_trigger_segment_id     = $fork_trigger_segment_id,
+                  e.fork_origin_spine_tip_hash  = $fork_origin_spine_tip_hash,
+                  e.fork_origin_active_branch_ids = $fork_origin_active_branch_ids,
+                  e.fork_status                 = $fork_status
+            """, {
+                "episode_id": str(episode.episode_id),
+                "schema_version": episode.schema_version,
+                "agent_id": episode.agent_id,
+                "opened_at": episode.opened_at.isoformat(),
+                "episode_status": episode.episode_status.value,
+                "participants": episode.participants,
+                "title": episode.title,
+                "context_note": episode.context_note,
+                "episode_type": episode.episode_type,
+                "initiated_by": episode.initiated_by,
+                "episode_mode": episode.episode_mode,
+                "fork_origin_episode_id": str(episode.fork_origin_episode_id) if episode.fork_origin_episode_id else None,
+                "fork_anchor_index": episode.fork_anchor_index,
+                "fork_id": str(episode.fork_id) if episode.fork_id else None,
+                "fork_created_at": episode.fork_created_at.isoformat() if episode.fork_created_at else None,
+                "fork_creation_trigger": episode.fork_creation_trigger,
+                "fork_trigger_confidence": episode.fork_trigger_confidence,
+                "fork_trigger_segment_id": episode.fork_trigger_segment_id,
+                "fork_origin_spine_tip_hash": episode.fork_origin_spine_tip_hash,
+                "fork_origin_active_branch_ids": episode.fork_origin_active_branch_ids,
+                "fork_status": episode.fork_status,
+            })
+        logger.info(
+            f"Ariadne: Departure-fork Episode {str(episode.episode_id)[:8]}... "
+            f"created ACTIVE (origin={str(episode.fork_origin_episode_id)[:8] if episode.fork_origin_episode_id else '?'}...)"
+        )
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write departure-fork episode: {e}")
+
+
+def write_departure_fork_point_sync(driver, fp) -> None:
+    """Write a DepartureForkPointNode to the origin spine + FORK_ORIGIN edge
+    (origin Episode -> departure fork point). Single node (no siblings)."""
+    if not _ariadne_guard():
+        return
+    try:
+        from ariadne.core.schema import ARIADNE_SCHEMA_VERSION
+        with driver.session() as session:
+            session.run("""
+                MERGE (fp:AriadneDepartureForkPoint {fork_point_id: $fork_point_id})
+                ON CREATE SET
+                  fp.fork_id                     = $fork_id,
+                  fp.fork_episode_id             = $fork_episode_id,
+                  fp.origin_episode_id           = $origin_episode_id,
+                  fp.origin_segment_id           = $origin_segment_id,
+                  fp.fork_objective              = $fork_objective,
+                  fp.fork_creation_trigger       = $fork_creation_trigger,
+                  fp.fork_title_snapshot         = $fork_title_snapshot,
+                  fp.spine_tip_hash_at_departure = $spine_tip_hash_at_departure,
+                  fp.initiator                   = $initiator,
+                  fp.content_hash                = $content_hash,
+                  fp.parent_hash                 = $parent_hash,
+                  fp.timestamp_utc               = $timestamp_utc,
+                  fp.schema_version              = $schema_version
+            """, {
+                "fork_point_id": str(fp.fork_point_id),
+                "fork_id": str(fp.fork_id),
+                "fork_episode_id": str(fp.fork_episode_id),
+                "origin_episode_id": str(fp.origin_episode_id),
+                "origin_segment_id": fp.origin_segment_id,
+                "fork_objective": fp.fork_objective,
+                "fork_creation_trigger": fp.fork_creation_trigger.value,
+                "fork_title_snapshot": fp.fork_title_snapshot,
+                "spine_tip_hash_at_departure": fp.spine_tip_hash_at_departure,
+                "initiator": fp.initiator,
+                "content_hash": fp.content_hash,
+                "parent_hash": fp.parent_hash,
+                "timestamp_utc": fp.timestamp_utc.isoformat(),
+                "schema_version": ARIADNE_SCHEMA_VERSION,
+            })
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $origin_episode_id})
+                MATCH (fp:AriadneDepartureForkPoint {fork_point_id: $fork_point_id})
+                MERGE (e)-[:FORK_ORIGIN {
+                    fork_id: $fork_id,
+                    departure: true,
+                    created_at: $timestamp_utc
+                }]->(fp)
+            """, {
+                "origin_episode_id": str(fp.origin_episode_id),
+                "fork_point_id": str(fp.fork_point_id),
+                "fork_id": str(fp.fork_id),
+                "timestamp_utc": fp.timestamp_utc.isoformat(),
+            })
+        logger.info(
+            f"Ariadne: DepartureForkPoint {str(fp.fork_point_id)[:8]}... "
+            f"[{fp.fork_creation_trigger.value}] (fork={str(fp.fork_id)[:8]}...)"
+        )
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write DepartureForkPoint: {e}")
+
+
 def mark_fork_point_status_sync(driver, fork_point_id: str, status: str) -> None:
     """Update a ForkPoint's fork_status — used by resolve_fork.
 
