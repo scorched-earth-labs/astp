@@ -1,7 +1,7 @@
 # Ariadne State Tree Protocol Specification
 
-**Version:** 3.1.0
-**Status:** Stable. v3.0 (cross-episode linking + grouping) and v3.1 (Layer 3 Workflow & Execution DAG) are normatively defined by their amendment documents until the SPEC integration pass folds them into this document's body. See [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) and [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md). Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
+**Version:** 3.2.0
+**Status:** Stable. The Phase D departure-fork lifecycle (v3.2.0) is defined in-body at §19.3.5–19.3.6. v3.0 (cross-episode linking + grouping) and v3.1 (Layer 3 Workflow & Execution DAG) are normatively defined by their amendment documents until the SPEC integration pass folds them into this document's body. See [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) and [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md). Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-06-07
 **Supersedes:** SPEC-v1.md (0.1.0-draft)
@@ -925,6 +925,7 @@ This test should be run bidirectionally (A→B and B→A).
 | 2.5.0-draft | 2026-04-21 | Branch/Fork/Merge Taxonomy §19 covering BFM Phases 1–4: BranchPoint/BranchTerminus (§19.2), ForkPoint/MergePoint/BranchReturn with three-Merkle-root verification (§19.3), AsideSegment/SoliloquySegment with HASH_PLACEHOLDER content policy and Decision 1 visibility (§19.4), CoherenceFingerprint write-intercept state machine and ConfirmationCache (§19.5). New governance rules G-19 through G-29. New delta types BRANCH_CREATED/ABANDONED, FORK_CREATED/RESOLVED, MERGE_EXECUTED, ASIDE_OPENED/CLOSED, SOLILOQUY_INITIATED/CONCLUDED. AuditRecord chain integrity (`prior_audit_hash`), IntentRecord idempotency, derived lifecycle state (§19.2.4). |
 | 3.0.0 | 2026-06-07 | **MAJOR** — Cross-episode linking + grouping. Source: [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md). Typed `EpisodeLink` with `LinkType`, `LinkHealthState`, `Signal`/`SignalType` machinery. `EpisodeGrouping` interface (`MembershipRecord` as protocol-owned artifact; `ConformanceDeclaration` for downstream conformance). Succession-chain governance for membership/conformance. Audit-the-decision pattern for behavioral-tier implementation choices (§12). Three-tier conformance taxonomy: wire / state / behavioral. **Breaking hash preimage changes on `EpisodeLink`, `MembershipRecord`, `ConformanceDeclaration`** — see amendment Appendix A for the full breaking-change reference. `LINK_*` audit events + `assert_episode_link` operation. Phase 2 discovery primitives (link proposals + calibration loop). Audit-chain + canonical-hash helpers lifted into shared core modules. |
 | 3.1.0 | 2026-06-07 | **MINOR** — Layer 3 Workflow & Execution DAG. Source: [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md). New node types: `WorkflowDeclaration`, `ExecutionNode`, `SkillInvocation`. Three-Merkle-layer model formalized: Layer 1 Spine, Layer 2 episode content, Layer 3 Workflow & Execution DAG. **Layer 3 is cryptographically isolated from Spine integrity** — references Layers 1/2 by ID only; never hash-linked into the Spine; no future Layer-3 change can force a MAJOR bump on Spine grounds. Cognitive Implementation Authority (CIA) — sole-writer guarantee as wire-tier conformance principle. New `CognitiveDeltaType` variants. `ExecutionNode` and `SkillInvocationNode` immutable after creation; only mutable Layer 3 field is `WorkflowDeclaration.status` (and `status_updated_at`). Hash byte-form left open at protocol layer per amendment §3. |
+| 3.2.0 | 2026-07-04 | **MINOR** — Phase D departure-fork lifecycle, defined in-body (§19.3.5–19.3.6). `create_departure_fork()`: a single directional departure into a new (continuing) Episode, distinct from the speculative `create_fork()`. New nodes `DepartureForkPointNode` (domain `DEPARTURE_FORK_POINT:`) and `ForkReturnNode` (domain `FORK_RETURN:`). Backdating integrity invariant (G-30): `spine_tip_hash_at_departure` == the fork Episode's `fork_origin_spine_tip_hash`. Lifecycle FSM `ACTIVE → COMPLETED \| ABANDONED` (`complete_departure_fork` / `abandon_departure_fork` / `declare_fork_return`); resumption is a non-event. **Declarative** return (`INCORPORATED`/`ACKNOWLEDGED`/`SUPERSEDED`), never the branch's structural merge. Immutable Episode fork provenance (§19.3.6). New `CognitiveDeltaType` variants `DEPARTURE_FORK_CREATED`/`_COMPLETED`/`_ABANDONED`/`_RETURNED`; new edges `FORK_RETURN`, `RETURNED_FROM`. Governance G-30 through G-35. **Additive — no breaking changes.** |
 
 ## 19. Branch/Fork/Merge Taxonomy
 
@@ -1118,6 +1119,68 @@ On merge, a `BRANCH_RETURN` edge connects `BranchTerminusNode(MERGED)`
 to the `MergePointNode` on the target spine. Carries
 `synthesis_summary` and `nodes_integrated`.
 
+#### 19.3.5 DepartureForkPointNode (Phase D — Departure Fork Lifecycle)
+
+A **departure fork** is distinct from the speculative fork of §19.3.1. It is a
+single **directional departure**: one topic diverges into a new Episode while the
+originating Episode *continues* uninterrupted. There are no siblings and no
+resolve/promote/discard — a departure fork, if not abandoned, *is* an Episode
+("fork is a verb, not a noun"). Created by `create_departure_fork()`.
+Domain prefix: `DEPARTURE_FORK_POINT:`.
+
+`create_departure_fork()` writes atomically: the new fork Episode (status ACTIVE,
+carrying the immutable fork provenance of §19.3.6), a single
+`DepartureForkPointNode` on the *originating* spine (`FORK_ORIGIN` edge), and a
+`DEPARTURE_FORK_CREATED` audit record.
+
+**G-30 (Backdating integrity invariant).**
+`DepartureForkPointNode.spine_tip_hash_at_departure` == the fork Episode's
+`fork_origin_spine_tip_hash`. Both are the originating spine tip at the departure
+moment; a mismatch is a fatal integrity violation at creation. The branch point
+records where divergence *began*, cross-verifiable across the two independent spines.
+
+Governance:
+- **G-31.** `fork_objective` non-empty (as G-19).
+- **G-32.** `fork_creation_trigger ∈ {TOPIC_SHIFT, PARALLEL_THREAD, EXPLICIT_FORK,
+  AGENT_ESCALATION}`. `EXPLORATORY_THREAD` routes to the speculative `create_fork()`,
+  not here.
+- **G-33.** `fork_trigger_segment_id` required when `fork_creation_trigger ==
+  AGENT_ESCALATION`.
+
+**Lifecycle FSM.** States `ACTIVE → COMPLETED | ABANDONED`, a distinct vocabulary
+from the speculative fork's `PROMOTED | DISCARDED` (an abandoned departure is not a
+discarded alternative). `ACTIVE` covers both in-progress and *parked*;
+**resumption** — re-entering the origin while the fork stays ACTIVE — is a
+non-event: no node, no declaration.
+
+- `complete_departure_fork()` — `ACTIVE → COMPLETED`. A first-person declaration by
+  the fork Episode's own agent. Writes `DEPARTURE_FORK_COMPLETED`.
+- `abandon_departure_fork()` — `ACTIVE → ABANDONED` (terminal). By the originating
+  agent, or system cleanup of a never-entered stub. A COMPLETED fork returns; it is
+  not abandoned. Writes `DEPARTURE_FORK_ABANDONED`.
+
+**Formal return.** `declare_fork_return()` (authority: the originating agent) writes
+a `ForkReturnNode` to the *originating* spine (`FORK_RETURN` edge) plus a
+`RETURNED_FROM` edge to the fork Episode, and a `DEPARTURE_FORK_RETURNED` audit.
+Domain prefix: `FORK_RETURN:`. A fork return is **declarative** — the origin asserts
+incorporation across two independent spines — never the branch's *structural*
+merge; integration content is written as subsequent origin-spine segments.
+`return_type ∈ {INCORPORATED, ACKNOWLEDGED, SUPERSEDED}`.
+- **G-34.** The fork must be `COMPLETED` before a return may be declared.
+- **G-35.** At most one return declaration per `fork_id`.
+
+Resumption requires no node; only a formal return writes to the spine.
+
+#### 19.3.6 Departure-fork Episode provenance
+
+An Episode created via `create_departure_fork()` carries immutable provenance
+fields, set once at creation and never mutated: `fork_origin_episode_id`,
+`fork_anchor_index`, `fork_id`, `fork_created_at`, `fork_creation_trigger`,
+`fork_trigger_confidence`, `fork_trigger_segment_id`, `fork_origin_spine_tip_hash`,
+`fork_origin_active_branch_ids`, `fork_status`, `fork_return_type`. This is
+provenance — "how did this Episode come to exist" — not identity, analogous to
+`continuation_of`. Null on non-fork Episodes.
+
 ### 19.4 Phase 3 — Social/Internal Primitives
 
 #### 19.4.1 AsideSegmentNode
@@ -1261,14 +1324,21 @@ Expiry is checked at read time; expired entries are discarded.
 | `SOLILOQUY_OPEN` | Episode → Soliloquy | 3 |
 | `SOLILOQUY_CONCLUDED` | Soliloquy → SoliloquyConclusion | 3 |
 | `FINGERPRINTS` | Episode → CoherenceFingerprint | 4 |
+| `FORK_ORIGIN` (departure) | Origin Episode → DepartureForkPoint | D |
+| `FORK_RETURN` | Origin Episode → ForkReturn | D |
+| `RETURNED_FROM` | ForkReturn → Fork Episode | D |
 
 ### 19.7 Implementation Status
 
-All four BFM phases are implemented and covered by unit tests against
-the Neo4j adapter (mocked driver). See `tests/unit/protocol/test_phase2_*.py`,
-`test_phase3_*.py`, `test_phase4_*.py`.
+All four BFM phases **plus the Phase D departure-fork lifecycle** are implemented
+and covered by unit tests against the Neo4j adapter (mocked driver). See
+`tests/unit/protocol/test_phase2_*.py`, `test_phase3_*.py`, `test_phase4_*.py`, and
+the departure-fork suites in `test_phase2_operations.py` (`TestCreateDepartureFork`,
+`TestDepartureForkFSM`).
 
-Scoping notes deliberately left in the implementation layer:
+The following are **known limitations / forward-compatible extensions** —
+deliberately scoped out of this version, non-breaking to add later, and safe to
+build on:
 
 1. **`target_merkle_root_post`** in `execute_merge()` is computed
    deterministically from pre-merge roots and resolutions rather than
