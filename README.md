@@ -163,7 +163,22 @@ Protocol amendments are ratified in a designated Episode of Record and reference
 
 **SPEC v3.1.0 (Layer 3, MINOR)** formalizes the three-Merkle-layer model and codifies Layer 3 — `WorkflowDeclaration`, `ExecutionNode`, `SkillInvocation`. Layer 3 is cryptographically isolated from Spine integrity by construction (Layer 3 nodes reference Layers 1/2 by ID only; never participate in Spine hashing), so no future Layer-3 change can force a MAJOR bump on Spine grounds. Each Layer 3 node type has a designated Cognitive Implementation Authority (CIA) — sole-writer guarantee as a wire-tier conformance principle.
 
-The SPEC integration pass that folds the amendment material into `SPEC.md`'s body remains pending; until that lands, the amendment documents are the normative source for the surface they define.
+The SPEC integration pass landed in **v3.2.1**: this material is now normatively defined in the `SPEC.md` body (§20, §21), and each surface has a companion implementation guide and conformance-vector document (see **Specification Documents** below).
+
+---
+
+## Specification Documents
+
+The protocol is one normative document (`SPEC.md`) plus, per feature surface, a non-normative implementation guide (reference Neo4j adapter) and a conformance-vector document (cross-implementation test vectors).
+
+| Surface | SPEC | Implementation guide | Conformance vectors |
+|---------|------|----------------------|---------------------|
+| Branch / Fork / Merge + **Departure Fork** | §19 | [`IMPLEMENTATION-BFM.md`](./IMPLEMENTATION-BFM.md) | [`CONFORMANCE-BFM.md`](./CONFORMANCE-BFM.md) |
+| Cross-Episode Linking & Grouping | §20 | [`IMPLEMENTATION-CROSS-EPISODE-LINKING.md`](./IMPLEMENTATION-CROSS-EPISODE-LINKING.md) | [`CONFORMANCE-CROSS-EPISODE-LINKING.md`](./CONFORMANCE-CROSS-EPISODE-LINKING.md) |
+| Layer 3 — Workflow & Execution DAG | §21 | [`IMPLEMENTATION-LAYER3.md`](./IMPLEMENTATION-LAYER3.md) | [`CONFORMANCE-LAYER3.md`](./CONFORMANCE-LAYER3.md) |
+| Trust Infrastructure (Phase 3) | §16 | [`IMPLEMENTATION-PHASE3.md`](./IMPLEMENTATION-PHASE3.md) | [`CONFORMANCE.md`](./CONFORMANCE.md) |
+
+Supporting: [`VERSIONING.md`](./VERSIONING.md) (canonical version policy), [`GLOSSARY.md`](./GLOSSARY.md), [`VISION.md`](./VISION.md).
 
 ---
 
