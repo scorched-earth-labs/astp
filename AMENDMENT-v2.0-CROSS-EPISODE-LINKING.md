@@ -1,3 +1,6 @@
+> **⚠️ HISTORICAL REFERENCE — INTEGRATED INTO THE SPEC BODY (v3.2.1).**
+> The normative content of this amendment now lives in **[`SPEC.md`](./SPEC.md) §20 — Cross-Episode Linking & Grouping**. Under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) this amendment corresponds to **SPEC v3.0.0**. This file is retained **for provenance only** and is no longer maintained; the SPEC body is authoritative. Section numbers referenced below (§1–§12) are internal to this amendment and appear as subsections of SPEC §20.
+
 # Cross-Episode Linking & Grouping Interface
 ## Protocol Amendment — Schema Version 2.0.0
 

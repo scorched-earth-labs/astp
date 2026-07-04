@@ -4,10 +4,23 @@ All notable changes to the Ariadne protocol. Version numbering follows [VERSIONI
 
 ## [Unreleased]
 
-The next change-set queues here. `AMENDMENT-*.md` documents that have not yet been integrated into the SPEC body remain authoritative for the surface they define until the integration pass lands.
+The next change-set queues here.
 
 ### Clarified (errata — PATCH)
 - **Segment parentage vs. proof-chain parentage.** New §3.4.1 states explicitly that a Segment's `parent_node_id` is its **`EpisodeNode`** (an upward anchor), that segments order by `sequence_index` with no segment→segment edge, and that the canonical materialization is an ordered `(Episode)-[:CONTAINS {sequence_index}]->(Segment)` fan-out (derive next/prev at read time, don't persist a chain). A reciprocal note at §16.5.3 distinguishes this from the proof-chain rule `B.parent_node_id == A.node_id`, which links whole nodes causally (e.g. episode→episode). **No canonical-form change** — this clarifies existing semantics (G-2 reparenting prohibition; §5.2 leaf-hash preimage). Surfaced by a reference-implementation question ([ariadne-samples #1](https://github.com/scorched-earth-labs/ariadne-samples/issues/1)): an adapter graph showed a segment→segment containment chain instead of the canonical episode→segment fan-out.
+
+## [3.2.1] — 2026-07-04
+
+**PATCH.** SPEC integration pass — editorial only, no normative change. The full protocol surface now lives in the SPEC body; the two standalone amendment documents are retired to provenance-only historical references.
+
+### Changed (editorial)
+- **Cross-episode linking + grouping** folded into SPEC **§20** (was `AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`, canonical SPEC v3.0.0).
+- **Layer 3 Workflow & Execution DAG** folded into SPEC **§21** (was `AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`, canonical SPEC v3.1.0). References section moved to §22.
+- The amendment's CIA conformance rule was renumbered from its authoring numeral **G-19** (which collided with the BFM Taxonomy's G-19) to **G-36**, keeping the governance-rule namespace contiguous (G-1…G-36).
+- Status line + §18 Version History updated; the amendment files carry historical-reference banners pointing at their in-body sections.
+
+### Notes
+- No hash preimage, serialization, or required-field changes. Every v3.2.0-conformant implementation is v3.2.1-conformant unchanged.
 
 ## [3.2.0] — 2026-07-04
 

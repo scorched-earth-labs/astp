@@ -53,7 +53,7 @@ The **namespace firewall** (`ariadne.protocol.*` cannot import `ariadne.nodes.*`
 
 ### Layers in the spec sense (not the directory sense)
 
-The protocol now defines **three Merkle layers** (see `AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`):
+The protocol now defines **three Merkle layers** (see `SPEC.md` §21 — Layer 3 Workflow & Execution DAG):
 
 - **Layer 1 — Merkle Spine**: kernel-owned, hash-chained `EpisodeNode`, `SegmentNode`, `SignalNode`, etc.
 - **Layer 2 — Adaptive Merkle Tree**: episode content tree (crystallization, WIL).

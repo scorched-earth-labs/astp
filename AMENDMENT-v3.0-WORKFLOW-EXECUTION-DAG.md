@@ -1,3 +1,6 @@
+> **⚠️ HISTORICAL REFERENCE — INTEGRATED INTO THE SPEC BODY (v3.2.1).**
+> The normative content of this amendment now lives in **[`SPEC.md`](./SPEC.md) §21 — Layer 3 Workflow & Execution DAG**. Under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) this amendment corresponds to **SPEC v3.1.0**. This file is retained **for provenance only** and is no longer maintained; the SPEC body is authoritative. **Note:** the CIA conformance rule numbered **G-19** below was renumbered to **G-36** on integration (the authoring numeral collided with the BFM Taxonomy's G-19). Section numbers referenced below (§1–§13) are internal to this amendment and appear as subsections of SPEC §21.
+
 # Workflow & Execution DAG — Layer 3 Codification
 ## Protocol Amendment — Schema Version 3.0.0
 
