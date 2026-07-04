@@ -9,6 +9,20 @@ The next change-set queues here. `AMENDMENT-*.md` documents that have not yet be
 ### Clarified (errata — PATCH)
 - **Segment parentage vs. proof-chain parentage.** New §3.4.1 states explicitly that a Segment's `parent_node_id` is its **`EpisodeNode`** (an upward anchor), that segments order by `sequence_index` with no segment→segment edge, and that the canonical materialization is an ordered `(Episode)-[:CONTAINS {sequence_index}]->(Segment)` fan-out (derive next/prev at read time, don't persist a chain). A reciprocal note at §16.5.3 distinguishes this from the proof-chain rule `B.parent_node_id == A.node_id`, which links whole nodes causally (e.g. episode→episode). **No canonical-form change** — this clarifies existing semantics (G-2 reparenting prohibition; §5.2 leaf-hash preimage). Surfaced by a reference-implementation question ([ariadne-samples #1](https://github.com/scorched-earth-labs/ariadne-samples/issues/1)): an adapter graph showed a segment→segment containment chain instead of the canonical episode→segment fan-out.
 
+## [3.2.0] — 2026-07-04
+
+**MINOR.** Phase D departure-fork lifecycle. Additive on top of v3.1.0 — no breaking changes. Defined in the SPEC body (§19.3.5–19.3.6), not as a standalone amendment.
+
+### Added
+- **`create_departure_fork()`** — a single **directional departure**: one topic diverges into a new Episode while the originating Episode *continues*. Distinct from the speculative `create_fork()` (N siblings, resolve→promote/discard). Atomic: fork Episode (ACTIVE + immutable provenance) + `DepartureForkPointNode` on the origin spine (`FORK_ORIGIN`) + `DEPARTURE_FORK_CREATED` audit.
+- **Lifecycle FSM** — `ACTIVE → COMPLETED | ABANDONED`. `complete_departure_fork()` (fork's own agent), `abandon_departure_fork()` (origin agent / system stub-cleanup). Resumption (re-entering the origin while the fork stays ACTIVE) is a non-event.
+- **`declare_fork_return()`** — a **declarative** return (origin asserts incorporation across two independent spines; never the branch's structural merge). Writes `ForkReturnNode` on the origin spine + `FORK_RETURN`/`RETURNED_FROM` edges + `DEPARTURE_FORK_RETURNED` audit. `return_type ∈ {INCORPORATED, ACKNOWLEDGED, SUPERSEDED}`.
+- **New nodes/domains** — `DepartureForkPointNode` (`DEPARTURE_FORK_POINT:`), `ForkReturnNode` (`FORK_RETURN:`). **New deltas** — `DEPARTURE_FORK_CREATED` / `_COMPLETED` / `_ABANDONED` / `_RETURNED`. **New edges** — `FORK_RETURN`, `RETURNED_FROM`. **Immutable Episode fork provenance** fields (§19.3.6).
+- **Governance G-30 through G-35** — the backdating integrity invariant (G-30: `spine_tip_hash_at_departure` == the fork Episode's `fork_origin_spine_tip_hash`), non-empty objective, trigger whitelist, `AGENT_ESCALATION` requires a trigger segment, return-requires-COMPLETED, one-return-per-fork.
+
+### Tests
+`test_phase2_operations.py` — `TestCreateDepartureFork`, `TestDepartureForkFSM`. Full protocol suite: 298 passing.
+
 ## [3.1.0] — 2026-06-07
 
 **MINOR.** Layer 3 Workflow & Execution DAG codification. Additive on top of v3.0.0.
