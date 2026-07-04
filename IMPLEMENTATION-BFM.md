@@ -1,8 +1,8 @@
 # Ariadne — Branch/Fork/Merge Implementation Guide
 
-**Version:** 1.0.0
-**Date:** 2026-04-21
-**Scope:** All four phases of the Branch/Fork/Merge taxonomy (SPEC §19)
+**Version:** 1.1.0
+**Date:** 2026-07-04
+**Scope:** All four phases of the Branch/Fork/Merge taxonomy (SPEC §19), plus the **Phase D departure-fork lifecycle** (SPEC §19.3.5–19.3.6, added §5)
 **Target audience:** Implementers extending a conforming Ariadne instance with the BFM taxonomy.
 
 ---
@@ -12,7 +12,7 @@
 SPEC §19 defines the protocol surface of the Branch/Fork/Merge/Aside/Soliloquy/CoherenceFingerprint taxonomy — the normative invariants any conforming implementation must satisfy. This document describes **how Scorched Earth Labs implemented that taxonomy** against the Neo4j adapter. It is not normative: another adapter (Postgres, DynamoDB, a vector store + relational hybrid) may differ in storage layout while remaining spec-conforming.
 
 What is normative from this file:
-- The domain-separation hash prefixes (`BRANCH_POINT:`, `MERGE_POINT:`, `ASIDE:`, `SOLILOQUY_PLACEHOLDER:`, `SOLILOQUY_FULL:`, `DELIBERATION_CHAIN:`, `SOLILOQUY_CONCLUSION:`, `FINGERPRINT:`, `OBJECTIVE:`, `AUDIT:`, `INTENT:`, `CONFIRMATION:`, `CONFLICT_MANIFEST:`, `MERGE_SPINE_POST:`, `ASIDE_FINAL:`). These are part of the protocol.
+- The domain-separation hash prefixes (`BRANCH_POINT:`, `MERGE_POINT:`, `DEPARTURE_FORK_POINT:`, `FORK_RETURN:`, `ASIDE:`, `SOLILOQUY_PLACEHOLDER:`, `SOLILOQUY_FULL:`, `DELIBERATION_CHAIN:`, `SOLILOQUY_CONCLUSION:`, `FINGERPRINT:`, `OBJECTIVE:`, `AUDIT:`, `INTENT:`, `CONFIRMATION:`, `CONFLICT_MANIFEST:`, `MERGE_SPINE_POST:`, `ASIDE_FINAL:`). These are part of the protocol.
 - The three-writes rule: every taxonomy state transition writes a structural node, a cognitive delta, and an audit record, or it writes nothing.
 - The conflict-manifest short-circuit in `execute_merge()`.
 
@@ -29,7 +29,7 @@ What is implementation-space:
 ariadne/
 ├── core/
 │   ├── branching.py             # All BFM schema types + hash functions + governance
-│   ├── branch_operations.py     # create/abandon/fork/resolve/merge/aside/soliloquy ops
+│   ├── branch_operations.py     # create/abandon/fork/resolve/merge/aside/soliloquy + departure-fork ops
 │   └── coherence.py             # Phase 4 registry + detect + intercept
 └── adapters/
     └── neo4j/
@@ -186,7 +186,119 @@ Abort path (integrity assertion failure): writes only a SYSTEM-caught failure au
 
 ---
 
-## 5. Phase 3 — Social/Internal Primitives
+## 5. Phase D — Departure Fork Lifecycle
+
+Phase D adds the **departure fork**, distinct from the speculative fork of §4.5. A speculative fork (`create_fork()`) opens N sibling alternatives that resolve to `PROMOTED`/`DISCARDED`; a departure fork (`create_departure_fork()`) is a single **directional departure** — one topic leaves into a new Episode while the originating Episode *continues*, with no siblings and no resolve/promote/discard. If not abandoned, a departure fork *is* an Episode ("fork is a verb, not a noun"). SPEC §19.3.5–19.3.6 is the normative surface; this section describes the Neo4j implementation.
+
+### 5.1 Public API
+
+```python
+from ariadne.core.branch_operations import (
+    create_departure_fork,
+    complete_departure_fork, abandon_departure_fork,
+    declare_fork_return,
+)
+
+result = create_departure_fork(
+    driver,
+    origin_episode_id, origin_segment_id,
+    fork_objective,
+    fork_creation_trigger,             # ForkCreationTrigger — EXPLORATORY_THREAD routes to create_fork(), not here (G-32)
+    initiator="system",
+    fork_agent_id=None,
+    fork_title=None,
+    participants=None,
+    fork_trigger_segment_id=None,      # REQUIRED when fork_creation_trigger == AGENT_ESCALATION (G-33)
+    fork_trigger_confidence=None,
+    fork_origin_active_branch_ids=None,
+    episode_mode="directed",
+    caught_by="HUMAN",
+    fork_episode_id=None,
+) -> Optional[DepartureForkResult]
+
+ok = complete_departure_fork(driver, fork_episode_id, actor="system", note="")  -> bool   # ACTIVE → COMPLETED
+ok = abandon_departure_fork(driver, fork_episode_id, actor="system", reason="") -> bool   # ACTIVE → ABANDONED (terminal)
+
+ret = declare_fork_return(
+    driver, fork_id, origin_episode_id,
+    return_type,                       # ForkReturnType: INCORPORATED | ACKNOWLEDGED | SUPERSEDED
+    returned_by,                       # the originating agent (authority)
+    synthesis_summary="",
+    fork_episode_id=None,
+) -> Optional[ForkReturnResult]
+```
+
+### 5.2 Departure vs. Speculative Fork
+
+| | Speculative fork (§4.5) | Departure fork (§5) |
+|---|---|---|
+| Op | `create_fork()` | `create_departure_fork()` |
+| Shape | N siblings share one `fork_id` | One directional departure, single node |
+| Origin | Suspended pending selection | **Continues uninterrupted** |
+| Resolution | `resolve_fork()` → `PROMOTED`/`DISCARDED` | Lifecycle FSM → `COMPLETED`/`ABANDONED` |
+| Bring-back | Structural (selection is the outcome) | **Declarative** `declare_fork_return()` across two spines |
+| Node label | `AriadneForkPoint` | `AriadneDepartureForkPoint` (+ `AriadneForkReturn`) |
+| Domain prefix | `FORK_POINT:` | `DEPARTURE_FORK_POINT:` (+ `FORK_RETURN:`) |
+| Trigger routing | `EXPLORATORY_THREAD` | `TOPIC_SHIFT`, `PARALLEL_THREAD`, `EXPLICIT_FORK`, `AGENT_ESCALATION` |
+
+### 5.3 Governance Summary (G-30–G-35)
+
+| Rule | Enforcement |
+|------|-------------|
+| **G-30** Backdating integrity: `spine_tip_hash_at_departure` == fork Episode's `fork_origin_spine_tip_hash` | `create_departure_fork` derives both from a single origin-spine-tip read (see §5.4) |
+| **G-31** `fork_objective` non-empty | `create_departure_fork` step 1 (as G-19) |
+| **G-32** `fork_creation_trigger ∈ {TOPIC_SHIFT, PARALLEL_THREAD, EXPLICIT_FORK, AGENT_ESCALATION}` | `create_departure_fork` — `EXPLORATORY_THREAD` is rejected here (belongs to `create_fork()`) |
+| **G-33** `fork_trigger_segment_id` required when trigger `== AGENT_ESCALATION` | `create_departure_fork` guard |
+| **G-34** Fork must be `COMPLETED` before a return | `declare_fork_return` guard (reads `fork_status`) |
+| **G-35** At most one return declaration per `fork_id` | `declare_fork_return` guard (no prior `ForkReturnNode` for the `fork_id`) |
+
+### 5.4 The Backdating Integrity Invariant (G-30)
+
+The branch point records where divergence *began* — not where it was declared. Because the origin continues, the fork point and the fork Episode must agree on the origin spine tip at the departure moment, verifiable across two independent spines. The implementation makes G-30 hold **by construction**: it reads the origin spine tip once and derives both `DepartureForkPointNode.spine_tip_hash_at_departure` and the fork Episode's `fork_origin_spine_tip_hash` from that single value. A mismatch is a fatal integrity violation at creation, never a runtime reconciliation.
+
+### 5.5 Writes per operation
+
+`create_departure_fork()` (atomic):
+1. The fork **Episode** (status `ACTIVE`, immutable fork provenance of §19.3.6) — `write_departure_fork_episode_sync`
+2. A single `DepartureForkPointNode` (`AriadneDepartureForkPoint`) on the *originating* spine + `FORK_ORIGIN` edge — `write_departure_fork_point_sync`
+3. `AuditRecord` (`delta_type=DEPARTURE_FORK_CREATED`) + `AUDIT_TRAIL` edge
+
+`complete_departure_fork()` / `abandon_departure_fork()`: `mark_departure_fork_status_sync` flips the fork Episode's `fork_status`; writes `DEPARTURE_FORK_COMPLETED` / `DEPARTURE_FORK_ABANDONED` audit. No structural node — status transition + audit.
+
+`declare_fork_return()`: `ForkReturnNode` (`AriadneForkReturn`) on the *originating* spine (`FORK_RETURN` edge) + `RETURNED_FROM` edge to the fork Episode + `DEPARTURE_FORK_RETURNED` audit — `write_fork_return_node_sync`. Integration content is written as ordinary subsequent origin-spine segments, **not** by the return node.
+
+### 5.6 Lifecycle FSM
+
+```
+                complete_departure_fork()
+     ┌────────┐ ───────────────────────▶ ┌───────────┐  declare_fork_return()
+     │ ACTIVE │                          │ COMPLETED │ ─────────────────────▶ (origin-spine ForkReturnNode)
+     └────────┘ ───────────────────────▶ └───────────┘   (G-34: only from COMPLETED; G-35: once)
+          │      abandon_departure_fork()
+          │                              ┌───────────┐
+          └─────────────────────────────▶│ ABANDONED │ (terminal — never returns)
+                                          └───────────┘
+
+     ACTIVE covers in-progress AND parked. RESUMPTION (re-entering the origin
+     while the fork stays ACTIVE) is a NON-EVENT: no node, no declaration.
+     Actors: complete() = fork's own agent (first-person); abandon() = origin
+     agent or system stub-cleanup; declare_fork_return() = originating agent.
+```
+
+### 5.7 Hash Domains
+
+Both preimages are `sha3_256(prefix + ":" + colon-joined fields)`; ground truth is `ariadne/core/branching.py`.
+
+| Node | Prefix | Preimage field order |
+|------|--------|----------------------|
+| `DepartureForkPointNode` | `DEPARTURE_FORK_POINT:` | `fork_point_id`, `fork_id`, `fork_episode_id`, `origin_episode_id`, `origin_segment_id`, `fork_objective`, `fork_creation_trigger`, `spine_tip_hash_at_departure`, `initiator`, `timestamp`, `parent_hash` |
+| `ForkReturnNode` | `FORK_RETURN:` | `fork_return_id`, `fork_id`, `fork_episode_id`, `origin_episode_id`, `return_type`, `synthesis_summary`, `fork_final_spine_tip_hash`, `returned_by`, `timestamp`, `parent_hash` |
+
+The `DEPARTURE_FORK_POINT:` prefix is deliberately distinct from `FORK_POINT:` — a departure fork point and a speculative fork point with otherwise-identical fields MUST NOT collide.
+
+---
+
+## 6. Phase 3 — Social/Internal Primitives
 
 ### 5.1 Public API
 
@@ -263,9 +375,9 @@ The deliberation chain itself stays on the `SoliloquySegmentNode`. Only the conc
 
 ---
 
-## 6. Phase 4 — Prescriptive Enforcement
+## 7. Phase 4 — Prescriptive Enforcement
 
-### 6.1 Public API
+### 7.1 Public API
 
 ```python
 from ariadne.core.coherence import (
@@ -306,7 +418,7 @@ create_branch(
 
 The recommendation anchors at the last NOMINAL segment — before drift began — so the retroactive branch covers the full drift window.
 
-### 6.2 State Transitions (Default Thresholds)
+### 7.2 State Transitions (Default Thresholds)
 
 ```
                        drift < 0.3                drift < 0.3
@@ -326,7 +438,7 @@ The recommendation anchors at the last NOMINAL segment — before drift began �
        • intent_class == INTRODUCE
 ```
 
-### 6.3 Intercept Sequence
+### 7.3 Intercept Sequence
 
 1. `objective_hash = sha3_256("OBJECTIVE:" + canonicalized_objective)`
 2. `detect_branch_candidate()` reads the last fingerprint for the episode, applies `advance_detection_state()`, and (on first entry to MATERIALIZED) computes the recommendation anchored at `get_last_nominal_segment_sync()`.
@@ -335,7 +447,7 @@ The recommendation anchors at the last NOMINAL segment — before drift began �
 5. `write_coherence_fingerprint_sync()` persists to `AriadneCoherenceFingerprint` + `FINGERPRINTS` edge from episode.
 6. Return `DetectionResult`.
 
-### 6.4 Confirmation Cache
+### 7.4 Confirmation Cache
 
 `ConfirmationCache` is an in-memory TTL-by-turn store. Callers use it to suppress re-prompting for confirmation of actions that were recently confirmed:
 
@@ -352,9 +464,9 @@ Keys are canonicalized (case-folded, stripped) before hashing. Expiry is checked
 
 ---
 
-## 7. Neo4j Schema Additions Summary
+## 8. Neo4j Schema Additions Summary
 
-### 7.1 Node Labels
+### 8.1 Node Labels
 
 | Label | Unique constraint on | Phase |
 |-------|----------------------|-------|
@@ -364,17 +476,19 @@ Keys are canonicalized (case-folded, stripped) before hashing. Expiry is checked
 | `AriadneIntentRecord` | `intent_id`, `idempotency_key` | 1 |
 | `AriadneForkPoint` | `fork_point_id` | 2 |
 | `AriadneMergePoint` | `merge_point_id` | 2 |
+| `AriadneDepartureForkPoint` | `fork_point_id` | D |
+| `AriadneForkReturn` | `fork_return_id` | D |
 | `AriadneAside` | `aside_id` | 3 |
 | `AriadneAsideTerminus` | `aside_terminus_id` | 3 |
 | `AriadneSoliloquy` | `soliloquy_id` | 3 |
 | `AriadneSoliloquyConclusion` | `conclusion_id` | 3 |
 | `AriadneCoherenceFingerprint` | `fingerprint_id` | 4 |
 
-### 7.2 Edge Types
+### 8.2 Edge Types
 
 See SPEC §19.6.
 
-### 7.3 Indexes
+### 8.3 Indexes
 
 Episode/status/owner-scoped indexes on every table for listing and state
 derivation queries. Full list in `adapters/neo4j/writer.py`
@@ -382,7 +496,7 @@ derivation queries. Full list in `adapters/neo4j/writer.py`
 
 ---
 
-## 8. Test Layout and Coverage
+## 9. Test Layout and Coverage
 
 All tests pass under `ARIADNE_ENABLED=true` with a mocked Neo4j driver
 (`tests/unit/protocol/test_phase*_{schema,operations,intercept}.py`).
@@ -390,19 +504,18 @@ All tests pass under `ARIADNE_ENABLED=true` with a mocked Neo4j driver
 | File | Count | Focus |
 |------|-------|-------|
 | `test_phase2_schema.py` | 16 | Fork/merge schema, hash domain separation, conflict manifest |
-| `test_phase2_operations.py` | 12 | Fork N-way, resolve, merge clean/conflict/resolved paths, integrity |
+| `test_phase2_operations.py` | 23 | Fork N-way, resolve, merge clean/conflict/resolved paths, integrity; **Phase D** `TestCreateDepartureFork` + `TestDepartureForkFSM` (11): create/backdating-invariant/origin-continues/escalation-trigger/idempotency, complete/abandon/return FSM + G-34/G-35 guards |
 | `test_phase3_schema.py` | 24 | Aside/soliloquy schema, HASH_PLACEHOLDER independence from chain, governance |
 | `test_phase3_operations.py` | 17 | Aside close + reference scan, soliloquy conclude, chain stays in soliloquy |
 | `test_phase4_schema.py` | 22 | State machine transitions, thresholds, confirmation cache, write-time guard |
 | `test_phase4_intercept.py` | 8 | Intercept progression NOMINAL→MATERIALIZED, drift reset, objective/INTRODUCE overrides |
-| **Total** | **99** | |
+| **Total** | **110** | |
 
-Combined with baseline tests (namespace firewall, Phase 3 conformance,
-verification, etc.), the suite currently runs **144/144 passing**.
+The Phase D vectors are colocated in `test_phase2_operations.py` (the departure fork is part of the fork family). Combined with the full protocol test surface (namespace firewall, trust-infrastructure conformance, cross-episode, Layer 3, verification, etc.), `poetry`-less `.venv/bin/python -m pytest tests/ -q` currently runs **298/298 passing**.
 
 ---
 
-## 9. Forward Compatibility Notes
+## 10. Forward Compatibility Notes
 
 The following are deliberate Phase-exit scope limits, forward-compatible
 with future extension:
