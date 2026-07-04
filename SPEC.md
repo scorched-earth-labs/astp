@@ -1,7 +1,7 @@
 # Ariadne State Tree Protocol Specification
 
-**Version:** 3.2.1
-**Status:** Stable. The full normative protocol is defined in this document's body. The Phase D departure-fork lifecycle (v3.2.0) is at §19.3.5–19.3.6; cross-episode linking + grouping (v3.0.0) at §20; the Layer 3 Workflow & Execution DAG (v3.1.0) at §21. The v3.2.1 integration pass folded the former standalone amendments into the SPEC body — editorial only, no normative change. The historical amendment documents ([`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) → §20, [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) → §21) are retained for provenance only. Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
+**Version:** 3.2.2
+**Status:** Stable. The full normative protocol is defined in this document's body. (v3.2.2 is a prose errata — it corrected the §20 hash-preimage descriptions and the §21 Form-B attribution to match the reference implementation; the canonical hash form is unchanged, so every v3.2.1-conformant implementation remains conformant.) The Phase D departure-fork lifecycle (v3.2.0) is at §19.3.5–19.3.6; cross-episode linking + grouping (v3.0.0) at §20; the Layer 3 Workflow & Execution DAG (v3.1.0) at §21. The v3.2.1 integration pass folded the former standalone amendments into the SPEC body — editorial only, no normative change. The historical amendment documents ([`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) → §20, [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) → §21) are retained for provenance only. Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-06-07
 **Supersedes:** SPEC-v1.md (0.1.0-draft)
@@ -927,6 +927,7 @@ This test should be run bidirectionally (A→B and B→A).
 | 3.1.0 | 2026-06-07 | **MINOR** — Layer 3 Workflow & Execution DAG. Source: [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md). New node types: `WorkflowDeclaration`, `ExecutionNode`, `SkillInvocation`. Three-Merkle-layer model formalized: Layer 1 Spine, Layer 2 episode content, Layer 3 Workflow & Execution DAG. **Layer 3 is cryptographically isolated from Spine integrity** — references Layers 1/2 by ID only; never hash-linked into the Spine; no future Layer-3 change can force a MAJOR bump on Spine grounds. Cognitive Implementation Authority (CIA) — sole-writer guarantee as wire-tier conformance principle. New `CognitiveDeltaType` variants. `ExecutionNode` and `SkillInvocationNode` immutable after creation; only mutable Layer 3 field is `WorkflowDeclaration.status` (and `status_updated_at`). Hash byte-form left open at protocol layer per amendment §3. |
 | 3.2.0 | 2026-07-04 | **MINOR** — Phase D departure-fork lifecycle, defined in-body (§19.3.5–19.3.6). `create_departure_fork()`: a single directional departure into a new (continuing) Episode, distinct from the speculative `create_fork()`. New nodes `DepartureForkPointNode` (domain `DEPARTURE_FORK_POINT:`) and `ForkReturnNode` (domain `FORK_RETURN:`). Backdating integrity invariant (G-30): `spine_tip_hash_at_departure` == the fork Episode's `fork_origin_spine_tip_hash`. Lifecycle FSM `ACTIVE → COMPLETED \| ABANDONED` (`complete_departure_fork` / `abandon_departure_fork` / `declare_fork_return`); resumption is a non-event. **Declarative** return (`INCORPORATED`/`ACKNOWLEDGED`/`SUPERSEDED`), never the branch's structural merge. Immutable Episode fork provenance (§19.3.6). New `CognitiveDeltaType` variants `DEPARTURE_FORK_CREATED`/`_COMPLETED`/`_ABANDONED`/`_RETURNED`; new edges `FORK_RETURN`, `RETURNED_FROM`. Governance G-30 through G-35. **Additive — no breaking changes.** |
 | 3.2.1 | 2026-07-04 | **PATCH** — SPEC integration pass. Folded the two former standalone amendments into this document's body: cross-episode linking + grouping (was `AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`) → **§20**; Layer 3 Workflow & Execution DAG (was `AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`) → **§21**; References moved to §22. The amendment's CIA conformance rule was renumbered from its authoring numeral G-19 (which collided with BFM's G-19) to **G-36**. Amendment files retained for provenance only (historical-reference banners). **Editorial only — no normative change.** |
+| 3.2.2 | 2026-07-04 | **PATCH** — prose errata. Corrected the §20 hash-preimage descriptions to match the reference implementation: `EpisodeLink.content_hash`, `MembershipRecord.content_hash`, `ConformanceDeclaration.declaration_hash` are **SHA3-256** (not SHA-256), per the §5 protocol commitment; `MembershipRecord` binds `supersedes_record_id` + `succession_reason` (the prose omitted them); `EpisodeLink` excludes only `quarantine_resolved_at` / `quarantine_resolution` (the prose wrongly listed `health_state` / `health_checked_at` as excluded — they ARE hashed). Corrected the §21 Form-B attribution (the Ignis reference implementation uses SHA3-256 + declared field order, not SHA-256 + key-sorting). **The canonical hash form is unchanged — prose-only; every v3.2.1 implementation remains conformant.** |
 
 ## 19. Branch/Fork/Merge Taxonomy
 
@@ -1409,7 +1410,7 @@ EpisodeLink {
   quarantine_resolution:     Optional<QuarantineResolution>  // CONFIRMED | DISSOLVED | ESCALATED
 
   // Integrity
-  content_hash:          Hash                  // SHA-256 of canonical field set (excludes health_state, health_checked_at, quarantine_resolved_at, quarantine_resolution)
+  content_hash:          Hash                  // SHA3-256 of canonical field set (excludes only quarantine_resolved_at, quarantine_resolution — the resolution fields are set after the hash, on quarantine exit)
 }
 ```
 
@@ -1521,7 +1522,7 @@ MembershipRecord {
   succession_reason:     Optional<String> // why this record supersedes the prior
 
   // Integrity — immutable once set
-  content_hash:          Hash             // SHA-256 of: record_id + episode_id + group_id + group_system + asserted_at + asserted_by + membership_role
+  content_hash:          Hash             // SHA3-256 of: record_id + episode_id + group_id + group_system + asserted_at + asserted_by + membership_role + supersedes_record_id + succession_reason
 }
 ```
 
@@ -1550,7 +1551,7 @@ ConformanceDeclaration {
   superseded_by:         Optional<UUID>   // declaration_id of successor
 
   // Integrity
-  declaration_hash:      Hash             // SHA-256 of: declaration_id + group_id + group_system + declared_at + declared_by + declaration_version + capabilities
+  declaration_hash:      Hash             // SHA3-256 of: declaration_id + group_id + group_system + declared_at + declared_by + declaration_version + capabilities
 }
 ```
 
@@ -2264,13 +2265,15 @@ preimage = (
 content_hash = SHA3-256(preimage).hex()
 ```
 
-**Form B — Canonical JSON (SHA-256), used by the Ignis reference implementation:**
+**Form B — Ordered JSON, used by the Ignis reference implementation (with SHA3-256):**
 
 ```
-payload = {field: value for every immutable-and-hashable field}
-canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-content_hash = SHA256(canonical).hex()
+payload = {field: value for each immutable field, in the declared preimage order}
+canonical = json.dumps(payload, sort_keys=False, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+content_hash = SHA3-256(canonical).hex()
 ```
+
+(The reference implementation uses **SHA3-256** and **declared field order** — not SHA-256 or key-sorting — consistent with the protocol's SHA3-256 commitment in §5. Per this section the byte-form remains implementation-open; a different conforming implementation MAY choose SHA-256 or key-sorted JSON, provided it is internally consistent.)
 
 Both forms satisfy W-L3-1, W-L3-2, and W-L3-3. An implementation choosing Form A and an implementation choosing Form B will produce **different hashes for the same field values** — this is intentional and acceptable. Cross-implementation hash equivalence is not a protocol requirement at Layer 3; cross-implementation *verifiability* is, and is achieved via the documented serialization, not via a single canonical hash function.
 

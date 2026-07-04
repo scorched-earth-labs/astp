@@ -9,6 +9,16 @@ The next change-set queues here.
 ### Clarified (errata — PATCH)
 - **Segment parentage vs. proof-chain parentage.** New §3.4.1 states explicitly that a Segment's `parent_node_id` is its **`EpisodeNode`** (an upward anchor), that segments order by `sequence_index` with no segment→segment edge, and that the canonical materialization is an ordered `(Episode)-[:CONTAINS {sequence_index}]->(Segment)` fan-out (derive next/prev at read time, don't persist a chain). A reciprocal note at §16.5.3 distinguishes this from the proof-chain rule `B.parent_node_id == A.node_id`, which links whole nodes causally (e.g. episode→episode). **No canonical-form change** — this clarifies existing semantics (G-2 reparenting prohibition; §5.2 leaf-hash preimage). Surfaced by a reference-implementation question ([ariadne-samples #1](https://github.com/scorched-earth-labs/ariadne-samples/issues/1)): an adapter graph showed a segment→segment containment chain instead of the canonical episode→segment fan-out.
 
+## [3.2.2] — 2026-07-04
+
+**PATCH.** Prose errata — the §20/§21 hash-preimage descriptions were reconciled to the reference implementation. **No canonical-form change; the code was already correct** — only the SPEC prose was wrong, so every v3.2.1-conformant implementation remains conformant unchanged. Surfaced while authoring the §20/§21 implementation & conformance companion docs.
+
+### Corrected (errata)
+- **§20 hash algorithm.** `EpisodeLink.content_hash`, `MembershipRecord.content_hash`, and `ConformanceDeclaration.declaration_hash` are computed with **SHA3-256**, not SHA-256 — consistent with the §5 "all hashing uses SHA3-256, no exceptions" commitment and the `hash_canonical.py` implementation. The prose said "SHA-256".
+- **§20 MembershipRecord preimage.** The preimage binds `supersedes_record_id` and `succession_reason` in addition to the seven fields the prose listed (per `_MEMBERSHIP_HASH_PREIMAGE_FIELDS`).
+- **§20 EpisodeLink exclusions.** The preimage **includes** `health_state` and `health_checked_at`; it excludes only `quarantine_resolved_at` and `quarantine_resolution` (set after the hash, on quarantine exit). The prose had the exclusion list inverted.
+- **§21 Form-B attribution.** The Ignis reference implementation serializes in declared field order and hashes with SHA3-256 — not key-sorted JSON with SHA-256. §21 §8 still leaves the Layer-3 byte-form implementation-open; this only corrects the description of what the reference implementation does.
+
 ## [3.2.1] — 2026-07-04
 
 **PATCH.** SPEC integration pass — editorial only, no normative change. The full protocol surface now lives in the SPEC body; the two standalone amendment documents are retired to provenance-only historical references.

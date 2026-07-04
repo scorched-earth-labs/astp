@@ -6,7 +6,7 @@ Bring your own cognitive architecture. Ariadne handles the persistence, integrit
 
 📖 **New to Ariadne?** Start with the [Glossary](./GLOSSARY.md) — every term used in the spec and code, defined once with explicit structural relationships (e.g. how `EpisodeNode` relates to `CognitiveNode` + `EpisodePayload`).
 
-**Current version:** `3.1.0` — see [`SPEC.md`](./SPEC.md). Versioning policy: [`VERSIONING.md`](./VERSIONING.md). Change history: [`CHANGELOG.md`](./CHANGELOG.md).
+**Current version:** `3.2.2` — see [`SPEC.md`](./SPEC.md). Versioning policy: [`VERSIONING.md`](./VERSIONING.md). Change history: [`CHANGELOG.md`](./CHANGELOG.md).
 
 ---
 
