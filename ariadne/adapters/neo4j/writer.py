@@ -1306,6 +1306,34 @@ def mark_departure_fork_status_sync(driver, fork_episode_id: str, status: str) -
         logger.warning(f"Ariadne: Failed to update departure-fork status: {e}")
 
 
+def set_departure_fork_anchor_index_sync(driver, fork_episode_id: str, anchor_index: int) -> None:
+    """Patch a departure-fork Episode's fork_anchor_index — the second phase of the
+    two-phase field (STEP 6 of create_departure_fork). Set once, AFTER the
+    DepartureForkPointNode is written to the origin spine: null -> the origin segment's
+    sequence_index. The null->value transition is the "point was written" confirmation
+    the orphan detector keys on (a non-null anchor with NO DepartureForkPointNode is the
+    Class-B corruption indicator). Idempotent — re-patching to the same value is safe, so
+    a patch-only retry after a STEP-5-done/STEP-6-missing partial failure is a clean fix.
+    A write primitive; recovery orchestration (ignis-os) may call it directly."""
+    if not _ariadne_guard():
+        return
+    try:
+        with driver.session() as session:
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $episode_id})
+                SET e.fork_anchor_index = $anchor_index
+            """, {
+                "episode_id": str(fork_episode_id),
+                "anchor_index": anchor_index,
+            })
+        logger.info(
+            f"Ariadne: DepartureFork {str(fork_episode_id)[:8]}... "
+            f"fork_anchor_index -> {anchor_index}"
+        )
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to patch fork_anchor_index: {e}")
+
+
 def write_fork_return_node_sync(driver, frn) -> None:
     """Write a ForkReturnNode to the ORIGIN spine + FORK_RETURN edge (origin -> return
     node) + RETURNED_FROM edge (return node -> fork episode). Declarative return."""
