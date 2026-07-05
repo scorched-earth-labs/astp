@@ -88,6 +88,7 @@ class FakeStore:
         self.fork_points: Dict[str, Dict[str, Any]] = {}
         self.departure_points: Dict[str, Dict[str, Any]] = {}  # Phase D
         self.fork_returns: Dict[str, Dict[str, Any]] = {}       # Phase D
+        self.segments: Dict[str, Dict[str, Any]] = {}           # by segment_id
         self.merge_points: Dict[str, Dict[str, Any]] = {}
         self.audit_records: List[Dict[str, Any]] = []
         self.intents: Dict[str, Dict[str, Any]] = {}  # by idempotency_key
@@ -272,6 +273,32 @@ class FakeStore:
         # Create DepartureForkPoint (Phase D)
         if "MERGE (fp:AriadneDepartureForkPoint" in q and "fork_point_id: $fork_point_id" in q:
             self.departure_points[params.get("fork_point_id")] = dict(params)
+            return FakeResult([])
+
+        # Load DepartureForkPoint by fork_id (idempotent re-drive / replay reconstruction)
+        if "MATCH (fp:AriadneDepartureForkPoint {fork_id: $fid})" in q and "RETURN fp.fork_point_id AS pid" in q:
+            fid = params.get("fid")
+            for fp in self.departure_points.values():
+                if str(fp.get("fork_id")) == str(fid):
+                    return FakeResult([{
+                        "pid": fp.get("fork_point_id"),
+                        "eid": fp.get("fork_episode_id"),
+                        "tip": fp.get("spine_tip_hash_at_departure"),
+                    }])
+            return FakeResult([])
+
+        # Read a segment's sequence_index (STEP 6 fork_anchor_index resolution)
+        if "MATCH (s:AriadneSegment {segment_id: $sid})" in q and "RETURN s.sequence_index" in q:
+            seg = self.segments.get(params.get("sid"))
+            if seg is None:
+                return FakeResult([])
+            return FakeResult([{"idx": seg.get("sequence_index")}])
+
+        # Patch fork_anchor_index (STEP 6 two-phase field)
+        if "MATCH (e:AriadneEpisode {episode_id: $episode_id})" in q and "SET e.fork_anchor_index" in q:
+            ep = self.episodes.get(params.get("episode_id"))
+            if ep is not None:
+                ep["fork_anchor_index"] = params.get("anchor_index")
             return FakeResult([])
 
         # Create departure-fork Episode node (Phase D — MERGE with ON CREATE SET)
@@ -822,6 +849,83 @@ class TestCreateDepartureFork:
         assert r1 is not None and r2 is not None
         # second call short-circuits on the COMPLETE intent — no second departure point
         assert len(store.departure_points) == 1
+
+    def test_fork_anchor_index_patched_to_origin_segment_index(self):
+        """STEP 6: fork_anchor_index (null at episode-create) is patched to the ORIGIN
+        segment's sequence_index once the DepartureForkPointNode is written."""
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])
+        store.segments["seg-1"] = {"sequence_index": 7}
+        driver = FakeDriver(store)
+        result = branch_operations.create_departure_fork(
+            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            fork_objective="obj", fork_creation_trigger="TOPIC_SHIFT", initiator="x",
+        )
+        assert store.episodes[result.fork_episode_id]["fork_anchor_index"] == 7
+
+    def test_fork_anchor_index_null_when_origin_segment_unresolved(self):
+        """No resolvable origin-segment index → anchor left null (point written, anchor
+        unresolved) rather than a wrong value. The point is still written."""
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])  # no segment seeded
+        driver = FakeDriver(store)
+        result = branch_operations.create_departure_fork(
+            driver, origin_episode_id=oid, origin_segment_id="seg-missing",
+            fork_objective="obj", fork_creation_trigger="TOPIC_SHIFT", initiator="x",
+        )
+        assert store.episodes[result.fork_episode_id].get("fork_anchor_index") is None
+        assert len(store.departure_points) == 1
+
+    def test_supplied_fork_id_is_used(self):
+        """A caller may pin fork_id (retry/recovery); it flows through to the result + point."""
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])
+        driver = FakeDriver(store)
+        pinned = str(uuid4())
+        result = branch_operations.create_departure_fork(
+            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            fork_objective="obj", fork_creation_trigger="TOPIC_SHIFT", initiator="x",
+            fork_id=pinned,
+        )
+        assert result.fork_id == pinned
+        assert str(store.departure_points[result.fork_point_id]["fork_id"]) == pinned
+
+    def test_supplied_fork_id_idempotent_no_duplicate(self):
+        """Re-drive with a pinned fork_id whose point already exists short-circuits (STEP 2b)
+        — no second departure point, even though the intent guard would not fire (fresh key)."""
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])
+        driver = FakeDriver(store)
+        pinned = str(uuid4())
+        pid = str(uuid4())
+        store.departure_points[pid] = {  # a prior attempt's already-written point
+            "fork_point_id": pid, "fork_id": pinned,
+            "fork_episode_id": "fork-ep-x", "spine_tip_hash_at_departure": "tip-x",
+        }
+        result = branch_operations.create_departure_fork(
+            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            fork_objective="a different objective", fork_creation_trigger="TOPIC_SHIFT",
+            initiator="x", fork_id=pinned,
+        )
+        assert result.fork_id == pinned
+        assert result.fork_point_id == pid            # returned the existing point
+        assert result.fork_episode_id == "fork-ep-x"
+        assert len(store.departure_points) == 1        # no duplicate created
+
+    def test_idempotent_replay_returns_full_result(self):
+        """The intent-COMPLETE replay reconstructs the FULL original result (point + episode
+        + tip), not a degraded empty shell."""
+        oid = str(uuid4())
+        store = _make_store_with_episodes([oid])
+        driver = FakeDriver(store)
+        kw = dict(origin_episode_id=oid, origin_segment_id="seg-1",
+                  fork_objective="same obj", fork_creation_trigger="TOPIC_SHIFT", initiator="x")
+        r1 = branch_operations.create_departure_fork(driver, **kw)
+        r2 = branch_operations.create_departure_fork(driver, **kw)
+        assert r2.fork_id == r1.fork_id
+        assert r2.fork_point_id == r1.fork_point_id and r2.fork_point_id
+        assert r2.fork_episode_id == r1.fork_episode_id and r2.fork_episode_id
+        assert r2.spine_tip_hash_at_departure == r1.spine_tip_hash_at_departure
 
 
 class TestDepartureForkFSM:

@@ -672,6 +672,7 @@ def create_departure_fork(
     episode_mode: str = "directed",
     caught_by: str = "HUMAN",
     fork_episode_id: Optional[str] = None,
+    fork_id: Optional[str] = None,
 ) -> Optional["object"]:
     """Create a DEPARTURE fork (Ariadne BFM Phase D): one directional departure into a
     new episode while the ORIGIN CONTINUES. Single node, no siblings, no resolve.
@@ -694,6 +695,7 @@ def create_departure_fork(
     from ariadne.adapters.neo4j.writer import (
         write_departure_fork_point_sync, write_departure_fork_episode_sync,
         write_audit_record_sync, acquire_intent_sync, complete_intent_sync,
+        set_departure_fork_anchor_index_sync,
     )
     from uuid import uuid4, UUID
     from datetime import datetime, timezone
@@ -730,14 +732,60 @@ def create_departure_fork(
         if intent and intent.get("status") == "COMPLETE":
             _fid = intent.get("result_node_id", "")
             logger.info(f"Departure fork already created (idempotent): {_fid}")
+            # Reconstruct the FULL original result from the existing point rather than
+            # returning a degraded (empty) shell — a replay must be indistinguishable
+            # from the first return so callers can rely on the ids.
+            with driver.session() as session:
+                prow = session.run(
+                    """
+                    MATCH (fp:AriadneDepartureForkPoint {fork_id: $fid})
+                    RETURN fp.fork_point_id AS pid, fp.fork_episode_id AS eid,
+                           fp.spine_tip_hash_at_departure AS tip
+                    """,
+                    {"fid": _fid},
+                ).single()
+            if prow is not None:
+                return DepartureForkResult(
+                    fork_id=_fid, fork_point_id=prow["pid"] or "",
+                    fork_episode_id=prow["eid"] or "",
+                    origin_episode_id=origin_episode_id, origin_segment_id=origin_segment_id,
+                    spine_tip_hash_at_departure=prow["tip"] or "",
+                    delta_id="", audit_record_id="",
+                )
             return DepartureForkResult(
                 fork_id=_fid, fork_point_id="", fork_episode_id="",
                 origin_episode_id=origin_episode_id, origin_segment_id=origin_segment_id,
                 spine_tip_hash_at_departure="", delta_id="", audit_record_id="",
             )
 
-        # STEP 3: Ids + the integrity anchor (origin's cryptographic spine tip now)
-        fork_id = uuid4()
+        # STEP 2b: supplied-fork_id idempotency. When a retry/recovery caller pins fork_id,
+        # short-circuit if its DepartureForkPointNode already exists — so a re-drive never
+        # duplicates the fork even when the prior attempt crashed before its intent reached
+        # COMPLETE (the one case the STEP-2 intent guard misses).
+        if fork_id:
+            with driver.session() as session:
+                erow = session.run(
+                    """
+                    MATCH (fp:AriadneDepartureForkPoint {fork_id: $fid})
+                    RETURN fp.fork_point_id AS pid, fp.fork_episode_id AS eid,
+                           fp.spine_tip_hash_at_departure AS tip
+                    """,
+                    {"fid": str(fork_id)},
+                ).single()
+            if erow is not None:
+                logger.info(f"Departure fork {fork_id} already anchored (idempotent re-drive)")
+                return DepartureForkResult(
+                    fork_id=str(fork_id), fork_point_id=erow["pid"] or "",
+                    fork_episode_id=erow["eid"] or "",
+                    origin_episode_id=origin_episode_id, origin_segment_id=origin_segment_id,
+                    spine_tip_hash_at_departure=erow["tip"] or "",
+                    delta_id="", audit_record_id="",
+                )
+
+        # STEP 3: Ids + the integrity anchor (origin's cryptographic spine tip now).
+        # fork_id may be SUPPLIED by a retry/recovery caller so the MERGE-based writers
+        # dedup on it (idempotent re-drive after a partial failure); generated otherwise.
+        fork_id = UUID(fork_id) if fork_id else uuid4()
         fork_ep_id = fork_episode_id or str(uuid4())
         now = datetime.now(timezone.utc)
         spine_tip_hash = fetch_prior_audit_hash(driver, origin_episode_id)
@@ -761,6 +809,7 @@ def create_departure_fork(
             fork_origin_spine_tip_hash=spine_tip_hash,
             fork_origin_active_branch_ids=fork_origin_active_branch_ids,
             fork_status=DepartureForkStatus.ACTIVE.value,
+            fork_anchor_index=None,  # two-phase: null now; patched in STEP 6 post point-write
         )
         write_departure_fork_episode_sync(driver, fork_ep)
 
@@ -783,9 +832,43 @@ def create_departure_fork(
             dfp.fork_creation_trigger.value, dfp.spine_tip_hash_at_departure,
             dfp.initiator, dfp.timestamp_utc.isoformat(), dfp.parent_hash,
         )
+        # G-30 backdating invariant — the fork point and the fork episode MUST agree on
+        # the origin spine tip at departure. Both derive from the single `spine_tip_hash`
+        # read above, so this holds by construction; assert it explicitly so any future
+        # refactor that separates the two sources fails loudly instead of silently
+        # corrupting the cross-verifiable anchor.
+        if dfp.spine_tip_hash_at_departure != fork_ep.fork_origin_spine_tip_hash:
+            raise AriadneGovernanceError(
+                "G-30 backdating invariant violated: fork-point tip "
+                f"{dfp.spine_tip_hash_at_departure!r} != fork-episode tip "
+                f"{fork_ep.fork_origin_spine_tip_hash!r}"
+            )
         write_departure_fork_point_sync(driver, dfp)
 
-        # STEP 6: Write DEPARTURE_FORK_CREATED AuditRecord
+        # STEP 6: two-phase fork_anchor_index — now the point exists on the origin spine,
+        # patch the fork episode's anchor to the ORIGIN SEGMENT's sequence_index (where the
+        # departure anchored). The null->value transition confirms the point write; a
+        # non-null anchor with no DepartureForkPointNode is the Class-B corruption signal
+        # the orphan detector keys on. If the origin segment has no resolvable index, leave
+        # the anchor null (point written, anchor unresolved) — a patch-only retry can fix it.
+        anchor_index = None
+        with driver.session() as session:
+            arow = session.run(
+                "MATCH (s:AriadneSegment {segment_id: $sid}) RETURN s.sequence_index AS idx",
+                {"sid": origin_segment_id},
+            ).single()
+            if arow is not None:
+                anchor_index = arow["idx"]
+        if anchor_index is not None:
+            set_departure_fork_anchor_index_sync(driver, fork_ep_id, anchor_index)
+        else:
+            logger.warning(
+                f"Departure fork {str(fork_id)[:8]}...: origin segment "
+                f"{origin_segment_id[:8]}... has no resolvable sequence_index; "
+                f"fork_anchor_index left null (point written, anchor unresolved)"
+            )
+
+        # STEP 7: Write DEPARTURE_FORK_CREATED AuditRecord
         forward_delta = {
             "origin_episode_id": origin_episode_id,
             "origin_segment_id": origin_segment_id,
@@ -823,7 +906,7 @@ def create_departure_fork(
         )
         write_audit_record_sync(driver, audit)
 
-        # STEP 7-8: intent complete + WIL entry
+        # STEP 8: intent complete + WIL entry
         complete_intent_sync(driver, idempotency_key, str(fork_id))
         _write_branch_wil(driver, origin_episode_id, str(fork_id), "DEPARTURE_FORK_CREATE")
 
