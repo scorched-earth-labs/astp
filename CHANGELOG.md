@@ -9,6 +9,23 @@ The next change-set queues here.
 ### Clarified (errata — PATCH)
 - **Segment parentage vs. proof-chain parentage.** New §3.4.1 states explicitly that a Segment's `parent_node_id` is its **`EpisodeNode`** (an upward anchor), that segments order by `sequence_index` with no segment→segment edge, and that the canonical materialization is an ordered `(Episode)-[:CONTAINS {sequence_index}]->(Segment)` fan-out (derive next/prev at read time, don't persist a chain). A reciprocal note at §16.5.3 distinguishes this from the proof-chain rule `B.parent_node_id == A.node_id`, which links whole nodes causally (e.g. episode→episode). **No canonical-form change** — this clarifies existing semantics (G-2 reparenting prohibition; §5.2 leaf-hash preimage). Surfaced by a reference-implementation question ([ariadne-samples #1](https://github.com/scorched-earth-labs/ariadne-samples/issues/1)): an adapter graph showed a segment→segment containment chain instead of the canonical episode→segment fan-out.
 
+## [3.3.0] — 2026-07-05
+
+**MINOR.** Departure-fork orphan recovery (SPEC §19.3.7). Additive on top of v3.2.x — no breaking changes; every v3.2.x-conformant implementation remains conformant. The runtime enforcement layer for the §19.3.5 producer invariants: it catches partial-failure states the producers couldn't prevent (a crash between the two writes, a rolled-back status).
+
+### Added
+- **`ForkOrphanMarker`** — a non-chained diagnostic satellite recording a detection event. Self-hashed (domain `FORK_ORPHAN_MARKER:`) for tamper-evidence, but NOT a member of the origin spine's Merkle chain (no `parent_hash`; writing it never alters the origin episode's root/tip). Read-only after write; deduplicated one-per-orphaned-fork (keyed on `fork_id`); excluded from departure-registry queries. New `OrphanClass` enum (`CLASS_A..D`).
+- **Four orphan classes** — A (dangling `DepartureForkPointNode`, no episode), B (unanchored fork episode, no point), C (`ForkReturnNode` present but fork not `COMPLETED`), D (stale `ACTIVE` fork).
+- **The one permitted retroactive spine write** (Class B) — `write_retroactive_departure_fork_point_sync` appends the missing `DepartureForkPointNode` using the fork episode's stored `fork_origin_spine_tip_hash` as the point's `spine_tip_hash_at_departure` (cross-verify holds by construction), gated by a hash-consistency check (escalate, don't write, on mismatch). Byte-identical to an on-time write; `retroactive`/`orphan_recovery_timestamp` are diagnostic metadata outside the hash preimage. Mirrors RETROACTIVE branch declaration.
+- **Recovery write-primitives** (protocol exposes the writes; the consumer orchestrates detection): `write_fork_orphan_marker_sync`, `mark_departure_fork_point_orphaned_sync` (Class A), `write_retroactive_departure_fork_point_sync` + `mark_fork_episode_unanchored_sync` (Class B), `correct_fork_status_by_orphan_recovery_sync` (Class C).
+- **New diagnostic fields** — on `DepartureForkPointNode`: `orphaned`, `retroactive`, `orphan_recovery_timestamp`; on the fork `EpisodeNode`: `fork_orphaned`, `fork_orphan_class` (`UNANCHORED`), `status_corrected_by_orphan_recovery`, `status_corrected_at`. New `ForkOrphanClass` enum. None participate in any content hash.
+
+### Not normative
+- **Detection cadence.** Whether/how often an implementation scans for orphans is operational hygiene, not protocol conformance. Only the shape of a conformant *recovery* (the node, the field mutations, the retroactive-write discipline) is normative.
+
+### Tests
+`test_phase2_operations.py` — `TestForkOrphanRecovery` (6): marker hash determinism + satellite (no `parent_hash`), dedup-on-`fork_id`, Class-A append-only flag, Class-B retroactive append (backdated anchor + byte-identical hash), Class-B unanchored, Class-C status correction. Full protocol suite: **309 passing**.
+
 ## [3.2.2] — 2026-07-04
 
 **PATCH.** Prose errata — the §20/§21 hash-preimage descriptions were reconciled to the reference implementation. **No canonical-form change; the code was already correct** — only the SPEC prose was wrong, so every v3.2.1-conformant implementation remains conformant unchanged. Surfaced while authoring the §20/§21 implementation & conformance companion docs.

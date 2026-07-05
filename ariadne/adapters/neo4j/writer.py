@@ -82,6 +82,8 @@ SCHEMA_CONSTRAINTS = [
     "CREATE CONSTRAINT ariadne_soliloquy_conclusion_id IF NOT EXISTS FOR (sc:AriadneSoliloquyConclusion) REQUIRE sc.conclusion_id IS UNIQUE",
     # Phase 4 — Coherence Fingerprint Registry
     "CREATE CONSTRAINT ariadne_fingerprint_id IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) REQUIRE fp.fingerprint_id IS UNIQUE",
+    # Phase D — Orphan detection (dedup: one marker per orphaned fork)
+    "CREATE CONSTRAINT ariadne_fork_orphan_marker_fork_id IF NOT EXISTS FOR (m:AriadneForkOrphanMarker) REQUIRE m.fork_id IS UNIQUE",
 ]
 
 SCHEMA_INDEXES = [
@@ -148,6 +150,9 @@ SCHEMA_INDEXES = [
     "CREATE INDEX ariadne_fingerprint_segment IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) ON (fp.segment_id)",
     "CREATE INDEX ariadne_fingerprint_sequence IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) ON (fp.sequence_index)",
     "CREATE INDEX ariadne_fingerprint_state IF NOT EXISTS FOR (fp:AriadneCoherenceFingerprint) ON (fp.detection_state)",
+    # Phase D — Orphan detection (fork_id already indexed via its uniqueness constraint)
+    "CREATE INDEX ariadne_fork_orphan_marker_origin IF NOT EXISTS FOR (m:AriadneForkOrphanMarker) ON (m.origin_episode_id)",
+    "CREATE INDEX ariadne_fork_orphan_marker_class IF NOT EXISTS FOR (m:AriadneForkOrphanMarker) ON (m.orphan_class)",
     # Cross-Episode Linking (Amendment v2.0). Label is `AriadneEpisodeLink`
     # for consistency with the Ariadne* prefix convention; the amendment's
     # bare `EpisodeLink` notation is the protocol-level abstraction.
@@ -1395,6 +1400,200 @@ def write_fork_return_node_sync(driver, frn) -> None:
         )
     except Exception as e:
         logger.warning(f"Ariadne: Failed to write ForkReturn: {e}")
+
+
+# ── Phase D — Orphan-recovery write primitives (§19.3.7) ─────────────────────
+# Protocol exposes the WRITES; detection + which-recovery-to-run is orchestrated by
+# the consumer (ignis-os). All are append-only or set-once field mutations — no deletes.
+
+
+def write_fork_orphan_marker_sync(driver, marker) -> None:
+    """Write a ForkOrphanMarker as a NON-CHAINED diagnostic satellite off the ORIGIN episode
+    (ORPHAN_MARKER edge). Self-hashed (content_hash) for tamper-evidence, but NOT a member of
+    the origin spine's Merkle chain — writing it does not alter origin spine integrity. Dedup:
+    MERGE on fork_id → ONE marker per orphaned fork (a re-detection sweep never piles up
+    duplicates). Read-only after write; excluded from departure-registry queries."""
+    if not _ariadne_guard():
+        return
+    try:
+        from ariadne.core.schema import ARIADNE_SCHEMA_VERSION
+        with driver.session() as session:
+            session.run("""
+                MERGE (m:AriadneForkOrphanMarker {fork_id: $fork_id})
+                ON CREATE SET
+                  m.fork_orphan_marker_id     = $fork_orphan_marker_id,
+                  m.origin_episode_id         = $origin_episode_id,
+                  m.orphan_class              = $orphan_class,
+                  m.sequence_index            = $sequence_index,
+                  m.detection_run_id          = $detection_run_id,
+                  m.recovery_action           = $recovery_action,
+                  m.requires_operator_review  = $requires_operator_review,
+                  m.detected_at               = $detected_at,
+                  m.content_hash              = $content_hash,
+                  m.schema_version            = $schema_version
+            """, {
+                "fork_id": str(marker.fork_id),
+                "fork_orphan_marker_id": str(marker.fork_orphan_marker_id),
+                "origin_episode_id": str(marker.origin_episode_id),
+                "orphan_class": marker.orphan_class.value,
+                "sequence_index": marker.sequence_index,
+                "detection_run_id": str(marker.detection_run_id),
+                "recovery_action": marker.recovery_action,
+                "requires_operator_review": marker.requires_operator_review,
+                "detected_at": marker.detected_at.isoformat(),
+                "content_hash": marker.content_hash,
+                "schema_version": ARIADNE_SCHEMA_VERSION,
+            })
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $origin_episode_id})
+                MATCH (m:AriadneForkOrphanMarker {fork_id: $fork_id})
+                MERGE (e)-[:ORPHAN_MARKER {orphan_class: $orphan_class}]->(m)
+            """, {
+                "origin_episode_id": str(marker.origin_episode_id),
+                "fork_id": str(marker.fork_id),
+                "orphan_class": marker.orphan_class.value,
+            })
+        logger.info(
+            f"Ariadne: ForkOrphanMarker [{marker.orphan_class.value}] "
+            f"(fork={str(marker.fork_id)[:8]}...) review={marker.requires_operator_review}"
+        )
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to write ForkOrphanMarker: {e}")
+
+
+def mark_departure_fork_point_orphaned_sync(driver, fork_point_id: str) -> None:
+    """Class-A recovery: flag a dangling DepartureForkPointNode (its fork episode is missing)
+    as orphaned. Append-only — the point is NEVER deleted; the flag + the ForkOrphanMarker are
+    the resolution artifacts."""
+    if not _ariadne_guard():
+        return
+    try:
+        with driver.session() as session:
+            session.run("""
+                MATCH (fp:AriadneDepartureForkPoint {fork_point_id: $fork_point_id})
+                SET fp.orphaned = true
+            """, {"fork_point_id": str(fork_point_id)})
+        logger.info(f"Ariadne: DepartureForkPoint {str(fork_point_id)[:8]}... flagged orphaned (Class A)")
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to flag departure fork point orphaned: {e}")
+
+
+def write_retroactive_departure_fork_point_sync(driver, dfp, orphan_recovery_timestamp) -> None:
+    """Class-B recovery (hash-consistent path): retroactively APPEND a DepartureForkPointNode
+    that a failed write left missing. THE Spine-sensitive primitive — written self-contained
+    for auditability. Discipline (mirrors RETROACTIVE branch declaration):
+      * PURE APPEND — MERGE creates the missing point; no existing spine node or chain hash is
+        read-modified or recomputed.
+      * BACKDATED ANCHOR — `dfp.spine_tip_hash_at_departure` MUST be the fork episode's stored
+        `fork_origin_spine_tip_hash`, so the cross-verifiable invariant (point tip == episode
+        tip) holds by construction. The caller MUST have verified hash consistency vs the origin
+        spine at fork_anchor_index BEFORE calling this — on mismatch, escalate, do NOT write.
+      * FLAGS — the node is marked `retroactive=true` + `orphan_recovery_timestamp`; the
+        FORK_ORIGIN edge is marked retroactive so the recovery is auditable.
+    The point's content_hash is computed exactly as an on-time write, so a recovered point is
+    byte-identical to one written on time (the retroactive flag is diagnostic metadata, outside
+    the hash preimage)."""
+    if not _ariadne_guard():
+        return
+    try:
+        from ariadne.core.schema import ARIADNE_SCHEMA_VERSION
+        ts = orphan_recovery_timestamp.isoformat() if hasattr(orphan_recovery_timestamp, "isoformat") else orphan_recovery_timestamp
+        with driver.session() as session:
+            session.run("""
+                MERGE (fp:AriadneDepartureForkPoint {fork_point_id: $fork_point_id})
+                ON CREATE SET
+                  fp.fork_id                     = $fork_id,
+                  fp.fork_episode_id             = $fork_episode_id,
+                  fp.origin_episode_id           = $origin_episode_id,
+                  fp.origin_segment_id           = $origin_segment_id,
+                  fp.fork_objective              = $fork_objective,
+                  fp.fork_creation_trigger       = $fork_creation_trigger,
+                  fp.fork_title_snapshot         = $fork_title_snapshot,
+                  fp.spine_tip_hash_at_departure = $spine_tip_hash_at_departure,
+                  fp.initiator                   = $initiator,
+                  fp.content_hash                = $content_hash,
+                  fp.parent_hash                 = $parent_hash,
+                  fp.timestamp_utc               = $timestamp_utc,
+                  fp.schema_version              = $schema_version,
+                  fp.retroactive                 = $retroactive,
+                  fp.orphan_recovery_timestamp   = $orphan_recovery_timestamp
+            """, {
+                "fork_point_id": str(dfp.fork_point_id),
+                "fork_id": str(dfp.fork_id),
+                "fork_episode_id": str(dfp.fork_episode_id),
+                "origin_episode_id": str(dfp.origin_episode_id),
+                "origin_segment_id": dfp.origin_segment_id,
+                "fork_objective": dfp.fork_objective,
+                "fork_creation_trigger": dfp.fork_creation_trigger.value,
+                "fork_title_snapshot": dfp.fork_title_snapshot,
+                "spine_tip_hash_at_departure": dfp.spine_tip_hash_at_departure,
+                "initiator": dfp.initiator,
+                "content_hash": dfp.content_hash,
+                "parent_hash": dfp.parent_hash,
+                "timestamp_utc": dfp.timestamp_utc.isoformat(),
+                "schema_version": ARIADNE_SCHEMA_VERSION,
+                "retroactive": True,
+                "orphan_recovery_timestamp": ts,
+            })
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $origin_episode_id})
+                MATCH (fp:AriadneDepartureForkPoint {fork_point_id: $fork_point_id})
+                MERGE (e)-[:FORK_ORIGIN {
+                    fork_id: $fork_id, departure: true, retroactive: true, created_at: $timestamp_utc
+                }]->(fp)
+            """, {
+                "origin_episode_id": str(dfp.origin_episode_id),
+                "fork_point_id": str(dfp.fork_point_id),
+                "fork_id": str(dfp.fork_id),
+                "timestamp_utc": dfp.timestamp_utc.isoformat(),
+            })
+        logger.info(
+            f"Ariadne: RETROACTIVE DepartureForkPoint {str(dfp.fork_point_id)[:8]}... "
+            f"written (Class-B recovery, fork={str(dfp.fork_id)[:8]}...)"
+        )
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed retroactive departure fork point write: {e}")
+
+
+def mark_fork_episode_unanchored_sync(driver, fork_episode_id: str) -> None:
+    """Class-B recovery (origin-unreachable path): a fork with no recoverable origin. Sets
+    fork_orphaned=true + fork_orphan_class=UNANCHORED on the fork episode."""
+    if not _ariadne_guard():
+        return
+    try:
+        with driver.session() as session:
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $episode_id})
+                SET e.fork_orphaned = true, e.fork_orphan_class = 'UNANCHORED'
+            """, {"episode_id": str(fork_episode_id)})
+        logger.info(f"Ariadne: Fork episode {str(fork_episode_id)[:8]}... marked UNANCHORED (Class B)")
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to mark fork episode unanchored: {e}")
+
+
+def correct_fork_status_by_orphan_recovery_sync(driver, fork_episode_id: str) -> None:
+    """Class-C recovery (ACTIVE sub-case): a ForkReturnNode exists but the fork episode was
+    left non-COMPLETED. The ForkReturnNode is authoritative — set fork_status=COMPLETED +
+    status_corrected_by_orphan_recovery=true + status_corrected_at. The ABANDONED sub-case is a
+    data-integrity violation (operator review, NOT auto-corrected) and is intentionally not
+    written by this primitive — the caller guards on status before calling."""
+    if not _ariadne_guard():
+        return
+    try:
+        from datetime import datetime, timezone
+        with driver.session() as session:
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $episode_id})
+                SET e.fork_status = 'COMPLETED',
+                    e.status_corrected_by_orphan_recovery = true,
+                    e.status_corrected_at = $ts
+            """, {
+                "episode_id": str(fork_episode_id),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            })
+        logger.info(f"Ariadne: Fork episode {str(fork_episode_id)[:8]}... status corrected -> COMPLETED (Class C)")
+    except Exception as e:
+        logger.warning(f"Ariadne: Failed to correct fork status by orphan recovery: {e}")
 
 
 def mark_fork_point_status_sync(driver, fork_point_id: str, status: str) -> None:

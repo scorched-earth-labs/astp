@@ -828,6 +828,22 @@ class ForkReturnType(str, Enum):
     SUPERSEDED = "SUPERSEDED"        # origin moved past it; informational
 
 
+class OrphanClass(str, Enum):
+    """Which structural inconsistency a ForkOrphanMarker records (Ariadne BFM Phase D,
+    orphan detection). A/B/C are the partial-failure classes; D is the stale-ACTIVE
+    hygiene class. Tags the MARKER (distinct from ForkOrphanClass, set on the episode)."""
+    CLASS_A = "CLASS_A"    # dangling DepartureForkPointNode — no fork episode
+    CLASS_B = "CLASS_B"    # unanchored fork episode — no DepartureForkPointNode
+    CLASS_C = "CLASS_C"    # ForkReturnNode present but fork_status not COMPLETED
+    CLASS_D = "CLASS_D"    # stale ACTIVE fork — no spine activity past the threshold
+
+
+class ForkOrphanClass(str, Enum):
+    """Set on a fork EPISODE when a Class-B orphan cannot be re-anchored because its
+    originating episode is unreachable. Distinct from OrphanClass (which tags the marker)."""
+    UNANCHORED = "UNANCHORED"    # a fork with no recoverable origin
+
+
 class DepartureForkPointNode(BaseModel):
     """Written to the ORIGINATING episode's spine by create_departure_fork() —
     the single departure marker. Distinct label/hash-domain from the speculative
@@ -847,6 +863,11 @@ class DepartureForkPointNode(BaseModel):
     parent_hash: str = ""
     timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     schema_version: str = ARIADNE_SCHEMA_VERSION
+    # Orphan-recovery diagnostic flags — set by recovery only; NOT part of content_hash,
+    # so a retroactively-recovered point hashes identically to one written on time (§19.3.7).
+    orphaned: Optional[bool] = None                       # Class-A: dangling point (no fork episode)
+    retroactive: Optional[bool] = None                    # Class-B: point re-written by recovery
+    orphan_recovery_timestamp: Optional[datetime] = None  # when recovery wrote/flagged it
 
 
 class DepartureForkResult(BaseModel):
@@ -952,6 +973,52 @@ def compute_fork_return_hash(
         f"{returned_by}:{timestamp}:{parent_hash}"
     )
     return sha3_256(b"FORK_RETURN:" + preimage.encode())
+
+
+class ForkOrphanMarker(BaseModel):
+    """A non-chained diagnostic satellite recording that a departure fork was found in a
+    structurally-inconsistent state (Ariadne BFM Phase D, orphan detection). Written to the
+    ORIGIN spine by orphan recovery. Self-hashed for tamper-evidence (domain
+    FORK_ORPHAN_MARKER:) but NOT a member of the origin spine's Merkle chain — it has no
+    parent_hash and writing it never changes the origin episode's root/tip. Read-only after
+    write; ONE marker per orphaned fork (dedup on fork_id); excluded from departure-registry
+    queries (which match DepartureForkPointNode / ForkReturnNode only)."""
+    fork_orphan_marker_id: UUID = Field(default_factory=uuid4)
+    fork_id: UUID                                     # the orphaned fork (dedup key: one per fork)
+    origin_episode_id: UUID                           # the originating episode it hangs off
+    orphan_class: OrphanClass
+    sequence_index: int                               # positional record on the origin spine (satellite)
+    detection_run_id: UUID                            # the detection sweep that found it
+    recovery_action: str                              # human-readable description of what recovery did
+    requires_operator_review: bool                    # true for Class A; false for auto-recovered
+    detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    content_hash: str = ""                            # self-tamper-evidence (NOT a spine chain link)
+    schema_version: str = ARIADNE_SCHEMA_VERSION
+
+
+def compute_fork_orphan_marker_hash(
+    fork_orphan_marker_id: str,
+    fork_id: str,
+    origin_episode_id: str,
+    orphan_class: str,
+    sequence_index: int,
+    detection_run_id: str,
+    recovery_action: str,
+    requires_operator_review: bool,
+    detected_at: str,
+) -> str:
+    """Compute the SELF content hash of a ForkOrphanMarker.
+
+    Domain separation prefix: FORK_ORPHAN_MARKER:. This is a self-integrity hash ONLY — the
+    marker is a diagnostic satellite, NOT chained into the origin spine's Merkle root, so it
+    carries no parent_hash and writing it does not alter origin spine integrity.
+    """
+    preimage = (
+        f"{fork_orphan_marker_id}:{fork_id}:{origin_episode_id}:{orphan_class}:"
+        f"{sequence_index}:{detection_run_id}:{recovery_action}:"
+        f"{requires_operator_review}:{detected_at}"
+    )
+    return sha3_256(b"FORK_ORPHAN_MARKER:" + preimage.encode())
 
 
 def compute_merge_point_hash(

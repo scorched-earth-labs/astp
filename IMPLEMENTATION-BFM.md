@@ -1,8 +1,8 @@
 # Ariadne — Branch/Fork/Merge Implementation Guide
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Date:** 2026-07-04
-**Scope:** All four phases of the Branch/Fork/Merge taxonomy (SPEC §19), plus the **Phase D departure-fork lifecycle** (SPEC §19.3.5–19.3.6, added §5)
+**Scope:** All four phases of the Branch/Fork/Merge taxonomy (SPEC §19), plus the **Phase D departure-fork lifecycle** (SPEC §19.3.5–19.3.7, added §5 — incl. orphan recovery §5.8)
 **Target audience:** Implementers extending a conforming Ariadne instance with the BFM taxonomy.
 
 ---
@@ -296,11 +296,55 @@ Both preimages are `sha3_256(prefix + ":" + colon-joined fields)`; ground truth 
 
 The `DEPARTURE_FORK_POINT:` prefix is deliberately distinct from `FORK_POINT:` — a departure fork point and a speculative fork point with otherwise-identical fields MUST NOT collide.
 
+### 5.8 Orphan Recovery (§19.3.7)
+
+The producer (§5.5) and return holds a cross-verifiable invariant at write time; **orphan recovery is its runtime enforcement** — it catches the partial-failure states the producer couldn't prevent (a crash between the two writes, a rolled-back status). Per the protocol/runtime split, this repo ships the **write primitives**; detection (which sweep, how often) and the detect→recover orchestration live in the consumer (ignis-os). **Detection cadence is not part of conformance** — only the shape of a conformant recovery is (SPEC §19.3.7).
+
+**Write primitives** (`ariadne/adapters/neo4j/writer.py`):
+
+```python
+write_fork_orphan_marker_sync(driver, marker)                 # any class: diagnostic marker (dedup on fork_id)
+mark_departure_fork_point_orphaned_sync(driver, fork_point_id)  # Class A: flag dangling point orphaned=true
+write_retroactive_departure_fork_point_sync(driver, dfp, orphan_recovery_timestamp)  # Class B: append missing point
+mark_fork_episode_unanchored_sync(driver, fork_episode_id)    # Class B (origin unreachable): fork_orphaned + UNANCHORED
+correct_fork_status_by_orphan_recovery_sync(driver, fork_episode_id)  # Class C: ACTIVE -> COMPLETED (return is authoritative)
+```
+
+**`ForkOrphanMarker` — non-chained diagnostic satellite.** Written to the origin spine
+(`ORPHAN_MARKER` edge from the origin Episode), self-hashed with domain
+`FORK_ORPHAN_MARKER:` for tamper-evidence, but **NOT** a member of the origin spine's
+Merkle chain — it carries **no `parent_hash`**, so writing it never changes the origin
+Episode's root/tip. Neo4j: label `AriadneForkOrphanMarker`, uniqueness constraint on
+`fork_id` (this is what enforces **one marker per orphaned fork** — a re-detection sweep
+MERGEs onto the existing node). Read-only after write; `departure_registry` queries match
+`DepartureForkPointNode`/`ForkReturnNode` only, so markers never surface there.
+
+Hash preimage (SHA3-256, prefix `FORK_ORPHAN_MARKER:`):
+
+| Node | Preimage field order |
+|------|----------------------|
+| `ForkOrphanMarker` | `fork_orphan_marker_id`, `fork_id`, `origin_episode_id`, `orphan_class`, `sequence_index`, `detection_run_id`, `recovery_action`, `requires_operator_review`, `detected_at` |
+
+**The Class-B retroactive write** (`write_retroactive_departure_fork_point_sync`) — the
+one place a fork point is written after the fact. It is a **pure append** modeled on
+RETROACTIVE branch declaration (§3.4): it MERGEs the missing `DepartureForkPointNode`
+using the fork Episode's stored `fork_origin_spine_tip_hash` as the point's
+`spine_tip_hash_at_departure` (so the cross-verifiable invariant holds by construction),
+and touches **nothing else** — no existing spine node or chain hash is read-modified.
+The point's `content_hash` is computed exactly as an on-time write, so a recovered point
+is **byte-identical** to one written on time; `retroactive=true` and
+`orphan_recovery_timestamp` are diagnostic fields **outside** the hash preimage. The
+caller MUST verify hash consistency (fork provenance vs origin spine at
+`fork_anchor_index`) BEFORE calling it — on mismatch, escalate to an operator, do not
+write. Diagnostic fields land on the point (`orphaned`, `retroactive`,
+`orphan_recovery_timestamp`) and the fork Episode (`fork_orphaned`, `fork_orphan_class`,
+`status_corrected_by_orphan_recovery`, `status_corrected_at`); none are hashed.
+
 ---
 
 ## 6. Phase 3 — Social/Internal Primitives
 
-### 5.1 Public API
+### 6.1 Public API
 
 ```python
 from ariadne.core.branch_operations import (
@@ -335,7 +379,7 @@ conclusion = conclude_soliloquy(
 ) -> Optional[SoliloquyConclusionResult]
 ```
 
-### 5.2 Aside Reference Scan (on close)
+### 6.2 Aside Reference Scan (on close)
 
 `scan_aside_external_references_sync()` runs:
 
@@ -352,7 +396,7 @@ the `AsideTerminusNode` and the ASIDE_CLOSED audit record. This is the
 notified of the aside's existence, and leaks are part of the permanent
 audit trail for review.
 
-### 5.3 Soliloquy Merkle Handling
+### 6.3 Soliloquy Merkle Handling
 
 Two `SoliloquyContentHashPolicy` values:
 
@@ -363,7 +407,7 @@ Two `SoliloquyContentHashPolicy` values:
 
 The protocol default is `HASH_PLACEHOLDER` because it's the privacy-preserving choice. Deployments that need chain verification can opt in to `FULL_CONTENT` per-soliloquy via `visibility_policy.content_hash_policy`.
 
-### 5.4 Conclusion Merge Model
+### 6.4 Conclusion Merge Model
 
 `conclude_soliloquy()` writes `SoliloquyConclusionNode` with:
 
@@ -478,6 +522,7 @@ Keys are canonicalized (case-folded, stripped) before hashing. Expiry is checked
 | `AriadneMergePoint` | `merge_point_id` | 2 |
 | `AriadneDepartureForkPoint` | `fork_point_id` | D |
 | `AriadneForkReturn` | `fork_return_id` | D |
+| `AriadneForkOrphanMarker` | `fork_id` (dedup: one per orphaned fork) | D |
 | `AriadneAside` | `aside_id` | 3 |
 | `AriadneAsideTerminus` | `aside_terminus_id` | 3 |
 | `AriadneSoliloquy` | `soliloquy_id` | 3 |
@@ -504,14 +549,14 @@ All tests pass under `ARIADNE_ENABLED=true` with a mocked Neo4j driver
 | File | Count | Focus |
 |------|-------|-------|
 | `test_phase2_schema.py` | 16 | Fork/merge schema, hash domain separation, conflict manifest |
-| `test_phase2_operations.py` | 23 | Fork N-way, resolve, merge clean/conflict/resolved paths, integrity; **Phase D** `TestCreateDepartureFork` + `TestDepartureForkFSM` (11): create/backdating-invariant/origin-continues/escalation-trigger/idempotency, complete/abandon/return FSM + G-34/G-35 guards |
+| `test_phase2_operations.py` | 34 | Fork N-way, resolve, merge clean/conflict/resolved paths, integrity; **Phase D** `TestCreateDepartureFork` + `TestDepartureForkFSM` (11) + producer-hardening (5: idempotent re-drive, two-phase anchor, full-result replay) + `TestForkOrphanRecovery` (6): marker self-hash/satellite/dedup, Class-A/B/C recovery incl. retroactive append |
 | `test_phase3_schema.py` | 24 | Aside/soliloquy schema, HASH_PLACEHOLDER independence from chain, governance |
 | `test_phase3_operations.py` | 17 | Aside close + reference scan, soliloquy conclude, chain stays in soliloquy |
 | `test_phase4_schema.py` | 22 | State machine transitions, thresholds, confirmation cache, write-time guard |
 | `test_phase4_intercept.py` | 8 | Intercept progression NOMINAL→MATERIALIZED, drift reset, objective/INTRODUCE overrides |
-| **Total** | **110** | |
+| **Total** | **121** | |
 
-The Phase D vectors are colocated in `test_phase2_operations.py` (the departure fork is part of the fork family). Combined with the full protocol test surface (namespace firewall, trust-infrastructure conformance, cross-episode, Layer 3, verification, etc.), `poetry`-less `.venv/bin/python -m pytest tests/ -q` currently runs **298/298 passing**.
+The Phase D vectors are colocated in `test_phase2_operations.py` (the departure fork is part of the fork family). Combined with the full protocol test surface (namespace firewall, trust-infrastructure conformance, cross-episode, Layer 3, verification, etc.), `poetry`-less `.venv/bin/python -m pytest tests/ -q` currently runs **309/309 passing**.
 
 ---
 
