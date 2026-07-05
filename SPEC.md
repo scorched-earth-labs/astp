@@ -1,7 +1,7 @@
 # Ariadne State Tree Protocol Specification
 
-**Version:** 3.2.2
-**Status:** Stable. The full normative protocol is defined in this document's body. (v3.2.2 is a prose errata — it corrected the §20 hash-preimage descriptions and the §21 Form-B attribution to match the reference implementation; the canonical hash form is unchanged, so every v3.2.1-conformant implementation remains conformant.) The Phase D departure-fork lifecycle (v3.2.0) is at §19.3.5–19.3.6; cross-episode linking + grouping (v3.0.0) at §20; the Layer 3 Workflow & Execution DAG (v3.1.0) at §21. The v3.2.1 integration pass folded the former standalone amendments into the SPEC body — editorial only, no normative change. The historical amendment documents ([`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) → §20, [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) → §21) are retained for provenance only. Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
+**Version:** 3.3.0
+**Status:** Stable. The full normative protocol is defined in this document's body. (v3.3.0 adds the departure-fork **orphan-recovery** surface at §19.3.7 — the `ForkOrphanMarker` node, per-class recovery field mutations, and the one permitted retroactive spine write — additively; no existing canonical form changes, so every v3.2.x-conformant implementation remains conformant. Detection cadence is non-normative.) The Phase D departure-fork lifecycle (v3.2.0) is at §19.3.5–19.3.7; cross-episode linking + grouping (v3.0.0) at §20; the Layer 3 Workflow & Execution DAG (v3.1.0) at §21. The v3.2.1 integration pass folded the former standalone amendments into the SPEC body — editorial only, no normative change. The historical amendment documents ([`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) → §20, [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) → §21) are retained for provenance only. Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-06-07
 **Supersedes:** SPEC-v1.md (0.1.0-draft)
@@ -927,6 +927,7 @@ This test should be run bidirectionally (A→B and B→A).
 | 3.1.0 | 2026-06-07 | **MINOR** — Layer 3 Workflow & Execution DAG. Source: [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md). New node types: `WorkflowDeclaration`, `ExecutionNode`, `SkillInvocation`. Three-Merkle-layer model formalized: Layer 1 Spine, Layer 2 episode content, Layer 3 Workflow & Execution DAG. **Layer 3 is cryptographically isolated from Spine integrity** — references Layers 1/2 by ID only; never hash-linked into the Spine; no future Layer-3 change can force a MAJOR bump on Spine grounds. Cognitive Implementation Authority (CIA) — sole-writer guarantee as wire-tier conformance principle. New `CognitiveDeltaType` variants. `ExecutionNode` and `SkillInvocationNode` immutable after creation; only mutable Layer 3 field is `WorkflowDeclaration.status` (and `status_updated_at`). Hash byte-form left open at protocol layer per amendment §3. |
 | 3.2.0 | 2026-07-04 | **MINOR** — Phase D departure-fork lifecycle, defined in-body (§19.3.5–19.3.6). `create_departure_fork()`: a single directional departure into a new (continuing) Episode, distinct from the speculative `create_fork()`. New nodes `DepartureForkPointNode` (domain `DEPARTURE_FORK_POINT:`) and `ForkReturnNode` (domain `FORK_RETURN:`). Backdating integrity invariant (G-30): `spine_tip_hash_at_departure` == the fork Episode's `fork_origin_spine_tip_hash`. Lifecycle FSM `ACTIVE → COMPLETED \| ABANDONED` (`complete_departure_fork` / `abandon_departure_fork` / `declare_fork_return`); resumption is a non-event. **Declarative** return (`INCORPORATED`/`ACKNOWLEDGED`/`SUPERSEDED`), never the branch's structural merge. Immutable Episode fork provenance (§19.3.6). New `CognitiveDeltaType` variants `DEPARTURE_FORK_CREATED`/`_COMPLETED`/`_ABANDONED`/`_RETURNED`; new edges `FORK_RETURN`, `RETURNED_FROM`. Governance G-30 through G-35. **Additive — no breaking changes.** |
 | 3.2.1 | 2026-07-04 | **PATCH** — SPEC integration pass. Folded the two former standalone amendments into this document's body: cross-episode linking + grouping (was `AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`) → **§20**; Layer 3 Workflow & Execution DAG (was `AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`) → **§21**; References moved to §22. The amendment's CIA conformance rule was renumbered from its authoring numeral G-19 (which collided with BFM's G-19) to **G-36**. Amendment files retained for provenance only (historical-reference banners). **Editorial only — no normative change.** |
+| 3.3.0 | 2026-07-05 | **MINOR** — Departure-fork orphan recovery (§19.3.7). New non-chained diagnostic satellite node `ForkOrphanMarker` (domain `FORK_ORPHAN_MARKER:`, self-hashed, excluded from the spine Merkle chain and from departure-registry queries, deduplicated one-per-orphaned-fork). Four orphan classes (A dangling point / B unanchored episode / C return-status mismatch / D stale ACTIVE). Class-B recovery defines the **one permitted retroactive `DepartureForkPointNode` write** (append + backdated anchor + cross-verify gate, byte-identical to an on-time write; escalate-don't-write on hash mismatch). New diagnostic fields on the fork point (`orphaned`, `retroactive`, `orphan_recovery_timestamp`) and the fork episode (`fork_orphaned`, `fork_orphan_class=UNANCHORED`, `status_corrected_by_orphan_recovery`, `status_corrected_at`). **Detection cadence is non-normative** (operational hygiene). **Additive — no breaking changes.** |
 | 3.2.2 | 2026-07-04 | **PATCH** — prose errata. Corrected the §20 hash-preimage descriptions to match the reference implementation: `EpisodeLink.content_hash`, `MembershipRecord.content_hash`, `ConformanceDeclaration.declaration_hash` are **SHA3-256** (not SHA-256), per the §5 protocol commitment; `MembershipRecord` binds `supersedes_record_id` + `succession_reason` (the prose omitted them); `EpisodeLink` excludes only `quarantine_resolved_at` / `quarantine_resolution` (the prose wrongly listed `health_state` / `health_checked_at` as excluded — they ARE hashed). Corrected the §21 Form-B attribution (the Ignis reference implementation uses SHA3-256 + declared field order, not SHA-256 + key-sorting). **The canonical hash form is unchanged — prose-only; every v3.2.1 implementation remains conformant.** |
 
 ## 19. Branch/Fork/Merge Taxonomy
@@ -1182,6 +1183,63 @@ fields, set once at creation and never mutated: `fork_origin_episode_id`,
 `fork_origin_active_branch_ids`, `fork_status`, `fork_return_type`. This is
 provenance — "how did this Episode come to exist" — not identity, analogous to
 `continuation_of`. Null on non-fork Episodes.
+
+#### 19.3.7 Departure-fork Orphan Recovery
+
+The two-write departure-fork producer (§19.3.5) and the declarative return (§19.3.5)
+each hold a cross-verifiable integrity invariant at write time. **Orphan recovery is
+the runtime enforcement of those invariants after a partial failure** — the producers
+enforce them at write time; orphan recovery catches the cases where enforcement failed
+(a crash between the two writes, a rolled-back status). This section defines the
+**normative recovery surface**: the `ForkOrphanMarker` node, the recovery field
+mutations, and the one permitted retroactive spine write. **The detection cadence — how
+often an implementation scans for orphans, and whether it scans at all — is NOT
+normative** (it is operational hygiene); only the shape of a *conformant recovery* is.
+
+**Orphan classes.** Four structurally-impossible-under-normal-writes states:
+
+| Class | Definition | Severity |
+|-------|------------|----------|
+| **A** — Dangling point | A `DepartureForkPointNode` exists on the origin spine with no Episode carrying its `fork_id`. | High |
+| **B** — Unanchored episode | An Episode has `fork_origin_episode_id` set (and thus, per §19.3.6, `fork_anchor_index`) but no `DepartureForkPointNode` with a matching `fork_id` exists on the origin spine. | High |
+| **C** — Return/status mismatch | A `ForkReturnNode` exists for a `fork_id` whose fork Episode is not `COMPLETED`. | Medium |
+| **D** — Stale ACTIVE fork | An `ACTIVE` fork with no spine activity past an implementation-defined staleness threshold. | Low |
+
+A **non-null `fork_anchor_index` with no corresponding `DepartureForkPointNode`** is the defining corruption signature of Class B (the producer patches `fork_anchor_index` only *after* the point write — §19.3.5 STEP 6).
+
+**`ForkOrphanMarker`** — a **non-chained diagnostic satellite** recording a detection
+event. Written to the origin spine (linked by an `ORPHAN_MARKER` edge from the origin
+Episode), it is **self-hashed** for tamper-evidence with domain prefix
+`FORK_ORPHAN_MARKER:` but is **NOT a member of the origin spine's Merkle chain** — it
+carries no `parent_hash`, and writing it MUST NOT alter the origin Episode's spine
+root/tip. Fields: `fork_orphan_marker_id`, `fork_id`, `origin_episode_id`,
+`orphan_class` (`CLASS_A`…`CLASS_D`), `sequence_index`, `detection_run_id`,
+`recovery_action`, `requires_operator_review`, `detected_at`. It is **read-only after
+write**, **deduplicated one-per-orphaned-fork** (keyed on `fork_id` — a re-detection
+sweep MUST NOT write a duplicate), and **excluded from departure-registry queries**
+(which match `DepartureForkPointNode` / `ForkReturnNode` only).
+
+**Recovery actions** (the producer exposes the writes; an orchestrator decides which to run):
+
+- **Class A** — flag the dangling `DepartureForkPointNode` `orphaned = true` (append-only — the point is **never deleted**; spine nodes are append-only) and write a `ForkOrphanMarker` (`requires_operator_review = true` — a dangling point may reference an Episode in a storage layer the detection query cannot reach).
+- **Class B** — validate that the fork Episode's `fork_origin_spine_tip_hash` is consistent with the origin spine at `fork_anchor_index`. **If consistent**, perform the **one permitted retroactive spine write** (below). **If inconsistent**, escalate to an operator — do NOT auto-write. **If the origin Episode is unreachable**, mark the fork Episode `fork_orphaned = true`, `fork_orphan_class = UNANCHORED`.
+- **Class C** — if the fork Episode is `ACTIVE`, the `ForkReturnNode` is authoritative: set `fork_status = COMPLETED`, `status_corrected_by_orphan_recovery = true`, `status_corrected_at`. If the fork Episode is `ABANDONED`, this is a data-integrity violation requiring operator review — do NOT auto-correct.
+- **Class D** — notification only. An implementation MAY, after a longer abandonment threshold, invoke `abandon_departure_fork()` via the system/housekeeping actor (§19.3.5). It MUST NOT auto-abandon on staleness alone.
+
+**The retroactive `DepartureForkPointNode` write (Class B).** The point was *supposed*
+to be on the spine — its absence is a write failure, not a design choice — so its
+recovery is the one place a fork point is written after the fact. It is an **append**,
+governed by the same discipline as a RETROACTIVE branch declaration (§19.2):
+
+1. It **records the backdated anchor**: the point's `spine_tip_hash_at_departure` MUST be the fork Episode's stored `fork_origin_spine_tip_hash`, so the cross-verifiable invariant `DepartureForkPointNode.spine_tip_hash_at_departure == fork Episode.fork_origin_spine_tip_hash` holds by construction.
+2. It **MUST NOT recompute or mutate any existing spine node or chain hash** — it only creates the missing point.
+3. The point's `content_hash` is computed exactly as an on-time write, so a recovered point is **byte-identical** to one written on time; the recovery flags `retroactive = true` and `orphan_recovery_timestamp` are diagnostic metadata **outside** the hash preimage.
+4. The consistency check of the preceding paragraph is the **gate**: on mismatch, escalate — never write.
+
+**Invariants.** (a) Spine nodes are append-only — orphan recovery never deletes.
+(b) The `ForkOrphanMarker` never enters the spine Merkle chain — a diagnostic write
+never alters an Episode's cryptographic fingerprint. (c) The retroactive point write
+preserves the §19.3.5 cross-verifiable anchor by construction.
 
 ### 19.4 Phase 3 — Social/Internal Primitives
 

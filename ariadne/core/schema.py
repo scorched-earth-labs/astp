@@ -176,7 +176,7 @@ class EpisodeNode(BaseModel):
     # Null on non-fork episodes. Provenance metadata ("how did this come to exist"),
     # not identity — a departure fork IS an episode. (Ariadne BFM Phase D.)
     fork_origin_episode_id: Optional[UUID] = None      # episode this departed from
-    fork_anchor_index: Optional[int] = None            # sequence_index of the DepartureForkPointNode in the origin spine
+    fork_anchor_index: Optional[int] = None            # sequence_index of the ORIGIN SEGMENT where the departure anchored (the point is a satellite, not a spine-sequence member); null during in-progress creation (two-phase)
     fork_id: Optional[UUID] = None                     # shared id linking the fork point to this episode
     fork_created_at: Optional[datetime] = None         # the mechanical fork event time
     fork_creation_trigger: Optional[str] = None        # ForkCreationTrigger value
@@ -186,6 +186,11 @@ class EpisodeNode(BaseModel):
     fork_origin_active_branch_ids: Optional[list] = None  # [{branch_id, spine_tip_hash}] snapshot at fork time
     fork_status: Optional[str] = None                  # DepartureForkStatus: ACTIVE | COMPLETED | ABANDONED
     fork_return_type: Optional[str] = None             # ForkReturnType (set on declare_fork_return): INCORPORATED | ACKNOWLEDGED | SUPERSEDED
+    # --- Orphan-recovery diagnostics (Phase D, §19.3.7) — set by orphan recovery only ----
+    fork_orphaned: Optional[bool] = None               # Class-B unrecoverable: originating episode unreachable
+    fork_orphan_class: Optional[str] = None            # ForkOrphanClass: UNANCHORED
+    status_corrected_by_orphan_recovery: Optional[bool] = None  # Class-C: fork_status set by recovery
+    status_corrected_at: Optional[datetime] = None     # Class-C: when recovery corrected fork_status
 
 
 class RetentionTier(str, Enum):

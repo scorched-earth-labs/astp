@@ -1,10 +1,10 @@
 # Ariadne Protocol — BFM Conformance Test Vectors
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Status:** Stable
 **Authors:** Scorched Earth Labs / Clotho
 **Date:** 2026-07-04
-**Applies To:** SPEC.md §19 (Branch / Fork / Merge / **Departure Fork** / Aside / Soliloquy / CoherenceFingerprint), v3.2.1
+**Applies To:** SPEC.md §19 (Branch / Fork / Merge / **Departure Fork** / Aside / Soliloquy / CoherenceFingerprint + Orphan Recovery), v3.3.0
 
 ---
 
@@ -18,13 +18,15 @@ BFM is organized into the following phases, matching `IMPLEMENTATION-BFM.md`:
 |-------|-------|---------------|
 | 1 | Branch lifecycle (linear deviation) | `BR-` |
 | 2 | Fork / merge / common ancestor | `FM-` |
-| D | Departure-fork lifecycle (single directional departure; origin continues) | `DF-` |
+| D | Departure-fork lifecycle (single directional departure; origin continues) + orphan recovery | `DF-` / `FO-` |
 | 3 | Aside / Soliloquy (social & internal primitives) | `AS-` / `SL-` |
 | 4 | Coherence fingerprint write-time branch detection | `CF-` |
 
 Vector format matches `CONFORMANCE.md` (Phase 3 Trust Infrastructure §16): ID, spec reference, class, description, inputs, expected output, failure condition. All hex values lowercase. All string fields UTF-8.
 
 > **v1.1.0 reconciliation note.** This vector set was realigned to SPEC v3.2.1: §19 subsection references and governance rule numbers were corrected to the consolidated §19 / G-19–G-29 numbering (the v1.0.0-draft predated it), and the Phase D `DF-` set was added. Branch-phase governance (depth limit, access policy, abandonment reason) is enforced at the implementation layer — it has no numbered SPEC §19 governance rule — so those vectors cite the `IMPLEMENTATION-BFM.md` enforcement function rather than a G-number.
+>
+> **v1.2.0 note.** Added the orphan-recovery `FO-` set (§4.5, SPEC §19.3.7). These are state-integrity vectors (they test the shape of a conformant *recovery*), not new governance rules — and FO-008 makes explicit that running detection is **not** a conformance requirement.
 
 ---
 
@@ -192,6 +194,54 @@ A departure fork is a single directional departure (`create_departure_fork()`) i
 - **Class:** REQUIRED
 - **Spec Reference:** §19.3.5, G-35
 - **Description:** A second `declare_fork_return()` for a `fork_id` that already has a `ForkReturnNode` MUST be rejected. `return_type ∈ {INCORPORATED, ACKNOWLEDGED, SUPERSEDED}`; the return is declarative (origin-spine assertion across two spines), never a structural merge.
+
+### 4.5 Orphan Recovery (§19.3.7)
+
+These vectors test the *shape of a conformant recovery*, not that an implementation runs detection — **detection cadence is explicitly non-normative** (FO-008).
+
+**FO-001** — `ForkOrphanMarker` self-hash determinism
+- **Class:** REQUIRED
+- **Spec Reference:** §19.3.7
+- **Description:** `compute_fork_orphan_marker_hash()` (domain `FORK_ORPHAN_MARKER:`) canonicalizes `fork_orphan_marker_id`, `fork_id`, `origin_episode_id`, `orphan_class`, `sequence_index`, `detection_run_id`, `recovery_action`, `requires_operator_review`, `detected_at`. Two conforming implementations MUST produce identical bytes for the same input tuple.
+
+**FO-002** — Marker is a non-chained satellite (Spine isolation)
+- **Class:** REQUIRED
+- **Spec Reference:** §19.3.7
+- **Description:** A `ForkOrphanMarker` is self-hashed (`content_hash`) but MUST NOT participate in the origin spine's Merkle chain — it carries no `parent_hash`, and writing it MUST NOT change the origin Episode's spine root/tip.
+- **Verification Protocol:** Capture the origin Episode's spine root; write a marker; the root MUST be unchanged.
+- **Failure Condition:** Writing a marker alters the origin Episode's integrity fingerprint (a diagnostic write mutating the cryptographic record).
+
+**FO-003** — Marker dedup (one per orphaned fork)
+- **Class:** REQUIRED
+- **Spec Reference:** §19.3.7
+- **Description:** Markers are deduplicated on `fork_id` — a re-detection sweep that re-finds the same orphan MUST NOT create a duplicate marker.
+- **Failure Condition:** Two detection passes over the same unresolved orphan yield two marker nodes.
+
+**FO-004** — Marker excluded from departure registry
+- **Class:** REQUIRED
+- **Spec Reference:** §19.3.7
+- **Description:** Departure-registry queries match `DepartureForkPointNode` / `ForkReturnNode` only. A `ForkOrphanMarker` MUST NOT appear in departure-registry results.
+
+**FO-005** — Class-B retroactive write: append + backdated anchor + byte-identical
+- **Class:** REQUIRED
+- **Spec Reference:** §19.3.7
+- **Description:** The Class-B retroactive `DepartureForkPointNode` write MUST (a) use the fork Episode's stored `fork_origin_spine_tip_hash` as the point's `spine_tip_hash_at_departure` so the cross-verifiable invariant holds, (b) produce a `content_hash` **byte-identical** to an on-time write (the `retroactive` / `orphan_recovery_timestamp` flags are outside the preimage), and (c) create ONLY the missing point — no existing spine node or chain hash is recomputed.
+- **Failure Condition:** The recovered point's `content_hash` differs from an on-time write, OR any pre-existing spine hash changes.
+
+**FO-006** — Class-B hash-mismatch gate
+- **Class:** REQUIRED
+- **Spec Reference:** §19.3.7
+- **Description:** When the fork provenance is inconsistent with the origin spine at `fork_anchor_index`, recovery MUST escalate to an operator and MUST NOT write the retroactive point.
+
+**FO-007** — Append-only recovery
+- **Class:** REQUIRED
+- **Spec Reference:** §19.3.7
+- **Description:** Orphan recovery MUST NOT delete spine nodes. A dangling point (Class A) is flagged `orphaned=true` and marked, never removed.
+
+**FO-008** — Detection cadence is non-normative
+- **Class:** RECOMMENDED
+- **Spec Reference:** §19.3.7
+- **Description:** Conformance does NOT require an implementation to run orphan detection, nor at any particular cadence. Only the node schema, the field mutations, and the retroactive-write discipline (FO-001…007) are normative. An implementation that never orphans (or resolves orphans by other means) is conformant provided it never violates the invariants.
 
 ---
 
@@ -368,11 +418,11 @@ Level 1 plus all **RECOMMENDED** vectors and the advisory checks in IMPLEMENTATI
 
 ## 9. Cross-Reference
 
-- **SPEC.md §19** — normative protocol surface (v3.2.1)
+- **SPEC.md §19** — normative protocol surface (v3.3.0)
 - **IMPLEMENTATION-BFM.md** — Neo4j reference adapter (non-normative)
 - **CONFORMANCE.md** — Phase 3 Trust Infrastructure vectors (§16)
 
 ---
 
 *Ariadne Protocol BFM Conformance Test Vectors are maintained by Scorched Earth Labs.*
-*Vector set version: 1.1.0 | Applies to SPEC.md: v3.2.1 §19*
+*Vector set version: 1.2.0 | Applies to SPEC.md: v3.3.0 §19*
