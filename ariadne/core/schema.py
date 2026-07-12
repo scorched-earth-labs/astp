@@ -50,13 +50,19 @@ class EpisodeVisualizationState(str, Enum):
 
 
 _VISUALIZATION_STATE_MAP = {
+    # CREATED is only the initialization phase before content flow begins.
     EpisodeStatus.CREATED: EpisodeVisualizationState.CREATED,
+    # ACTIVE surface includes all non-terminal productive states where work can
+    # still continue or resume after temporary gates.
     EpisodeStatus.ACTIVE: EpisodeVisualizationState.ACTIVE,
     EpisodeStatus.PENDING_HITL: EpisodeVisualizationState.ACTIVE,
     EpisodeStatus.CRYSTALLIZATION_PENDING: EpisodeVisualizationState.ACTIVE,
     EpisodeStatus.CRYSTALLIZED: EpisodeVisualizationState.ACTIVE,
+    # CLOSING surface represents explicit closure intent prior to seal finality.
     EpisodeStatus.CLOSING: EpisodeVisualizationState.CLOSING,
     EpisodeStatus.CLOSING_PENDING_SEAL: EpisodeVisualizationState.CLOSING,
+    # SEALS surface groups the seal execution/finality statuses because they
+    # all represent "seal operation underway or complete" in visualization UIs.
     EpisodeStatus.CLOSED: EpisodeVisualizationState.SEALS,
     EpisodeStatus.SEALING: EpisodeVisualizationState.SEALS,
     EpisodeStatus.SEALED: EpisodeVisualizationState.SEALS,
