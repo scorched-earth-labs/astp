@@ -1,4 +1,7 @@
+import pytest
+
 from ariadne.core.schema import (
+    AriadneGovernanceError,
     EpisodeStatus,
     EpisodeVisualizationState,
     to_visualization_episode_state,
@@ -32,3 +35,8 @@ def test_to_visualization_episode_state_maps_protocol_statuses():
 def test_to_visualization_episode_state_covers_all_episode_status_values():
     mapped = {status: to_visualization_episode_state(status) for status in EpisodeStatus}
     assert set(mapped.keys()) == set(EpisodeStatus)
+
+
+def test_to_visualization_episode_state_rejects_unsupported_status():
+    with pytest.raises(AriadneGovernanceError, match="Unsupported EpisodeStatus"):
+        to_visualization_episode_state("UNKNOWN_STATUS")  # type: ignore[arg-type]

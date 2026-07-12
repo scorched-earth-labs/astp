@@ -36,7 +36,12 @@ class EpisodeStatus(str, Enum):
 
 
 class EpisodeVisualizationState(str, Enum):
-    """Coarse episode lifecycle states for UI/status visualization."""
+    """Protocol-defined coarse lifecycle surface for episode status visualization.
+
+    This surface is adapter/UI-facing but canonical at the protocol layer, and is
+    derived from the finer-grained `EpisodeStatus` enum via
+    `to_visualization_episode_state`.
+    """
     CREATED = "CREATED"
     ACTIVE = "ACTIVE"
     SEALS = "SEALS"
@@ -60,7 +65,12 @@ _VISUALIZATION_STATE_MAP = {
 
 
 def to_visualization_episode_state(status: EpisodeStatus) -> EpisodeVisualizationState:
-    """Map protocol EpisodeStatus values into visualization-oriented lifecycle states."""
+    """Map protocol EpisodeStatus values into visualization lifecycle states.
+
+    Raises:
+        AriadneGovernanceError: If the provided status has no supported
+            visualization mapping.
+    """
     mapped = _VISUALIZATION_STATE_MAP.get(status)
     if mapped is None:
         raise AriadneGovernanceError(
