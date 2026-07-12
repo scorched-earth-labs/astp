@@ -27,3 +27,8 @@ def test_to_visualization_episode_state_maps_protocol_statuses():
     assert to_visualization_episode_state(EpisodeStatus.SEALING) == EpisodeVisualizationState.SEALS
     assert to_visualization_episode_state(EpisodeStatus.SEALED) == EpisodeVisualizationState.SEALS
     assert to_visualization_episode_state(EpisodeStatus.ARCHIVED) == EpisodeVisualizationState.ARCHIVED
+
+
+def test_to_visualization_episode_state_covers_all_episode_status_values():
+    mapped = {status: to_visualization_episode_state(status) for status in EpisodeStatus}
+    assert set(mapped.keys()) == set(EpisodeStatus)

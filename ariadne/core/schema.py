@@ -61,7 +61,12 @@ _VISUALIZATION_STATE_MAP = {
 
 def to_visualization_episode_state(status: EpisodeStatus) -> EpisodeVisualizationState:
     """Map protocol EpisodeStatus values into visualization-oriented lifecycle states."""
-    return _VISUALIZATION_STATE_MAP[status]
+    mapped = _VISUALIZATION_STATE_MAP.get(status)
+    if mapped is None:
+        raise AriadneGovernanceError(
+            f"Unsupported EpisodeStatus for visualization mapping: {status!r}."
+        )
+    return mapped
 
 
 class CrystallizationStatus(str, Enum):
