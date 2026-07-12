@@ -35,6 +35,35 @@ class EpisodeStatus(str, Enum):
     ARCHIVED = "ARCHIVED"
 
 
+class EpisodeVisualizationState(str, Enum):
+    """Coarse episode lifecycle states for UI/status visualization."""
+    CREATED = "CREATED"
+    ACTIVE = "ACTIVE"
+    SEALS = "SEALS"
+    CLOSING = "CLOSING"
+    ARCHIVED = "ARCHIVED"
+
+
+_VISUALIZATION_STATE_MAP = {
+    EpisodeStatus.CREATED: EpisodeVisualizationState.CREATED,
+    EpisodeStatus.ACTIVE: EpisodeVisualizationState.ACTIVE,
+    EpisodeStatus.PENDING_HITL: EpisodeVisualizationState.ACTIVE,
+    EpisodeStatus.CRYSTALLIZATION_PENDING: EpisodeVisualizationState.ACTIVE,
+    EpisodeStatus.CRYSTALLIZED: EpisodeVisualizationState.ACTIVE,
+    EpisodeStatus.CLOSING: EpisodeVisualizationState.CLOSING,
+    EpisodeStatus.CLOSING_PENDING_SEAL: EpisodeVisualizationState.CLOSING,
+    EpisodeStatus.CLOSED: EpisodeVisualizationState.SEALS,
+    EpisodeStatus.SEALING: EpisodeVisualizationState.SEALS,
+    EpisodeStatus.SEALED: EpisodeVisualizationState.SEALS,
+    EpisodeStatus.ARCHIVED: EpisodeVisualizationState.ARCHIVED,
+}
+
+
+def to_visualization_episode_state(status: EpisodeStatus) -> EpisodeVisualizationState:
+    """Map protocol EpisodeStatus values into visualization-oriented lifecycle states."""
+    return _VISUALIZATION_STATE_MAP[status]
+
+
 class CrystallizationStatus(str, Enum):
     PROVISIONAL = "provisional"
     CRYSTALLIZED = "crystallized"
