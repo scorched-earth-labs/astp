@@ -197,6 +197,75 @@ async def get_episode_detail(driver, episode_id: str) -> Optional[dict[str, Any]
     return await asyncio.to_thread(_query)
 
 
+# ── Layer 3 Execution DAG Queries ────────────────────────────────────────────
+
+
+async def get_execution_dag_for_episode(driver, episode_id: str) -> dict[str, Any]:
+    """Get the Layer 3 Execution DAG for an episode.
+
+    Returns the workflow declarations anchored to the episode, their execution
+    steps, and the PRECEDES edges between steps — the raw material for a DAG
+    visualization. The DAG is written exclusively by the ignis-mcp-server, so
+    most episodes have none; in that case workflows/steps/edges come back empty.
+
+    Shape::
+
+        {
+          "workflows": [{node_id, workflow_name, workflow_version, status,
+                         declared_by, declared_at}],
+          "steps":     [{node_id, workflow_id, step_name, sequence_index,
+                         status, agent_id, executed_at, duration_ms}],
+          "edges":     [{source, target, edge_type, sequence_gap}],  # PRECEDES
+        }
+    """
+    if not ARIADNE_ENABLED:
+        return {"workflows": [], "steps": [], "edges": []}
+
+    def _query():
+        with driver.session() as session:
+            workflows = [
+                record["workflow"]
+                for record in session.run("""
+                    MATCH (w:WorkflowDeclaration {episode_id: $episode_id})
+                          -[:DECLARED_WITHIN]->(:AriadneEpisode {episode_id: $episode_id})
+                    RETURN w {
+                        .node_id, .workflow_name, .workflow_version,
+                        .status, .declared_by, .declared_at
+                    } AS workflow
+                    ORDER BY w.declared_at ASC
+                """, {"episode_id": episode_id})
+            ]
+            steps = [
+                record["step"]
+                for record in session.run("""
+                    MATCH (x:ExecutionNode {episode_id: $episode_id})
+                          -[:EXECUTES_WITHIN]->(:WorkflowDeclaration {episode_id: $episode_id})
+                    RETURN x {
+                        .node_id, .workflow_id, .step_name, .sequence_index,
+                        .status, .agent_id, .executed_at, .duration_ms
+                    } AS step
+                    ORDER BY x.sequence_index ASC
+                """, {"episode_id": episode_id})
+            ]
+            edges = [
+                {
+                    "source": record["source"],
+                    "target": record["target"],
+                    "edge_type": record["edge_type"],
+                    "sequence_gap": record["sequence_gap"],
+                }
+                for record in session.run("""
+                    MATCH (a:ExecutionNode {episode_id: $episode_id})
+                          -[r:PRECEDES]->(b:ExecutionNode {episode_id: $episode_id})
+                    RETURN a.node_id AS source, b.node_id AS target,
+                           r.edge_type AS edge_type, r.sequence_gap AS sequence_gap
+                """, {"episode_id": episode_id})
+            ]
+            return {"workflows": workflows, "steps": steps, "edges": edges}
+
+    return await asyncio.to_thread(_query)
+
+
 # ── Segment Queries ──────────────────────────────────────────────────────────
 
 
