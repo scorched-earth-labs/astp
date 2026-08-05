@@ -1,4 +1,4 @@
-# Ariadne — Layer 3 (Workflow & Execution DAG) Implementation Guide
+# ASTP — Layer 3 (Workflow & Execution DAG) Implementation Guide
 
 **Version:** 1.0.0
 **Status:** Stable

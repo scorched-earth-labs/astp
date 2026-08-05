@@ -1,4 +1,4 @@
-# Ariadne State Tree Protocol
+# ASTP — AI State Tree Protocol
 ## Unified Architecture Vision
 **Version:** 0.1.0-draft synthesis  
 **Date:** April 8, 2026  
@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-Ariadne is the persistence layer that gives agents continuous identity and verifiable state. It answers a deceptively simple question: *"Did this agent reason honestly, in this order, with these influences, and can we prove it?"*
+ASTP (the AI State Tree Protocol, developed internally as Project Ariadne) is the persistence layer that gives agents continuous identity and verifiable state. It answers a deceptively simple question: *"Did this agent reason honestly, in this order, with these influences, and can we prove it?"*
 
 The protocol achieves this through three interlocking primitives:
 - **The Spine** — an ordered hash chain that makes reasoning sequence part of the integrity guarantee
@@ -24,7 +24,7 @@ Everything else in this document serves those three primitives.
 
 ### 1.1 The Core Insight
 
-Most persistence systems treat *what* was stored as the integrity concern. Ariadne treats *when* and *in what order* as equally fundamental. An agent that reasons correctly but in a manipulated sequence has not reasoned authentically. The Spine is the mechanism that makes reordering a cryptographic violation, not just a policy violation.
+Most persistence systems treat *what* was stored as the integrity concern. ASTP treats *when* and *in what order* as equally fundamental. An agent that reasons correctly but in a manipulated sequence has not reasoned authentically. The Spine is the mechanism that makes reordering a cryptographic violation, not just a policy violation.
 
 ### 1.2 The Three-Level Hash Architecture
 
@@ -324,7 +324,7 @@ ARCHIVED ───────────────────────�
 
 ## 4. Storage Architecture
 
-Ariadne's storage layer is **inherently polyglot** — not as a preference, but as a structural requirement. The cryptographic integrity and cognitive persistence roles have partially conflicting storage needs. No single store handles both.
+ASTP's storage layer is **inherently polyglot** — not as a preference, but as a structural requirement. The cryptographic integrity and cognitive persistence roles have partially conflicting storage needs. No single store handles both.
 
 ### 4.1 Storage Tier Mapping
 
@@ -576,8 +576,8 @@ These principles should guide every implementation decision:
 
 6. **CONSULTATION before COLLABORATION.** Cross-Faculty interactions should default to the CONSULTATION pattern (clear handoff, no concurrent writes) and escalate to COLLABORATION only when genuinely necessary.
 
-7. **External anchoring closes the self-attestation gap.** Without external anchoring of crystallization records, Ariadne provides integrity guarantees *within* the system but cannot prove to an external auditor that records weren't retroactively constructed.
+7. **External anchoring closes the self-attestation gap.** Without external anchoring of crystallization records, ASTP provides integrity guarantees *within* the system but cannot prove to an external auditor that records weren't retroactively constructed.
 
 ---
 
-*Ariadne gives agents the thread that leads back through the labyrinth of their own reasoning — verifiable, ordered, and true.*
+*Project Ariadne gives agents the thread that leads back through the labyrinth of their own reasoning — verifiable, ordered, and true.*

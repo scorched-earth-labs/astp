@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository purpose
 
-Ariadne is a **protocol** (specification + reference adapter), not an application. The artifacts shipped from this repo are:
+ASTP is a **protocol** (specification + reference adapter), not an application. The artifacts shipped from this repo are:
 
 1. The normative spec documents (`SPEC.md`, `AMENDMENT-v*.md`, `CONFORMANCE*.md`, `IMPLEMENTATION-*.md`, `VISION.md`).
 2. The Python package `ariadne/` — protocol primitives, episode node type, and the Neo4j reference adapter.
