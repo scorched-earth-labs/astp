@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ariadne-protocol"
+name = "astp"
 version = "0.1.0"
-description = "A cognitive persistence protocol for multi-agent systems"
+description = "ASTP (AI State Tree Protocol) — a cognitive persistence protocol for multi-agent AI systems"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
@@ -38,9 +38,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/scorched-earth-labs/ariadne-protocol"
-Documentation = "https://github.com/scorched-earth-labs/ariadne-protocol/blob/main/SPEC.md"
-Repository = "https://github.com/scorched-earth-labs/ariadne-protocol"
+Homepage = "https://github.com/scorched-earth-labs/astp"
+Documentation = "https://github.com/scorched-earth-labs/astp/blob/main/SPEC.md"
+Repository = "https://github.com/scorched-earth-labs/astp"
 
 [tool.setuptools.packages.find]
 include = ["ariadne*"]

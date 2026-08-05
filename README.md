@@ -131,7 +131,7 @@ A conforming adapter must pass all structural layer checks.
 ## Installation
 
 ```bash
-pip install ariadne-protocol        # once published to PyPI
+pip install astp        # once published to PyPI
 ```
 
 For local development against the reference implementation:
@@ -139,7 +139,7 @@ For local development against the reference implementation:
 ```toml
 # pyproject.toml
 [tool.poetry.dependencies]
-ariadne-protocol = {path = "../ariadne-protocol"}
+astp = {path = "../ariadne-protocol"}
 ```
 
 ---
