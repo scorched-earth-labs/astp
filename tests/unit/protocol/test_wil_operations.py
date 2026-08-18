@@ -11,6 +11,9 @@ value would have vanished rather than failed. These tests pin both halves: the
 vocabulary is complete, and a violation of it is loud.
 """
 
+import re
+from pathlib import Path
+
 import pytest
 
 from ariadne.core.wil import WILOperation
@@ -79,25 +82,98 @@ class TestWILOperationVocabulary:
         """
         assert WILOperation.SEGMENT_COMMIT.value == "SEGMENT_COMMIT"
 
-    def test_segment_commit_is_not_yet_emitted_here(self):
-        """Documents a known gap so closing it is a deliberate, visible change.
+    def test_segment_commit_is_emitted_by_the_library(self):
+        """SEGMENT_COMMIT now has a coordinated write path (SPEC S12.4 Tier 1).
 
-        `create_segment_node` writes the segment without declaring a write
-        intent, so this library never emits SEGMENT_COMMIT. When segment
-        commits get the coordinated-write treatment SIGNAL_COMMIT has, this
-        test should fail and be replaced by coverage of the real write path.
+        It previously had none: callers wrote the segment directly and the
+        absence of a ledger entry was indistinguishable from a lost one.
         """
-        from pathlib import Path
+        from ariadne.adapters.neo4j import wil as wil_adapter
 
-        ariadne_root = Path(__file__).resolve().parents[3] / "ariadne"
-        emitted = [
-            path
-            for path in ariadne_root.rglob("*.py")
-            if "WILOperation.SEGMENT_COMMIT" in path.read_text(encoding="utf-8")
-        ]
-        assert emitted == [], (
-            "SEGMENT_COMMIT is now emitted by the library — the segment write "
-            "path has ledger coverage. Replace this test with coverage of it."
+        assert hasattr(wil_adapter, "execute_segment_commit")
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        assert "WILOperation.SEGMENT_COMMIT" in source
+
+    def test_segment_commit_delegates_to_the_guarded_writer(self):
+        """It must go through create_segment_node, not inline its own Cypher.
+
+        create_segment_node enforces G-1 and the crystallization lock. A
+        coordinated write that duplicated the MERGE would bypass both — a
+        ledger entry is not a licence to skip governance.
+        """
+        from ariadne.adapters.neo4j import wil as wil_adapter
+
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        body = source[source.index("async def execute_segment_commit"):
+                      source.index("async def execute_episode_seal")]
+        assert "create_segment_node" in body
+        assert "MERGE (s:AriadneSegment" not in body
+
+
+class TestSpecRegisterAgreement:
+    """SPEC S12.4.1 registers every operation value. The enum must match it.
+
+    This is the drift guard. WILOperation was previously missing eight of the
+    ten operations its own writer emitted, and nothing failed — the register
+    existed only as code, so there was nothing for the code to disagree with.
+    """
+
+    @staticmethod
+    def _spec_register() -> dict:
+        spec = Path(__file__).resolve().parents[3] / "SPEC.md"
+        text = spec.read_text(encoding="utf-8")
+        section = text[text.index("#### 12.4.1 Operation Register"):]
+        section = section[: section.index("The register is closed")]
+        register = {}
+        for row in re.finditer(
+            r"^\|\s*`([A-Z_]+)`\s*\|\s*([12])\s*\|",
+            section,
+            re.M,
+        ):
+            register[row.group(1)] = int(row.group(2))
+        return register
+
+    def test_spec_table_parses(self):
+        assert len(self._spec_register()) == 21
+
+    def test_every_spec_operation_is_an_enum_member(self):
+        missing = [op for op in self._spec_register() if op not in WILOperation.__members__]
+        assert missing == [], f"registered in SPEC but absent from WILOperation: {missing}"
+
+    def test_every_enum_member_is_registered_in_spec(self):
+        register = self._spec_register()
+        missing = [m.value for m in WILOperation if m.value not in register]
+        assert missing == [], f"in WILOperation but absent from SPEC S12.4.1: {missing}"
+
+    def test_bfm_operations_are_tier_2(self):
+        """Single store, completed entry at commit, never replayed (G-38)."""
+        register = self._spec_register()
+        for name in BFM_OPERATIONS:
+            assert register[name] == 2, f"{name} registered Tier {register[name]}"
+
+    def test_coordinated_writes_are_tier_1(self):
+        """Everything this library declares an intent for must be Tier 1."""
+        register = self._spec_register()
+        for name in ("SIGNAL_COMMIT", "EPISODE_SEAL", "MANIFEST_FINALIZE", "SEGMENT_COMMIT"):
+            assert register[name] == 1, f"{name} is coordinated but registered Tier {register[name]}"
+
+    def test_register_states_no_ledgering_obligation(self):
+        """S12.4.2 defers WHICH operations must be ledgered to 4.0.0.
+
+        Guards against a well-meaning edit reintroducing per-operation MUST /
+        SHOULD levels into the register table. Those are conformance-breaking
+        and belong to a MAJOR release with a ratifying Episode of Record, not
+        to this table.
+        """
+        spec = Path(__file__).resolve().parents[3] / "SPEC.md"
+        text = spec.read_text(encoding="utf-8")
+        section = text[text.index("#### 12.4.1 Operation Register"):
+                       text.index("#### 12.4.2 Ledgering Obligations")]
+        rows = re.findall(r"^\|\s*`[A-Z_]+`\s*\|.*$", section, re.M)
+        offenders = [r for r in rows if re.search(r"\b(MUST|SHOULD|MAY)\b", r)]
+        assert offenders == [], (
+            "requirement levels reappeared in the S12.4.1 register; "
+            f"obligations are deferred to 4.0.0 per S12.4.2: {offenders}"
         )
 
 
