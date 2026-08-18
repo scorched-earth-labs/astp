@@ -69,6 +69,37 @@ class TestWILOperationVocabulary:
         for member in WILOperation:
             assert member.name == member.value
 
+    def test_segment_commit_is_a_member(self):
+        """Segment commits appear on AriadneWILEntry nodes in the field.
+
+        The value is written by downstream consumers rather than by this
+        library — see the note on the member. It still has to be part of the
+        vocabulary, or anything treating WILOperation as authoritative is
+        incomplete for the single most common operation in the graph.
+        """
+        assert WILOperation.SEGMENT_COMMIT.value == "SEGMENT_COMMIT"
+
+    def test_segment_commit_is_not_yet_emitted_here(self):
+        """Documents a known gap so closing it is a deliberate, visible change.
+
+        `create_segment_node` writes the segment without declaring a write
+        intent, so this library never emits SEGMENT_COMMIT. When segment
+        commits get the coordinated-write treatment SIGNAL_COMMIT has, this
+        test should fail and be replaced by coverage of the real write path.
+        """
+        from pathlib import Path
+
+        ariadne_root = Path(__file__).resolve().parents[3] / "ariadne"
+        emitted = [
+            path
+            for path in ariadne_root.rglob("*.py")
+            if "WILOperation.SEGMENT_COMMIT" in path.read_text(encoding="utf-8")
+        ]
+        assert emitted == [], (
+            "SEGMENT_COMMIT is now emitted by the library — the segment write "
+            "path has ledger coverage. Replace this test with coverage of it."
+        )
+
 
 class TestBranchWILWrite:
     @pytest.mark.parametrize("name", BFM_OPERATIONS)
