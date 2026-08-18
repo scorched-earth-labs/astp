@@ -126,11 +126,11 @@ class TestSpecRegisterAgreement:
         section = section[: section.index("The register is closed")]
         register = {}
         for row in re.finditer(
-            r"^\|\s*`([A-Z_]+)`\s*\|\s*([12])\s*\|\s*(MUST|SHOULD|MAY)\s*\|",
+            r"^\|\s*`([A-Z_]+)`\s*\|\s*([12])\s*\|",
             section,
             re.M,
         ):
-            register[row.group(1)] = (int(row.group(2)), row.group(3))
+            register[row.group(1)] = int(row.group(2))
         return register
 
     def test_spec_table_parses(self):
@@ -145,18 +145,36 @@ class TestSpecRegisterAgreement:
         missing = [m.value for m in WILOperation if m.value not in register]
         assert missing == [], f"in WILOperation but absent from SPEC S12.4.1: {missing}"
 
-    def test_bfm_operations_are_tier_2_must(self):
-        """Tier 2 per G-38: single store, completed entry, never replayed."""
+    def test_bfm_operations_are_tier_2(self):
+        """Single store, completed entry at commit, never replayed (G-38)."""
         register = self._spec_register()
         for name in BFM_OPERATIONS:
-            assert register[name] == (2, "MUST"), f"{name} -> {register[name]}"
+            assert register[name] == 2, f"{name} registered Tier {register[name]}"
 
     def test_coordinated_writes_are_tier_1(self):
         """Everything this library declares an intent for must be Tier 1."""
         register = self._spec_register()
         for name in ("SIGNAL_COMMIT", "EPISODE_SEAL", "MANIFEST_FINALIZE", "SEGMENT_COMMIT"):
-            tier, _ = register[name]
-            assert tier == 1, f"{name} is coordinated but registered Tier {tier}"
+            assert register[name] == 1, f"{name} is coordinated but registered Tier {register[name]}"
+
+    def test_register_states_no_ledgering_obligation(self):
+        """S12.4.2 defers WHICH operations must be ledgered to 4.0.0.
+
+        Guards against a well-meaning edit reintroducing per-operation MUST /
+        SHOULD levels into the register table. Those are conformance-breaking
+        and belong to a MAJOR release with a ratifying Episode of Record, not
+        to this table.
+        """
+        spec = Path(__file__).resolve().parents[3] / "SPEC.md"
+        text = spec.read_text(encoding="utf-8")
+        section = text[text.index("#### 12.4.1 Operation Register"):
+                       text.index("#### 12.4.2 Ledgering Obligations")]
+        rows = re.findall(r"^\|\s*`[A-Z_]+`\s*\|.*$", section, re.M)
+        offenders = [r for r in rows if re.search(r"\b(MUST|SHOULD|MAY)\b", r)]
+        assert offenders == [], (
+            "requirement levels reappeared in the S12.4.1 register; "
+            f"obligations are deferred to 4.0.0 per S12.4.2: {offenders}"
+        )
 
 
 class TestBranchWILWrite:
