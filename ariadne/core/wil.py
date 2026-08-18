@@ -48,9 +48,30 @@ class WILOperation(str, Enum):
     COLLABORATION_COMMIT = "COLLABORATION_COMMIT"    # Multi-round collaboration
     EPISODE_CLOSE = "EPISODE_CLOSE"                  # Episode sealed (closure)
     CODICIL_APPEND = "CODICIL_APPEND"                # Codicil added to sealed episode
-    # Branch lifecycle (Phase 1)
+    # Branch / Fork / Merge lifecycle (SPEC S19).
+    #
+    # Every BFM ledger write goes through `_write_branch_wil` in
+    # branch_operations.py. These members exist so that helper can take a
+    # WILOperation rather than a bare str — previously it accepted any string
+    # and eight of the ten operations it is called with were absent here, which
+    # made this enum read as the authoritative operation list without being one.
+    #
+    # NOTE: these values are intentionally NOT aligned with the corresponding
+    # CognitiveDeltaType names (SOLILOQUY_INIT here vs SOLILOQUY_INITIATED
+    # there). They are distinct vocabularies — the delta type records a
+    # reasoning event, this records a durability intent — and the values below
+    # are already persisted on AriadneWILEntry nodes in the field. Renaming
+    # them is a data migration, not an edit.
     BRANCH_CREATE = "BRANCH_CREATE"                  # Branch created from spine
     BRANCH_ABANDON = "BRANCH_ABANDON"                # Branch terminated without merge
+    FORK_CREATE = "FORK_CREATE"                      # Fork opened from a spine point
+    FORK_RESOLVE = "FORK_RESOLVE"                    # Fork resolved back to the spine
+    DEPARTURE_FORK_CREATE = "DEPARTURE_FORK_CREATE"  # Departure fork opened
+    MERGE_EXECUTE = "MERGE_EXECUTE"                  # Merge point committed
+    ASIDE_OPEN = "ASIDE_OPEN"                        # Aside segment opened
+    ASIDE_CLOSE = "ASIDE_CLOSE"                      # Aside segment closed
+    SOLILOQUY_INIT = "SOLILOQUY_INIT"                # Soliloquy initiated
+    SOLILOQUY_CONCLUDE = "SOLILOQUY_CONCLUDE"        # Soliloquy concluded
 
 
 class WILStatus(str, Enum):
