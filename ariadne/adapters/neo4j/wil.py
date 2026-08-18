@@ -265,6 +265,71 @@ async def execute_signal_commit(
     return str(intent.intent_id)
 
 
+async def execute_segment_commit(
+    redis_client,
+    neo4j_driver,
+    segment,
+    episode_status,
+    pre_state_hash: str,
+    post_state_hash: str,
+    is_provisional: bool = False,
+) -> str:
+    """
+    Coordinated write for SEGMENT_COMMIT (SPEC S12.4, Tier 1).
+
+    Blob write must be done by caller BEFORE calling this function.
+    Returns intent_id.
+
+    Unlike the other coordinated writes in this module, this one delegates the
+    Neo4j write to `create_segment_node` rather than inlining the Cypher. That
+    is deliberate: the segment writer enforces G-1 and the crystallization lock
+    guard, and duplicating its MERGE here would silently bypass both. A
+    coordinated write must not be a way around governance.
+
+    Prior to this function, segment commits were the one core spine operation
+    with no ledger coverage — callers wrote the segment directly, and the
+    absence of a WIL entry was indistinguishable from a lost one.
+    """
+    if not ARIADNE_ENABLED:
+        return ""
+
+    from ariadne.adapters.neo4j.writer import create_segment_node
+
+    if is_provisional:
+        enforce_provisional_state_guard(
+            True, StoreLayer.NEO4J, "segment during provisional window"
+        )
+
+    stores = [StoreLayer.NEO4J, StoreLayer.REDIS]
+    intent = await declare_write_intent(
+        redis_client, WILOperation.SEGMENT_COMMIT, segment.episode_id,
+        stores, pre_state_hash, post_state_hash,
+    )
+
+    try:
+        await create_segment_node(neo4j_driver, segment, episode_status)
+        await record_store_completion(
+            redis_client, str(intent.intent_id), StoreLayer.NEO4J
+        )
+
+        episode_key = build_redis_episode_key(str(segment.episode_id))
+        ttl = get_redis_ttl(episode_key)
+        await redis_client.expire(episode_key, ttl)
+        await record_store_completion(
+            redis_client, str(intent.intent_id), StoreLayer.REDIS
+        )
+
+        await complete_write_intent(
+            redis_client, neo4j_driver, str(intent.intent_id)
+        )
+
+    except Exception as e:
+        await fail_write_intent(redis_client, str(intent.intent_id), str(e))
+        raise
+
+    return str(intent.intent_id)
+
+
 async def execute_episode_seal(
     redis_client,
     neo4j_driver,
