@@ -39,6 +39,21 @@ PROVISIONAL_WINDOW_SECONDS = int(PROVISIONAL_WINDOW_HOURS * 3600)
 
 class WILOperation(str, Enum):
     EPISODE_CREATE = "EPISODE_CREATE"
+    # Segment appended to the spine.
+    #
+    # NOT YET EMITTED BY THIS LIBRARY. `create_segment_node` (adapters/neo4j/
+    # writer.py) currently writes the segment directly, without declaring a
+    # write intent — segment commits are the one core spine operation with no
+    # ledger coverage. The member is defined here because the value already
+    # exists on AriadneWILEntry nodes in the field: downstream writers filled
+    # the gap out-of-band, so the vocabulary must account for it even though
+    # the coordinated write path does not exist yet.
+    #
+    # Closing that gap means giving create_segment_node the same
+    # declare_write_intent / record_store_completion treatment SIGNAL_COMMIT
+    # gets in adapters/neo4j/wil.py. Tracked separately — it is a behavioural
+    # change on the hottest write path in the protocol, not a vocabulary edit.
+    SEGMENT_COMMIT = "SEGMENT_COMMIT"
     SIGNAL_COMMIT = "SIGNAL_COMMIT"
     EPISODE_SEAL = "EPISODE_SEAL"
     MANIFEST_FINALIZE = "MANIFEST_FINALIZE"
@@ -48,9 +63,30 @@ class WILOperation(str, Enum):
     COLLABORATION_COMMIT = "COLLABORATION_COMMIT"    # Multi-round collaboration
     EPISODE_CLOSE = "EPISODE_CLOSE"                  # Episode sealed (closure)
     CODICIL_APPEND = "CODICIL_APPEND"                # Codicil added to sealed episode
-    # Branch lifecycle (Phase 1)
+    # Branch / Fork / Merge lifecycle (SPEC S19).
+    #
+    # Every BFM ledger write goes through `_write_branch_wil` in
+    # branch_operations.py. These members exist so that helper can take a
+    # WILOperation rather than a bare str — previously it accepted any string
+    # and eight of the ten operations it is called with were absent here, which
+    # made this enum read as the authoritative operation list without being one.
+    #
+    # NOTE: these values are intentionally NOT aligned with the corresponding
+    # CognitiveDeltaType names (SOLILOQUY_INIT here vs SOLILOQUY_INITIATED
+    # there). They are distinct vocabularies — the delta type records a
+    # reasoning event, this records a durability intent — and the values below
+    # are already persisted on AriadneWILEntry nodes in the field. Renaming
+    # them is a data migration, not an edit.
     BRANCH_CREATE = "BRANCH_CREATE"                  # Branch created from spine
     BRANCH_ABANDON = "BRANCH_ABANDON"                # Branch terminated without merge
+    FORK_CREATE = "FORK_CREATE"                      # Fork opened from a spine point
+    FORK_RESOLVE = "FORK_RESOLVE"                    # Fork resolved back to the spine
+    DEPARTURE_FORK_CREATE = "DEPARTURE_FORK_CREATE"  # Departure fork opened
+    MERGE_EXECUTE = "MERGE_EXECUTE"                  # Merge point committed
+    ASIDE_OPEN = "ASIDE_OPEN"                        # Aside segment opened
+    ASIDE_CLOSE = "ASIDE_CLOSE"                      # Aside segment closed
+    SOLILOQUY_INIT = "SOLILOQUY_INIT"                # Soliloquy initiated
+    SOLILOQUY_CONCLUDE = "SOLILOQUY_CONCLUDE"        # Soliloquy concluded
 
 
 class WILStatus(str, Enum):

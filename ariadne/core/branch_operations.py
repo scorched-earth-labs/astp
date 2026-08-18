@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
+from ariadne.core.wil import WILOperation
 from ariadne.core.branching import (
     BranchPointNode,
     BranchTerminusNode,
@@ -257,7 +258,7 @@ def create_branch(
         )
 
         # STEP 11: Write WIL entry
-        _write_branch_wil(driver, source_episode_id, str(branch_point.branch_point_id), "BRANCH_CREATE")
+        _write_branch_wil(driver, source_episode_id, str(branch_point.branch_point_id), WILOperation.BRANCH_CREATE)
 
         logger.info(
             f"Branch created: {str(branch_point.branch_id)[:8]}... "
@@ -415,7 +416,7 @@ def abandon_branch(
             pass
 
         # STEP 7: Write WIL entry
-        _write_branch_wil(driver, episode_id, str(terminus.terminus_id), "BRANCH_ABANDON")
+        _write_branch_wil(driver, episode_id, str(terminus.terminus_id), WILOperation.BRANCH_ABANDON)
 
         logger.info(
             f"Branch abandoned: {branch_id[:8]}... "
@@ -632,7 +633,7 @@ def create_fork(
         complete_intent_sync(driver, idempotency_key, str(fork_id))
 
         # STEP 8: WIL entry
-        _write_branch_wil(driver, origin_episode_id, str(fork_id), "FORK_CREATE")
+        _write_branch_wil(driver, origin_episode_id, str(fork_id), WILOperation.FORK_CREATE)
 
         logger.info(
             f"Fork created: {str(fork_id)[:8]}... "
@@ -908,7 +909,7 @@ def create_departure_fork(
 
         # STEP 8: intent complete + WIL entry
         complete_intent_sync(driver, idempotency_key, str(fork_id))
-        _write_branch_wil(driver, origin_episode_id, str(fork_id), "DEPARTURE_FORK_CREATE")
+        _write_branch_wil(driver, origin_episode_id, str(fork_id), WILOperation.DEPARTURE_FORK_CREATE)
 
         logger.info(
             f"Departure fork created: {str(fork_id)[:8]}... "
@@ -1260,7 +1261,7 @@ def resolve_fork(
         )
         write_audit_record_sync(driver, audit)
 
-        _write_branch_wil(driver, origin_episode_id, fork_id, "FORK_RESOLVE")
+        _write_branch_wil(driver, origin_episode_id, fork_id, WILOperation.FORK_RESOLVE)
 
         logger.info(
             f"Fork resolved: {fork_id[:8]}... "
@@ -1637,7 +1638,7 @@ def execute_merge(
         write_audit_record_sync(driver, audit)
 
         _write_branch_wil(
-            driver, target_episode_id, str(merge_point.merge_point_id), "MERGE_EXECUTE"
+            driver, target_episode_id, str(merge_point.merge_point_id), WILOperation.MERGE_EXECUTE
         )
 
         logger.info(
@@ -1922,7 +1923,7 @@ def create_aside(
         )
         write_audit_record_sync(driver, audit)
 
-        _write_branch_wil(driver, parent_episode_id, str(aside.aside_id), "ASIDE_OPEN")
+        _write_branch_wil(driver, parent_episode_id, str(aside.aside_id), WILOperation.ASIDE_OPEN)
 
         logger.info(
             f"Aside opened: {str(aside.aside_id)[:8]}... "
@@ -2069,7 +2070,7 @@ def close_aside(
         write_audit_record_sync(driver, audit)
 
         _write_branch_wil(
-            driver, parent_episode_id, str(terminus.aside_terminus_id), "ASIDE_CLOSE"
+            driver, parent_episode_id, str(terminus.aside_terminus_id), WILOperation.ASIDE_CLOSE
         )
 
         if not reference_scan_passed:
@@ -2233,7 +2234,7 @@ def create_soliloquy(
         write_audit_record_sync(driver, audit)
 
         _write_branch_wil(
-            driver, parent_episode_id, str(soliloquy.soliloquy_id), "SOLILOQUY_INIT"
+            driver, parent_episode_id, str(soliloquy.soliloquy_id), WILOperation.SOLILOQUY_INIT
         )
 
         logger.info(
@@ -2386,7 +2387,7 @@ def conclude_soliloquy(
 
         _write_branch_wil(
             driver, parent_episode_id, str(conclusion.conclusion_id),
-            "SOLILOQUY_CONCLUDE",
+            WILOperation.SOLILOQUY_CONCLUDE,
         )
 
         logger.info(
@@ -2412,8 +2413,26 @@ def conclude_soliloquy(
         return None
 
 
-def _write_branch_wil(driver, episode_id: str, node_id: str, operation: str) -> None:
-    """Write a WIL entry for a branch operation."""
+def _write_branch_wil(
+    driver, episode_id: str, node_id: str, operation: WILOperation
+) -> None:
+    """Write a WIL entry for a branch operation.
+
+    `operation` is a WILOperation, not a str. It used to be a bare str, which
+    let every BFM call site pass a literal — and eight of the ten literals in
+    use were not members of the enum. That drift is invisible at the write site
+    and only surfaces downstream in anything that treats WILOperation as the
+    authoritative operation list.
+
+    The coercion below sits OUTSIDE the try on purpose. The blanket handler
+    exists so a Neo4j hiccup cannot fail a branch operation — the ledger write
+    is best-effort. It must not also swallow a bad operation value: that is a
+    programmer error, it is deterministic, and hiding it would leave the typing
+    on this signature decorative. Infrastructure failures stay non-fatal;
+    vocabulary violations raise.
+    """
+    operation = WILOperation(operation)
+
     try:
         from ariadne.core.branching import compute_branch_point_hash
         from uuid import uuid4
@@ -2433,7 +2452,7 @@ def _write_branch_wil(driver, episode_id: str, node_id: str, operation: str) -> 
                   w.last_completed_store   = 'neo4j'
             """, {
                 "intent_id": str(uuid4()),
-                "operation": operation,
+                "operation": operation.value,
                 "episode_id": episode_id,
                 "pre_hash": node_id,
                 "post_hash": node_id,
