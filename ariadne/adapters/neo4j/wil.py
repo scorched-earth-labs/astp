@@ -217,6 +217,60 @@ async def replay_incomplete_write(
 
 # ── Coordinated Write Sequences ─────────────────────────────────────────────
 
+async def execute_episode_create(
+    redis_client,
+    neo4j_driver,
+    episode,
+    pre_state_hash: str = "",
+    post_state_hash: str = "",
+) -> str:
+    """
+    Coordinated write for EPISODE_CREATE (SPEC S12.4, Tier 1).
+
+    Returns intent_id.
+
+    Delegates the Neo4j write to `create_episode_node` rather than inlining the
+    Cypher, for the same reason `execute_segment_commit` does: the writer owns
+    the node's shape and its `_ariadne_guard`, and a second copy of that MERGE
+    would drift from it.
+
+    On the state hashes: `pre_state_hash` defaults to empty because an episode
+    create is a genesis write — there is genuinely no prior state, so empty is
+    the correct value here rather than a placeholder. The protocol defines no
+    canonical hash for "episode exists, spine empty", so `post_state_hash` is
+    left to the caller instead of inventing a preimage; preimages are governed
+    and are not something a convenience wrapper should mint.
+
+    Single-store, and still Tier 1: the three-phase form is what makes an
+    interrupted episode create recognisable as `completed_at=null`, which a
+    single completed entry could never express.
+    """
+    if not ARIADNE_ENABLED:
+        return ""
+
+    from ariadne.adapters.neo4j.writer import create_episode_node
+
+    stores = [StoreLayer.NEO4J]
+    intent = await declare_write_intent(
+        redis_client, WILOperation.EPISODE_CREATE, episode.episode_id,
+        stores, pre_state_hash, post_state_hash,
+    )
+
+    try:
+        await create_episode_node(neo4j_driver, episode)
+        await record_store_completion(
+            redis_client, str(intent.intent_id), StoreLayer.NEO4J
+        )
+        await complete_write_intent(
+            redis_client, neo4j_driver, str(intent.intent_id)
+        )
+    except Exception as e:
+        await fail_write_intent(redis_client, str(intent.intent_id), str(e))
+        raise
+
+    return str(intent.intent_id)
+
+
 async def execute_signal_commit(
     redis_client,
     neo4j_driver,
