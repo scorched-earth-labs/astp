@@ -59,8 +59,6 @@ class WILOperation(str, Enum):
     MANIFEST_FINALIZE = "MANIFEST_FINALIZE"
     CRYSTALLIZATION = "CRYSTALLIZATION"
     EPISODE_ARCHIVE = "EPISODE_ARCHIVE"
-    CONSULTATION_COMMIT = "CONSULTATION_COMMIT"      # Inter-agent consultation exchange
-    COLLABORATION_COMMIT = "COLLABORATION_COMMIT"    # Multi-round collaboration
     EPISODE_CLOSE = "EPISODE_CLOSE"                  # Episode sealed (closure)
     CODICIL_APPEND = "CODICIL_APPEND"                # Codicil added to sealed episode
     # Branch / Fork / Merge lifecycle (SPEC S19).

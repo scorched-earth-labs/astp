@@ -134,7 +134,19 @@ class TestSpecRegisterAgreement:
         return register
 
     def test_spec_table_parses(self):
-        assert len(self._spec_register()) == 21
+        """The table is found and readable — not a pinned row count.
+
+        Pinning the count breaks on every deliberate register change while
+        catching nothing the two-way agreement tests below do not already
+        catch. The floor exists to fail a broken regex that matches nothing or
+        a couple of stray rows.
+        """
+        register = self._spec_register()
+        assert len(register) >= 15, (
+            f"only {len(register)} rows parsed out of the §12.4.1 register — "
+            "the table moved or the parser broke"
+        )
+        assert all(tier in (1, 2) for tier in register.values())
 
     def test_every_spec_operation_is_an_enum_member(self):
         missing = [op for op in self._spec_register() if op not in WILOperation.__members__]
