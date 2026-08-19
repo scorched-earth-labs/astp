@@ -47,8 +47,6 @@ class SegmentType(str, Enum):
     REASONING = "REASONING"
     ARTIFACT = "ARTIFACT"
     ANNOTATION = "ANNOTATION"
-    CONSULTATION = "CONSULTATION"      # Inter-agent consultation exchange
-    COLLABORATION = "COLLABORATION"    # Multi-round collaboration session
 
 
 class SignalType(str, Enum):
