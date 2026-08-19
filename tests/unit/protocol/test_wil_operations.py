@@ -94,6 +94,29 @@ class TestWILOperationVocabulary:
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         assert "WILOperation.SEGMENT_COMMIT" in source
 
+    def test_episode_create_is_emitted_by_the_library(self):
+        """EPISODE_CREATE has a coordinated write path (SPEC §12.4 Tier 1).
+
+        Episode creation had no ledger entry at all: the episode appeared and
+        nothing recorded that it was meant to. An interrupted create was
+        indistinguishable from one that never started.
+        """
+        from ariadne.adapters.neo4j import wil as wil_adapter
+
+        assert hasattr(wil_adapter, "execute_episode_create")
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        assert "WILOperation.EPISODE_CREATE" in source
+
+    def test_episode_create_delegates_to_the_writer(self):
+        """Must call create_episode_node, not carry a second copy of the MERGE."""
+        from ariadne.adapters.neo4j import wil as wil_adapter
+
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        body = source[source.index("async def execute_episode_create"):
+                      source.index("async def execute_signal_commit")]
+        assert "create_episode_node" in body
+        assert "MERGE (e:AriadneEpisode" not in body
+
     def test_segment_commit_delegates_to_the_guarded_writer(self):
         """It must go through create_segment_node, not inline its own Cypher.
 
@@ -152,10 +175,29 @@ class TestSpecRegisterAgreement:
             assert register[name] == 2, f"{name} registered Tier {register[name]}"
 
     def test_coordinated_writes_are_tier_1(self):
-        """Everything this library declares an intent for must be Tier 1."""
+        """Everything this library declares an intent for must be Tier 1.
+
+        Derived from the source rather than listed, so wiring a new coordinated
+        write cannot quietly introduce one registered as Tier 2 — the tier is a
+        claim about the entry's form, and a coordinated write that claims Tier 2
+        would be lying about its own shape.
+        """
+        import re as _re
+        from ariadne.adapters.neo4j import wil as wil_adapter
+
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        coordinated = set(_re.findall(
+            r"declare_write_intent\(\s*\n?\s*redis_client,\s*WILOperation\.([A-Z_]+)",
+            source,
+        ))
+        assert coordinated, "no coordinated writes found — the parser broke"
+
         register = self._spec_register()
-        for name in ("SIGNAL_COMMIT", "EPISODE_SEAL", "MANIFEST_FINALIZE", "SEGMENT_COMMIT"):
-            assert register[name] == 1, f"{name} is coordinated but registered Tier {register[name]}"
+        for name in sorted(coordinated):
+            assert name in register, f"{name} is coordinated but absent from §12.4.1"
+            assert register[name] == 1, (
+                f"{name} is coordinated but registered Tier {register[name]}"
+            )
 
     def test_register_states_no_ledgering_obligation(self):
         """S12.4.2 defers WHICH operations must be ledgered to 4.0.0.
