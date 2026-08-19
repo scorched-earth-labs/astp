@@ -19,6 +19,7 @@ from ariadne.core.schema import (
     CodicilNode,
     DocumentNode,
     EpisodeNode,
+    EpisodeClosureRecord,
     EpisodeStatus,
     ExclusionRecord,
     ReferenceType,
@@ -447,6 +448,113 @@ async def create_seal_node(driver, seal: SealNode) -> None:
             "spine_hash": seal.spine_hash,
             "signal_manifest_hash": seal.signal_manifest_hash,
             "episode_root_hash": seal.episode_root_hash,
+        })
+
+
+#: Episode properties `update_episode_status` may set alongside the status.
+#: An allowlist, not a passthrough: Cypher cannot parameterise a property NAME,
+#: so the SET clause is built from these keys as literals. Accepting arbitrary
+#: caller-supplied names here would be a Cypher injection.
+_UPDATABLE_EPISODE_FIELDS = frozenset({
+    "sealed_at",
+    "archived_at",
+    "spine_hash",
+    "signal_manifest_hash",
+    "episode_root_hash",
+    "crystallization_status",
+    "closing_initiated_at",
+    "grace_period_expires_at",
+})
+
+
+async def update_episode_status(driver, episode_id, status, **fields) -> None:
+    """Set an episode's lifecycle status, and optionally related fields.
+
+    `AriadneAdapter.update_episode_status` was declared abstract and never
+    implemented, so every lifecycle transition — close, seal, archive — was
+    written as ad-hoc Cypher by whoever needed it.
+
+    Unknown field names raise rather than being silently dropped: a transition
+    that quietly fails to record `sealed_at` looks identical to one that
+    recorded it.
+    """
+    if not _ariadne_guard():
+        return
+
+    unknown = sorted(set(fields) - _UPDATABLE_EPISODE_FIELDS)
+    if unknown:
+        raise AriadneGovernanceError(
+            f"update_episode_status: unknown episode field(s) {unknown}; "
+            f"allowed: {sorted(_UPDATABLE_EPISODE_FIELDS)}"
+        )
+
+    status_value = status.value if hasattr(status, "value") else str(status)
+    params = {"episode_id": str(episode_id), "episode_status": status_value}
+    assignments = ["e.episode_status = $episode_status"]
+    for key, value in fields.items():
+        params[key] = value
+        assignments.append(f"e.{key} = ${key}")
+
+    async with driver.session() as session:
+        await session.run(
+            "MATCH (e:AriadneEpisode {episode_id: $episode_id})\nSET " + ",\n    ".join(assignments),
+            params,
+        )
+
+
+async def create_closure_record_node(driver, closure: EpisodeClosureRecord) -> None:
+    """Persist the structured record generated when an episode is closed.
+
+    Another abstract-only adapter method (`create_closure_record`) with no
+    implementation, so :AriadneClosureRecord had no writer in the protocol —
+    the same gap as codicils, and for the same reason it was hand-rolled
+    downstream.
+
+    The SEALS_EPISODE edge runs closure -> episode, matching the direction
+    already in the live graph.
+    """
+    if not _ariadne_guard():
+        return
+    params = {
+        "closure_id": str(closure.closure_id),
+        "episode_id": str(closure.episode_id),
+        "sealed_by": closure.sealed_by,
+        "sealed_at": closure.sealed_at.isoformat(),
+        "summary": closure.summary,
+        "closure_notes": closure.closure_notes,
+        "carried_forward_items": list(closure.carried_forward_items or []),
+        "artifact_count": closure.artifact_count,
+        "segment_count": closure.segment_count,
+        "participant_count": closure.participant_count,
+        "codicil_count": closure.codicil_count,
+        "amendment_episode_id": (
+            str(closure.amendment_episode_id) if closure.amendment_episode_id else None
+        ),
+    }
+    async with driver.session() as session:
+        await session.run("""
+            MERGE (cl:AriadneClosureRecord {closure_id: $closure_id})
+            ON CREATE SET
+              cl.episode_id            = $episode_id,
+              cl.sealed_by             = $sealed_by,
+              cl.sealed_at             = $sealed_at,
+              cl.summary               = $summary,
+              cl.closure_notes         = $closure_notes,
+              cl.carried_forward_items = $carried_forward_items,
+              cl.artifact_count        = $artifact_count,
+              cl.segment_count         = $segment_count,
+              cl.participant_count     = $participant_count,
+              cl.codicil_count         = $codicil_count,
+              cl.amendment_episode_id  = $amendment_episode_id
+        """, params)
+        await session.run("""
+            MATCH (e:AriadneEpisode {episode_id: $episode_id})
+            MATCH (cl:AriadneClosureRecord {closure_id: $closure_id})
+            MERGE (cl)-[:SEALS_EPISODE {sealed_at: $sealed_at}]->(e)
+        """, {
+            "episode_id": str(closure.episode_id),
+            "closure_id": str(closure.closure_id),
+            "sealed_at": closure.sealed_at.isoformat(),
         })
 
 
