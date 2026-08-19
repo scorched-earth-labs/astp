@@ -271,6 +271,54 @@ async def execute_episode_create(
     return str(intent.intent_id)
 
 
+async def execute_codicil_append(
+    redis_client,
+    neo4j_driver,
+    codicil,
+    pre_state_hash: str = "",
+    post_state_hash: str = "",
+) -> str:
+    """
+    Coordinated write for CODICIL_APPEND (SPEC S12.4, Tier 1).
+
+    Returns intent_id.
+
+    Delegates to `create_codicil_node`, which until now did not exist — the
+    adapter interface declared `create_codicil` abstract and no Neo4j
+    implementation was ever written, so consumers hand-rolled both the node and
+    its ledger entry. That is the gap this closes.
+
+    `post_state_hash` defaults to the codicil's own content_hash: a codicil is
+    appended rather than integrated, so the meaningful commitment is to the
+    addendum's content. Callers with a broader notion of post-write state can
+    override it.
+    """
+    if not ARIADNE_ENABLED:
+        return ""
+
+    from ariadne.adapters.neo4j.writer import create_codicil_node
+
+    stores = [StoreLayer.NEO4J]
+    intent = await declare_write_intent(
+        redis_client, WILOperation.CODICIL_APPEND, codicil.episode_id,
+        stores, pre_state_hash, post_state_hash or codicil.content_hash,
+    )
+
+    try:
+        await create_codicil_node(neo4j_driver, codicil)
+        await record_store_completion(
+            redis_client, str(intent.intent_id), StoreLayer.NEO4J
+        )
+        await complete_write_intent(
+            redis_client, neo4j_driver, str(intent.intent_id)
+        )
+    except Exception as e:
+        await fail_write_intent(redis_client, str(intent.intent_id), str(e))
+        raise
+
+    return str(intent.intent_id)
+
+
 async def execute_signal_commit(
     redis_client,
     neo4j_driver,
