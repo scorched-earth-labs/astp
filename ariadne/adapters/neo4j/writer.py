@@ -262,6 +262,18 @@ async def create_segment_node(driver, segment: SegmentNode, episode_status: Epis
     enforce_G1_write_guard(episode_status)  # Rule G-1
     from ariadne.core.crystallization import enforce_crystallization_lock_guard
     enforce_crystallization_lock_guard(episode_status.value)  # Spec 7
+    # Every field SegmentNode declares is persisted. Four used to be dropped
+    # here — content_text, retention_tier, signal_versions_read and
+    # pending_hitl_ref — so the adapter silently wrote a lossy node: the model
+    # said the data existed, the graph did not have it, and nothing failed.
+    #
+    # None of them are decorative. content_text is the durable content readers
+    # reconstruct an episode from; retention_tier separates PERSISTENT
+    # conversation from EPHEMERAL evaluation records; signal_versions_read is
+    # the SPEC S4.5 stale-read audit; pending_hitl_ref is the SPEC S4.6
+    # advisory gate that marks a segment CONDITIONALLY_VALID. A consumer that
+    # needed any of them had to bypass this function and write its own Cypher,
+    # which is exactly what downstream did.
     params = {
         "segment_id": str(segment.segment_id),
         "episode_id": str(segment.episode_id),
@@ -269,20 +281,28 @@ async def create_segment_node(driver, segment: SegmentNode, episode_status: Epis
         "sequence_index": segment.sequence_index,
         "content_hash": segment.content_hash,
         "content_ref": segment.content_ref,
+        "content_text": segment.content_text,
         "authored_at": segment.authored_at.isoformat(),
         "author": segment.author,
+        "retention_tier": segment.retention_tier.value,
+        "signal_versions_read": list(segment.signal_versions_read or []),
+        "pending_hitl_ref": segment.pending_hitl_ref,
     }
     async with driver.session() as session:
         await session.run("""
             MERGE (s:AriadneSegment {segment_id: $segment_id})
             ON CREATE SET
-              s.episode_id     = $episode_id,
-              s.segment_type   = $segment_type,
-              s.sequence_index = $sequence_index,
-              s.content_hash   = $content_hash,
-              s.content_ref    = $content_ref,
-              s.authored_at    = $authored_at,
-              s.author         = $author
+              s.episode_id           = $episode_id,
+              s.segment_type         = $segment_type,
+              s.sequence_index       = $sequence_index,
+              s.content_hash         = $content_hash,
+              s.content_ref          = $content_ref,
+              s.content_text         = $content_text,
+              s.authored_at          = $authored_at,
+              s.author               = $author,
+              s.retention_tier       = $retention_tier,
+              s.signal_versions_read = $signal_versions_read,
+              s.pending_hitl_ref     = $pending_hitl_ref
         """, params)
         # CONTAINS edge: EpisodeNode -> SegmentNode
         await session.run("""
