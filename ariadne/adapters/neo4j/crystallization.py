@@ -36,9 +36,18 @@ IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE = os.getenv(
 
 async def acquire_crystallization_lock(driver, episode_id: str) -> bool:
     """
-    Sets episode_status to CRYSTALLIZATION_PENDING.
-    Returns True if lock acquired, False if episode not in ACTIVE state
-    or if pending HITL events exist.
+    Sets episode_status to CRYSTALLIZATION_PENDING, remembering the status it
+    displaced so `release_crystallization_lock` can restore it (SPEC §4.4.1).
+
+    Acquirable from ACTIVE, CLOSING and CLOSING_PENDING_SEAL. It used to accept
+    ACTIVE only, which made the protocol's own lock unusable for the case that
+    needs it most: an episode crystallizing during closure. Consumers that
+    needed it wrote their own lock with the wider WHERE clause — the same shape
+    of gap as the missing writers, where the protocol's version could not do
+    the job and a second implementation appeared beside it.
+
+    Returns True if the lock was acquired, False if the episode is in none of
+    those states or has unresolved blocking HITL events.
     """
     if not ARIADNE_ENABLED:
         return False
@@ -59,11 +68,17 @@ async def acquire_crystallization_lock(driver, episode_id: str) -> bool:
             )
             return False
 
+        # Remember the status the lock displaces, so releasing it can put the
+        # episode back rather than inventing a terminal state. Captured in the
+        # same statement that overwrites it — read separately, another writer
+        # could change it in between.
         result = await session.run("""
             MATCH (e:AriadneEpisode {episode_id: $episode_id})
-            WHERE e.episode_status = 'ACTIVE'
+            WHERE e.episode_status IN ['ACTIVE', 'CLOSING', 'CLOSING_PENDING_SEAL']
+            WITH e, e.episode_status AS prior
             SET e.episode_status = 'CRYSTALLIZATION_PENDING',
-                e.crystallization_pending_at = datetime()
+                e.crystallization_pending_at = datetime(),
+                e.crystallization_prior_status = prior
             RETURN e.episode_id AS locked
         """, {"episode_id": episode_id})
         record = await result.single()
@@ -73,28 +88,47 @@ async def acquire_crystallization_lock(driver, episode_id: str) -> bool:
         else:
             logger.warning(
                 f"Ariadne: Could not acquire crystallization lock for episode {episode_id} "
-                f"-- episode not in ACTIVE state or not found."
+                f"-- episode not in ACTIVE/CLOSING/CLOSING_PENDING_SEAL state or not found."
             )
         return locked
 
 
 async def release_crystallization_lock(driver, episode_id: str, success: bool) -> None:
     """
-    Releases the CRYSTALLIZATION_PENDING lock.
-    On success: transitions to CRYSTALLIZED. On failure: reverts to ACTIVE.
+    Releases the CRYSTALLIZATION_PENDING lock, restoring the status the lock
+    displaced (SPEC §4.4.1).
+
+    This used to set CRYSTALLIZED on success. That conflated a lifecycle status
+    with a fact stored elsewhere: `is_episode_crystallized` counts
+    CrystallizationDelta nodes and never reads episode_status, so CRYSTALLIZED
+    was never how anything determined whether an episode was crystallized.
+
+    Worse, it was wrong mid-closure. An episode crystallizing during a seal is
+    in CLOSING; landing it in CRYSTALLIZED strands it outside the closure
+    workflow with no documented transition back. §4.4.1 makes restoring the
+    prior status explicitly permitted, and it is the only correct behaviour
+    there.
+
+    Falls back to ACTIVE when no prior status was recorded — locks taken before
+    this change, or by a caller that acquired the lock with its own Cypher.
     """
     if not ARIADNE_ENABLED:
         return
-    new_status = "CRYSTALLIZED" if success else "ACTIVE"
     async with driver.session() as session:
-        await session.run("""
+        result = await session.run("""
             MATCH (e:AriadneEpisode {episode_id: $episode_id})
             WHERE e.episode_status = 'CRYSTALLIZATION_PENDING'
-            SET e.episode_status = $new_status,
-                e.crystallization_pending_at = null
-        """, {"episode_id": episode_id, "new_status": new_status})
+            WITH e, coalesce(e.crystallization_prior_status, 'ACTIVE') AS restored
+            SET e.episode_status = restored,
+                e.crystallization_pending_at = null,
+                e.crystallization_prior_status = null
+            RETURN restored
+        """, {"episode_id": episode_id})
+        record = await result.single()
+        restored = record["restored"] if record else None
     logger.info(
-        f"Ariadne: Released crystallization lock for episode {episode_id} -> {new_status}"
+        f"Ariadne: Released crystallization lock for episode {episode_id} "
+        f"-> {restored or '(no lock held)'} (success={success})"
     )
 
 
