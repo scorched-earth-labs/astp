@@ -9,6 +9,16 @@ The next change-set queues here.
 ### Clarified (errata — PATCH)
 - **Segment parentage vs. proof-chain parentage.** New §3.4.1 states explicitly that a Segment's `parent_node_id` is its **`EpisodeNode`** (an upward anchor), that segments order by `sequence_index` with no segment→segment edge, and that the canonical materialization is an ordered `(Episode)-[:CONTAINS {sequence_index}]->(Segment)` fan-out (derive next/prev at read time, don't persist a chain). A reciprocal note at §16.5.3 distinguishes this from the proof-chain rule `B.parent_node_id == A.node_id`, which links whole nodes causally (e.g. episode→episode). **No canonical-form change** — this clarifies existing semantics (G-2 reparenting prohibition; §5.2 leaf-hash preimage). Surfaced by a reference-implementation question ([ariadne-samples #1](https://github.com/scorched-earth-labs/ariadne-samples/issues/1)): an adapter graph showed a segment→segment containment chain instead of the canonical episode→segment fan-out.
 
+## [4.1.1] — 2026-08-20
+
+**PATCH.** `create_amendment_link_node` — the last abstract adapter method with no Neo4j implementation.
+
+`AriadneAdapter.create_amendment_link` was declared and left `...`, so consumers reopening a sealed Episode wrote their own node and edges. Same gap as codicils, closure records, episode-status transitions and attachments; this closes the set.
+
+Writes the node and **both** edges — `AMENDS` to the source, `PRODUCES` to the new Episode. The link is not symmetric: following provenance backwards wants the source, asking "what came of this" wants the amendment, and one edge would make the other direction a scan. G-1 is deliberately not enforced — the source is sealed *by definition*, which is the precondition for amending it, not an obstacle.
+
+**Known gap recorded, not closed:** `create_consultation`, `create_exchange_entry` and `create_consultation_participant` remain abstract with no implementation. v3.5.0 retired consultation from the protocol but removed only its WIL operations and `SegmentType` members — these three methods and the `ConsultationNode` / `ExchangeEntry` / `ConsultationParticipantNode` types survived, and appear nowhere in SPEC.md. Finishing that removal is a cross-repo migration (26 references downstream, including `bdi_bridge` importing `ExchangeEntry` from the protocol schema). Pinned by test so the gap cannot grow.
+
 ## [4.1.0] — 2026-08-20
 
 **MINOR.** SPEC §4.7 `AttachmentNode` — external content injected into an Episode's context, recorded so the injection is verifiable after the fact.

@@ -15,6 +15,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from ariadne.core.schema import (
+    AmendmentLink,
     AriadneGovernanceError,
     AttachmentNode,
     CodicilNode,
@@ -556,6 +557,73 @@ async def create_closure_record_node(driver, closure: EpisodeClosureRecord) -> N
             "episode_id": str(closure.episode_id),
             "closure_id": str(closure.closure_id),
             "sealed_at": closure.sealed_at.isoformat(),
+        })
+
+
+async def create_amendment_link_node(driver, amendment: AmendmentLink) -> None:
+    """Link a new Episode to a sealed source Episode.
+
+    The last of the abstract adapter methods that was never implemented.
+    `AriadneAdapter.create_amendment_link` was declared and left `...`, so
+    consumers that needed to reopen a sealed episode wrote their own node and
+    edges — the same gap as codicils, closure records and attachments.
+
+    Writes the node and both edges: AMENDS to the source, PRODUCES to the new
+    episode. Two edges rather than one because the link is not symmetric — a
+    reader following provenance backwards wants the source, and one asking
+    "what came of this episode" wants the amendment, and collapsing them would
+    make one of those a scan.
+
+    G-1 is NOT enforced. The source episode is sealed or archived by
+    definition — that is the precondition for amending it, not an obstacle.
+    Nothing about the sealed record changes: the amendment is a new episode
+    beside it, which is the whole point of reopening rather than editing.
+    """
+    if not _ariadne_guard():
+        return
+    params = {
+        "amendment_id": str(amendment.amendment_id),
+        "source_episode_id": str(amendment.source_episode_id),
+        "amendment_episode_id": str(amendment.amendment_episode_id),
+        "source_root_hash": amendment.source_root_hash,
+        "source_title": amendment.source_title,
+        "source_closed_at": (
+            amendment.source_closed_at.isoformat() if amendment.source_closed_at else None
+        ),
+        "source_participants": list(amendment.source_participants or []),
+        "amendment_count": amendment.amendment_count,
+        "created_at": amendment.created_at.isoformat(),
+        "created_by": amendment.created_by,
+    }
+    async with driver.session() as session:
+        await session.run("""
+            MERGE (am:AriadneAmendment {amendment_id: $amendment_id})
+            ON CREATE SET
+              am.source_episode_id    = $source_episode_id,
+              am.amendment_episode_id = $amendment_episode_id,
+              am.source_root_hash     = $source_root_hash,
+              am.source_title         = $source_title,
+              am.source_closed_at     = $source_closed_at,
+              am.source_participants  = $source_participants,
+              am.amendment_count      = $amendment_count,
+              am.created_at           = $created_at,
+              am.created_by           = $created_by
+        """, params)
+        await session.run("""
+            MATCH (am:AriadneAmendment {amendment_id: $amendment_id})
+            MATCH (e:AriadneEpisode {episode_id: $source_episode_id})
+            MERGE (am)-[:AMENDS]->(e)
+        """, {
+            "amendment_id": str(amendment.amendment_id),
+            "source_episode_id": str(amendment.source_episode_id),
+        })
+        await session.run("""
+            MATCH (am:AriadneAmendment {amendment_id: $amendment_id})
+            MATCH (e:AriadneEpisode {episode_id: $amendment_episode_id})
+            MERGE (am)-[:PRODUCES]->(e)
+        """, {
+            "amendment_id": str(amendment.amendment_id),
+            "amendment_episode_id": str(amendment.amendment_episode_id),
         })
 
 
