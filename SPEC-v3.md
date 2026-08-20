@@ -1,7 +1,14 @@
+> **HISTORICAL REFERENCE — SPEC v3.x line, retained at v3.5.1.**
+>
+> Superseded by `SPEC.md` at v4.0.0, which adds the ledgering obligations
+> (§12.4.2, G-39). Retained per [`VERSIONING.md`](./VERSIONING.md): conformance
+> is not preserved across MAJOR versions, so an implementation targeting v3.x
+> needs the document it was built against.
+
 # ASTP — AI State Tree Protocol Specification
 
-**Version:** 4.0.0
-**Status:** Stable. The full normative protocol is defined in this document's body. (**v4.0.0 is a MAJOR release.** §12.4.2 now states the ledgering obligations deferred since 3.4.0: **G-39** — an implementation MUST record a ledger entry for every registered operation it performs. This is conformance-breaking by construction and requires a ratifying **Episode of Record** per [`VERSIONING.md`](./VERSIONING.md). It also makes a missing entry mean something: from a conforming implementation, the operation did not occur. v3.5.1 is **errata**: §4.4.1 now states the Episode lifecycle states the protocol actually defines. The prior one-line list named four states no implementation has ever had and omitted seven that exist, including the entire closure workflow. No semantic change — the states were always these. v3.5.0 removes `CONSULTATION_COMMIT` and `COLLABORATION_COMMIT` from the §12.4.1 operation register, and the unused `SegmentType.CONSULTATION` / `COLLABORATION` members, as multi-agent interaction patterns the protocol does not define; implementations that ledger them namespace them per the §12.4.1 prefix rule. v3.4.0 added **§12.4 Ledgered Operations** — the closed register of WIL operation values and the Tier 1 / Tier 2 entry forms, with G-37 and G-38 governing the *form* of an entry whenever one is written; **which operations an implementation MUST ledger remains deferred to 4.0.0** per §12.4.2.) v3.3.0 added the departure-fork **orphan-recovery** surface at §19.3.7 — the `ForkOrphanMarker` node, per-class recovery field mutations, and the one permitted retroactive spine write — additively; no existing canonical form changes, so every v3.2.x-conformant implementation remains conformant. Detection cadence is non-normative.) The Phase D departure-fork lifecycle (v3.2.0) is at §19.3.5–19.3.7; cross-episode linking + grouping (v3.0.0) at §20; the Layer 3 Workflow & Execution DAG (v3.1.0) at §21. The v3.2.1 integration pass folded the former standalone amendments into the SPEC body — editorial only, no normative change. The historical amendment documents ([`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) → §20, [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) → §21) are retained for provenance only. Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
+**Version:** 3.5.1
+**Status:** Stable. The full normative protocol is defined in this document's body. (v3.5.1 is **errata**: §4.4.1 now states the Episode lifecycle states the protocol actually defines. The prior one-line list named four states no implementation has ever had and omitted seven that exist, including the entire closure workflow. No semantic change — the states were always these. v3.5.0 removes `CONSULTATION_COMMIT` and `COLLABORATION_COMMIT` from the §12.4.1 operation register, and the unused `SegmentType.CONSULTATION` / `COLLABORATION` members, as multi-agent interaction patterns the protocol does not define; implementations that ledger them namespace them per the §12.4.1 prefix rule. v3.4.0 added **§12.4 Ledgered Operations** — the closed register of WIL operation values and the Tier 1 / Tier 2 entry forms, with G-37 and G-38 governing the *form* of an entry whenever one is written; **which operations an implementation MUST ledger remains deferred to 4.0.0** per §12.4.2.) v3.3.0 added the departure-fork **orphan-recovery** surface at §19.3.7 — the `ForkOrphanMarker` node, per-class recovery field mutations, and the one permitted retroactive spine write — additively; no existing canonical form changes, so every v3.2.x-conformant implementation remains conformant. Detection cadence is non-normative.) The Phase D departure-fork lifecycle (v3.2.0) is at §19.3.5–19.3.7; cross-episode linking + grouping (v3.0.0) at §20; the Layer 3 Workflow & Execution DAG (v3.1.0) at §21. The v3.2.1 integration pass folded the former standalone amendments into the SPEC body — editorial only, no normative change. The historical amendment documents ([`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) → §20, [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) → §21) are retained for provenance only. Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-06-07
 **Supersedes:** SPEC-v1.md (0.1.0-draft)
@@ -712,59 +719,29 @@ does not specify. Implementations that ledger such operations namespace them
 
 #### 12.4.2 Ledgering Obligations
 
-A conforming implementation MUST write a ledger entry for every operation in
-the §12.4.1 register that it performs, in the form that operation's tier
-requires (G-37, G-38).
+**Which operations an implementation MUST ledger is not specified in the 3.x
+line. It is deferred to 4.0.0.**
 
-**G-39.** An implementation that performs a registered operation MUST record a
-ledger entry for it. Performing a registered operation without an entry is a
-conformance violation, not a degraded mode.
+This is deliberate, and the reasoning is worth stating rather than leaving to
+inference. Every candidate obligation here is conformance-breaking: an
+implementation that does not currently ledger an operation stops conforming the
+moment the specification requires it. Under the versioning policy that is a
+MAJOR change, and a MAJOR change to this protocol requires a ratifying Episode
+of Record. Introducing such requirements through a MINOR release — or
+pre-committing to them with SHOULD, which invites implementers to treat the
+weaker form as settled — would either break conformance without ratification or
+enshrine the current coverage gaps as the intended shape.
 
-This is what makes the ledger evidence. Until an implementation is obliged to
-record what it does, a missing entry has two readings — "it did not happen" and
-"nobody wrote it down" — and a record that cannot distinguish those is not a
-record of anything. §12.4.1 closed the vocabulary so entries mean the same
-thing everywhere; this closes the coverage so their absence does too.
+The vocabulary and the entry forms are stable and usable now. The obligations
+are a single decision, to be taken once, at full strength, with the coverage
+work completed first.
 
-##### Operations an implementation does not perform
+Until then: an implementation that ledgers an operation MUST do so in the form
+its tier requires (G-37, G-38), and an implementation's ledger is exactly as
+strong as the coverage it chooses. A verifier MUST NOT infer from a missing
+entry that an operation did not occur.
 
-The obligation is on operations performed, not on the register as a whole. An
-implementation that never crystallizes owes no `CRYSTALLIZATION` entries. This
-is deliberate: the register describes what the protocol can express, not a
-feature checklist every implementation must implement.
-
-##### Best-effort writes
-
-An implementation MAY treat its ledger writes as best-effort with respect to
-availability — a coordinator outage need not fail the operation it was meant to
-record. What it MUST NOT do is silently proceed as though the entry existed. An
-operation performed while the ledger was unavailable leaves the same gap as one
-never ledgered, and the implementation MUST surface that rather than absorb it.
-
-The distinction is between an implementation that cannot record and knows it,
-and one that does not record and cannot tell.
-
-##### What a verifier may conclude
-
-With G-39 in force, a missing entry from a conforming implementation means the
-operation did not occur. That inference is the point of the obligation and was
-explicitly unavailable before it.
-
-It remains unavailable for records written by an implementation that was not
-conforming at the time of writing, including every record written before this
-version. An implementation MUST NOT retroactively assert coverage over a period
-it did not have it. Where the distinction matters, a verifier needs the
-implementation's conformance claim for the period in question, not merely the
-absence of an entry.
-
-##### Incomplete entries
-
-A Tier 1 entry with `completed_at=null` past the provisional window records an
-interrupted write, not a missing one. It is evidence the operation was
-attempted and that its outcome is unknown — which is strictly more than either
-a completed entry or no entry conveys, and is why Tier 1 exists.
-
-## 13. Spine Tip Cache## 13. Spine Tip Cache
+## 13. Spine Tip Cache
 
 Segment append and snapshot capture both need to know the current `max(sequence_index)` for an Episode. Without caching, every such operation requires a database traversal.
 
@@ -1098,7 +1075,6 @@ This test should be run bidirectionally (A→B and B→A).
 | 3.4.0 | 2026-08-18 | **MINOR** — Write Intent Log operation register (§12.4). Registers all 21 WIL operation values and classifies each into one of two entry forms: **Tier 1 coordinated write** (multi-store; full three-phase §12.2 protocol; `completed_at=null` past the provisional window is a recovery candidate) and **Tier 2 ledger record** (single authoritative store; one completed entry at commit; never a recovery candidate). New governance rules **G-37** and **G-38** constrain the form of an entry whenever one is written, and compel no entry to exist. §12.4.1 closes the register against extension values lacking an implementation namespace prefix, and records that `SEGMENT_COMMIT` and `SIGNAL_COMMIT` are not interchangeable. §12.4.2 **defers ledgering obligations — which operations MUST be ledgered — to 4.0.0**, since each is conformance-breaking and therefore MAJOR under [`VERSIONING.md`](./VERSIONING.md), requiring a ratifying Episode of Record; and states that a verifier MUST NOT infer from a missing entry that an operation did not occur. **Additive — no breaking changes.** |
 | 3.5.0 | 2026-08-19 | **MINOR** — Retires `CONSULTATION_COMMIT` and `COLLABORATION_COMMIT` from the §12.4.1 operation register, and the never-used `SegmentType.CONSULTATION` / `COLLABORATION` members. Both describe multi-agent interaction patterns the protocol does not define; registering their operations extended the protocol's vocabulary to cover behaviour it does not specify. Implementations that ledger such operations namespace them (`sel:CONSULTATION_COMMIT`) under the §12.4.1 prefix rule. **No conformant implementation is affected:** the reference implementation never emitted either operation, the segment types have no writer and zero instances in any known deployment, and the only downstream writer migrated to namespaced values before this release. |
 | 3.5.1 | 2026-08-20 | **PATCH (errata)** — §4.4.1 Episode Lifecycle States. The prior text read "ACTIVE, REBALANCING, SEALING, SEALED, SEALING_FAILED, REBALANCE_FAILED, ARCHIVED, EXPIRED". Four of those (`REBALANCING`, `SEALING_FAILED`, `REBALANCE_FAILED`, `EXPIRED`) have never existed in any implementation; seven real states were missing (`CREATED`, `PENDING_HITL`, `CLOSING`, `CLOSING_PENDING_SEAL`, `CLOSED`, `CRYSTALLIZATION_PENDING`, `CRYSTALLIZED`). Replaced with the closed set as a table, plus the clarification that **crystallization is a fact recorded by a `CrystallizationDelta`, not a state** — an implementation MUST NOT infer it from `episode_status`, and MAY restore the pre-lock status after crystallizing, which is required for correctness mid-closure. **Errata, not a semantic change:** the states were always these, and no conformant implementation could have used the four fictional ones. |
-| 4.0.0 | 2026-08-20 | **MAJOR** — Ledgering obligations (§12.4.2), deferred since 3.4.0. New governance rule **G-39**: an implementation MUST record a ledger entry for every §12.4.1 operation it performs; performing one without an entry is a conformance violation, not a degraded mode. The obligation is scoped to operations *performed*, so an implementation owes nothing for capabilities it does not implement. Ledger writes MAY be best-effort with respect to availability, but an implementation MUST surface a gap rather than absorb it — the distinction is between one that cannot record and knows it, and one that does not record and cannot tell. **Consequence:** a missing entry from a conforming implementation now means the operation did not occur; that inference was explicitly unavailable before. It remains unavailable for records written before this version, and an implementation MUST NOT retroactively assert coverage over a period it did not have it. Tier 1 entries with `completed_at=null` past the provisional window continue to record an interrupted write — strictly more information than either a completed entry or none. **Breaking:** every 3.x-conformant implementation that performs a registered operation without ledgering it becomes non-conformant. Requires a ratifying Episode of Record. |
 | 3.2.2 | 2026-07-04 | **PATCH** — prose errata. Corrected the §20 hash-preimage descriptions to match the reference implementation: `EpisodeLink.content_hash`, `MembershipRecord.content_hash`, `ConformanceDeclaration.declaration_hash` are **SHA3-256** (not SHA-256), per the §5 protocol commitment; `MembershipRecord` binds `supersedes_record_id` + `succession_reason` (the prose omitted them); `EpisodeLink` excludes only `quarantine_resolved_at` / `quarantine_resolution` (the prose wrongly listed `health_state` / `health_checked_at` as excluded — they ARE hashed). Corrected the §21 Form-B attribution (the Ignis reference implementation uses SHA3-256 + declared field order, not SHA-256 + key-sorting). **The canonical hash form is unchanged — prose-only; every v3.2.1 implementation remains conformant.** |
 
 ## 19. Branch/Fork/Merge Taxonomy

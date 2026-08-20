@@ -277,12 +277,16 @@ class TestSpecRegisterAgreement:
             assert register[name] == 2, f"{name} registered Tier {register[name]}"
 
     def test_every_registered_operation_is_emitted(self):
-        """The 4.0.0 readiness gate.
+        """G-39's precondition, and the reference implementation's own compliance.
 
-        §12.4.2 defers "which operations MUST be ledgered" to 4.0.0 because
-        stating it while the reference implementation ledgered almost none of
-        them would publish a requirement this library fails. That is no longer
-        true: every registered operation now has a write path that emits it.
+        §12.4.2 (G-39) requires a ledger entry for every registered operation an
+        implementation performs. This library performs all of them, so this test
+        IS its conformance check — not merely a readiness gate as it was while
+        the obligation was still deferred.
+
+        It was deferred precisely because stating the requirement while the
+        reference implementation ledgered almost none of them would have
+        published a rule this library fails.
 
         If this fails, either a new operation was registered without a writer —
         which recreates exactly the gap §12.4.2 exists to acknowledge — or a

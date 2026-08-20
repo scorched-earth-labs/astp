@@ -9,6 +9,39 @@ The next change-set queues here.
 ### Clarified (errata — PATCH)
 - **Segment parentage vs. proof-chain parentage.** New §3.4.1 states explicitly that a Segment's `parent_node_id` is its **`EpisodeNode`** (an upward anchor), that segments order by `sequence_index` with no segment→segment edge, and that the canonical materialization is an ordered `(Episode)-[:CONTAINS {sequence_index}]->(Segment)` fan-out (derive next/prev at read time, don't persist a chain). A reciprocal note at §16.5.3 distinguishes this from the proof-chain rule `B.parent_node_id == A.node_id`, which links whole nodes causally (e.g. episode→episode). **No canonical-form change** — this clarifies existing semantics (G-2 reparenting prohibition; §5.2 leaf-hash preimage). Surfaced by a reference-implementation question ([ariadne-samples #1](https://github.com/scorched-earth-labs/ariadne-samples/issues/1)): an adapter graph showed a segment→segment containment chain instead of the canonical episode→segment fan-out.
 
+## [4.0.0] — 2026-08-20
+
+**MAJOR.** Ledgering obligations (SPEC §12.4.2), deferred since 3.4.0. Requires a ratifying **Episode of Record**.
+
+- **G-39** — an implementation MUST record a ledger entry for every §12.4.1 operation it performs. Performing one without an entry is a conformance violation, not a degraded mode.
+- Scoped to operations *performed*: an implementation owes nothing for capabilities it does not implement.
+- Ledger writes MAY be best-effort with respect to availability, but a gap MUST be surfaced rather than absorbed — the distinction is between an implementation that cannot record and knows it, and one that does not record and cannot tell.
+- **Consequence:** a missing entry from a conforming implementation now means the operation did not occur. That inference was explicitly unavailable before. It remains unavailable for records written prior to this version, and an implementation MUST NOT retroactively assert coverage over a period it did not have it.
+
+**Breaking.** Every 3.x-conformant implementation that performs a registered operation without ledgering it becomes non-conformant. `SPEC.md` at 3.5.1 retained as `SPEC-v3.md`.
+
+## [3.5.1] — 2026-08-20
+
+**PATCH (errata).** SPEC §4.4.1 Episode Lifecycle States.
+
+The prior one-line list read "ACTIVE, REBALANCING, SEALING, SEALED, SEALING_FAILED, REBALANCE_FAILED, ARCHIVED, EXPIRED". Four of those states have never existed in any implementation; seven real ones were missing, including the entire closure workflow. Four of eleven overlapped.
+
+Written 2026-04-09, two days *after* the enum it was describing already carried the states it omitted — wrong on the day it was authored, not drift. Replaced with the closed set as a table, plus: **crystallization is a fact recorded by a `CrystallizationDelta`, not a state**; an implementation MUST NOT infer it from `episode_status`, and MAY restore the pre-lock status, which is required for correctness mid-closure.
+
+## [3.5.0] — 2026-08-19
+
+**MINOR.** Retires `CONSULTATION_COMMIT` and `COLLABORATION_COMMIT` from the §12.4.1 register, and the never-used `SegmentType.CONSULTATION` / `COLLABORATION` members.
+
+Both describe multi-agent interaction patterns the protocol does not define; registering their operations extended the protocol's vocabulary to cover behaviour it does not specify. Implementations that ledger them namespace them (`sel:CONSULTATION_COMMIT`) under the §12.4.1 prefix rule. No conformant implementation affected — neither operation was ever emitted by the reference implementation, and the segment types had no writer and zero instances.
+
+## [3.4.0] — 2026-08-18
+
+**MINOR.** Write Intent Log operation register (SPEC §12.4).
+
+§12 defined *how* a write intent is recorded but never *which* operations record one, so the vocabulary existed only as a Python enum documented nowhere normative. Adds the closed register of all operation values and the two entry forms: **Tier 1 coordinated write** (multi-store, full three-phase §12.2 protocol, `completed_at=null` past the provisional window is a recovery candidate) and **Tier 2 ledger record** (single authoritative store, one completed entry at commit, never a recovery candidate).
+
+New governance rules **G-37** and **G-38** constrain the *form* of an entry whenever one is written; neither compels an entry to exist. §12.4.2 deferred that obligation to 4.0.0.
+
 ## [3.3.0] — 2026-07-05
 
 **MINOR.** Departure-fork orphan recovery (SPEC §19.3.7). Additive on top of v3.2.x — no breaking changes; every v3.2.x-conformant implementation remains conformant. The runtime enforcement layer for the §19.3.5 producer invariants: it catches partial-failure states the producers couldn't prevent (a crash between the two writes, a rolled-back status).
