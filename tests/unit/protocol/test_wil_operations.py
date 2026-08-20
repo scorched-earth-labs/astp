@@ -117,6 +117,23 @@ class TestWILOperationVocabulary:
         assert "create_episode_node" in body
         assert "MERGE (e:AriadneEpisode" not in body
 
+    def test_codicil_append_is_emitted_by_the_library(self):
+        """CODICIL_APPEND had neither a ledger entry nor a writer to ledger."""
+        from ariadne.adapters.neo4j import wil as wil_adapter
+
+        assert hasattr(wil_adapter, "execute_codicil_append")
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        assert "WILOperation.CODICIL_APPEND" in source
+
+    def test_codicil_append_delegates_to_the_writer(self):
+        from ariadne.adapters.neo4j import wil as wil_adapter
+
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        body = source[source.index("async def execute_codicil_append"):
+                      source.index("async def execute_signal_commit")]
+        assert "create_codicil_node" in body
+        assert "MERGE (cod:AriadneCodicil" not in body
+
     def test_segment_commit_delegates_to_the_guarded_writer(self):
         """It must go through create_segment_node, not inline its own Cypher.
 

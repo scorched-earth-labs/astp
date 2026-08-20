@@ -16,6 +16,7 @@ from uuid import UUID
 
 from ariadne.core.schema import (
     AriadneGovernanceError,
+    CodicilNode,
     DocumentNode,
     EpisodeNode,
     EpisodeStatus,
@@ -446,6 +447,55 @@ async def create_seal_node(driver, seal: SealNode) -> None:
             "spine_hash": seal.spine_hash,
             "signal_manifest_hash": seal.signal_manifest_hash,
             "episode_root_hash": seal.episode_root_hash,
+        })
+
+
+async def create_codicil_node(driver, codicil: CodicilNode) -> None:
+    """Persist a codicil — a bounded addendum to an already-closed episode.
+
+    This had no Neo4j implementation: `AriadneAdapter.create_codicil` was
+    declared abstract and never realised, so every consumer that needed a
+    codicil wrote its own Cypher against :AriadneCodicil. That is why the
+    operation was hand-rolled downstream rather than ledgered by the protocol.
+
+    NOTE: G-1 is deliberately NOT enforced here. G-1 blocks writes to SEALING /
+    SEALED / ARCHIVED episodes, and a codicil is the protocol's sanctioned
+    exception — the whole point is a post-closure addendum that preserves the
+    sealed record by being appended rather than integrated into it. Applying
+    the guard would make the node type unwritable in the only state it exists
+    for.
+    """
+    if not _ariadne_guard():
+        return
+    params = {
+        "codicil_id": str(codicil.codicil_id),
+        "episode_id": str(codicil.episode_id),
+        "author": codicil.author,
+        "content": codicil.content,
+        "content_hash": codicil.content_hash,
+        "created_at": codicil.created_at.isoformat(),
+        "schema_version": codicil.schema_version,
+    }
+    async with driver.session() as session:
+        await session.run("""
+            MERGE (cod:AriadneCodicil {codicil_id: $codicil_id})
+            ON CREATE SET
+              cod.episode_id     = $episode_id,
+              cod.author         = $author,
+              cod.content        = $content,
+              cod.content_hash   = $content_hash,
+              cod.created_at     = $created_at,
+              cod.schema_version = $schema_version
+        """, params)
+        # HAS_CODICIL edge: EpisodeNode -> CodicilNode
+        await session.run("""
+            MATCH (e:AriadneEpisode {episode_id: $episode_id})
+            MATCH (cod:AriadneCodicil {codicil_id: $codicil_id})
+            MERGE (e)-[:HAS_CODICIL {created_at: $created_at}]->(cod)
+        """, {
+            "episode_id": str(codicil.episode_id),
+            "codicil_id": str(codicil.codicil_id),
+            "created_at": codicil.created_at.isoformat(),
         })
 
 

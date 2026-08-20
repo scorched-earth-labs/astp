@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from ariadne.core.schema import SegmentNode, SignalNode
+from ariadne.core.schema import CodicilNode, SegmentNode, SignalNode
 
 WRITER = Path(__file__).resolve().parents[3] / "ariadne" / "adapters" / "neo4j" / "writer.py"
 SOURCE = WRITER.read_text(encoding="utf-8")
@@ -69,3 +69,36 @@ class TestSignalWriterParity:
         params = _persisted_params(self.BODY)
         missing = sorted(f for f in SignalNode.model_fields if f not in params)
         assert missing == [], f"SignalNode fields never bound by create_signal_node: {missing}"
+
+
+class TestCodicilWriterParity:
+    """create_codicil_node had no implementation at all until now."""
+
+    BODY = _writer_body("create_codicil_node", "create_exclusion_record")
+
+    @pytest.mark.parametrize("field", sorted(CodicilNode.model_fields))
+    def test_field_is_bound_as_a_parameter(self, field):
+        assert field in _persisted_params(self.BODY), (
+            f"CodicilNode.{field} is declared on the model but "
+            "create_codicil_node never binds it"
+        )
+
+    def test_every_field_is_set_in_cypher(self):
+        expected = set(CodicilNode.model_fields) - {"codicil_id"}  # MERGE key
+        missing = sorted(expected - _cypher_assignments(self.BODY))
+        assert missing == [], f"declared but never SET on the node: {missing}"
+
+    def test_g1_is_deliberately_not_enforced(self):
+        """A codicil is the sanctioned post-closure write.
+
+        G-1 blocks writes to SEALING / SEALED / ARCHIVED episodes. A codicil
+        exists precisely to add to a closed episode without integrating into
+        the sealed record, so enforcing G-1 here would make the node type
+        unwritable in the only state it is for. Pinned because "this writer is
+        missing its guard" is exactly the kind of thing a later reader fixes by
+        adding one.
+        """
+        assert "enforce_G1_write_guard" not in self.BODY
+
+    def test_links_the_codicil_to_its_episode(self):
+        assert "HAS_CODICIL" in self.BODY
