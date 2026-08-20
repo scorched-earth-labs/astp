@@ -1,7 +1,7 @@
 # ASTP — AI State Tree Protocol Specification
 
-**Version:** 3.5.0
-**Status:** Stable. The full normative protocol is defined in this document's body. (v3.5.0 removes `CONSULTATION_COMMIT` and `COLLABORATION_COMMIT` from the §12.4.1 operation register, and the unused `SegmentType.CONSULTATION` / `COLLABORATION` members, as multi-agent interaction patterns the protocol does not define; implementations that ledger them namespace them per the §12.4.1 prefix rule. v3.4.0 added **§12.4 Ledgered Operations** — the closed register of WIL operation values and the Tier 1 / Tier 2 entry forms, with G-37 and G-38 governing the *form* of an entry whenever one is written; **which operations an implementation MUST ledger remains deferred to 4.0.0** per §12.4.2.) v3.3.0 added the departure-fork **orphan-recovery** surface at §19.3.7 — the `ForkOrphanMarker` node, per-class recovery field mutations, and the one permitted retroactive spine write — additively; no existing canonical form changes, so every v3.2.x-conformant implementation remains conformant. Detection cadence is non-normative.) The Phase D departure-fork lifecycle (v3.2.0) is at §19.3.5–19.3.7; cross-episode linking + grouping (v3.0.0) at §20; the Layer 3 Workflow & Execution DAG (v3.1.0) at §21. The v3.2.1 integration pass folded the former standalone amendments into the SPEC body — editorial only, no normative change. The historical amendment documents ([`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) → §20, [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) → §21) are retained for provenance only. Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
+**Version:** 3.5.1
+**Status:** Stable. The full normative protocol is defined in this document's body. (v3.5.1 is **errata**: §4.4.1 now states the Episode lifecycle states the protocol actually defines. The prior one-line list named four states no implementation has ever had and omitted seven that exist, including the entire closure workflow. No semantic change — the states were always these. v3.5.0 removes `CONSULTATION_COMMIT` and `COLLABORATION_COMMIT` from the §12.4.1 operation register, and the unused `SegmentType.CONSULTATION` / `COLLABORATION` members, as multi-agent interaction patterns the protocol does not define; implementations that ledger them namespace them per the §12.4.1 prefix rule. v3.4.0 added **§12.4 Ledgered Operations** — the closed register of WIL operation values and the Tier 1 / Tier 2 entry forms, with G-37 and G-38 governing the *form* of an entry whenever one is written; **which operations an implementation MUST ledger remains deferred to 4.0.0** per §12.4.2.) v3.3.0 added the departure-fork **orphan-recovery** surface at §19.3.7 — the `ForkOrphanMarker` node, per-class recovery field mutations, and the one permitted retroactive spine write — additively; no existing canonical form changes, so every v3.2.x-conformant implementation remains conformant. Detection cadence is non-normative.) The Phase D departure-fork lifecycle (v3.2.0) is at §19.3.5–19.3.7; cross-episode linking + grouping (v3.0.0) at §20; the Layer 3 Workflow & Execution DAG (v3.1.0) at §21. The v3.2.1 integration pass folded the former standalone amendments into the SPEC body — editorial only, no normative change. The historical amendment documents ([`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) → §20, [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) → §21) are retained for provenance only. Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-06-07
 **Supersedes:** SPEC-v1.md (0.1.0-draft)
@@ -197,7 +197,38 @@ The protocol MUST NOT inspect payload fields directly.
 
 `EpisodePayload` implements `NodePayload` with fields: title, context_note, episode_type, episode_mode, workspace_id, participants, segment_count, signal_reads.
 
-Episode lifecycle states: ACTIVE, REBALANCING, SEALING, SEALED, SEALING_FAILED, REBALANCE_FAILED, ARCHIVED, EXPIRED.
+#### 4.4.1 Episode Lifecycle States
+
+An Episode is in exactly one of the following states. The set is closed: an
+implementation MUST NOT persist an `episode_status` outside it.
+
+| State | Meaning |
+|-------|---------|
+| `CREATED` | Node written; no content committed yet. |
+| `ACTIVE` | Accepting segments and signals. The ordinary working state. |
+| `PENDING_HITL` | A blocking human-in-the-loop gate is unresolved (§4.6). Advisory gates do not enter this state. |
+| `CLOSING` | Closure initiated; final contributions still permitted. |
+| `CLOSING_PENDING_SEAL` | All contributions in; grace period active before the record is fixed. |
+| `CLOSED` | Closure recorded. Further content is admissible only as a codicil (§4.9). |
+| `CRYSTALLIZATION_PENDING` | The crystallization lock is held (§7). A transient state, not a resting one. |
+| `CRYSTALLIZED` | A crystallization completed and the episode was left in this state. |
+| `SEALING` | Seal in progress. |
+| `SEALED` | Sealed; the record is cryptographically fixed. |
+| `ARCHIVED` | Retired from active use. Terminal. |
+
+**Crystallization is a fact, not a state.** Whether an episode is crystallized
+is determined by the existence of a `CrystallizationDelta`, not by
+`episode_status`. An implementation MUST NOT infer crystallization from the
+status field. `CRYSTALLIZED` therefore records only that a crystallization
+concluded while the episode was in no other pending state; an implementation
+MAY instead restore the status the episode held before acquiring the lock,
+which is the correct behaviour when crystallizing mid-closure — an episode
+being sealed must return to `CLOSING`, not to `CRYSTALLIZED`.
+
+`CRYSTALLIZATION_PENDING` is the one state that blocks all content writes
+without being a closure state; see §7 for the lock and §4.6 for the HITL guard
+that refuses to enter it.
+
 
 ### 4.5 Segment Metadata: signal_versions_read
 
@@ -1036,6 +1067,7 @@ This test should be run bidirectionally (A→B and B→A).
 | 3.3.0 | 2026-07-05 | **MINOR** — Departure-fork orphan recovery (§19.3.7). New non-chained diagnostic satellite node `ForkOrphanMarker` (domain `FORK_ORPHAN_MARKER:`, self-hashed, excluded from the spine Merkle chain and from departure-registry queries, deduplicated one-per-orphaned-fork). Four orphan classes (A dangling point / B unanchored episode / C return-status mismatch / D stale ACTIVE). Class-B recovery defines the **one permitted retroactive `DepartureForkPointNode` write** (append + backdated anchor + cross-verify gate, byte-identical to an on-time write; escalate-don't-write on hash mismatch). New diagnostic fields on the fork point (`orphaned`, `retroactive`, `orphan_recovery_timestamp`) and the fork episode (`fork_orphaned`, `fork_orphan_class=UNANCHORED`, `status_corrected_by_orphan_recovery`, `status_corrected_at`). **Detection cadence is non-normative** (operational hygiene). **Additive — no breaking changes.** |
 | 3.4.0 | 2026-08-18 | **MINOR** — Write Intent Log operation register (§12.4). Registers all 21 WIL operation values and classifies each into one of two entry forms: **Tier 1 coordinated write** (multi-store; full three-phase §12.2 protocol; `completed_at=null` past the provisional window is a recovery candidate) and **Tier 2 ledger record** (single authoritative store; one completed entry at commit; never a recovery candidate). New governance rules **G-37** and **G-38** constrain the form of an entry whenever one is written, and compel no entry to exist. §12.4.1 closes the register against extension values lacking an implementation namespace prefix, and records that `SEGMENT_COMMIT` and `SIGNAL_COMMIT` are not interchangeable. §12.4.2 **defers ledgering obligations — which operations MUST be ledgered — to 4.0.0**, since each is conformance-breaking and therefore MAJOR under [`VERSIONING.md`](./VERSIONING.md), requiring a ratifying Episode of Record; and states that a verifier MUST NOT infer from a missing entry that an operation did not occur. **Additive — no breaking changes.** |
 | 3.5.0 | 2026-08-19 | **MINOR** — Retires `CONSULTATION_COMMIT` and `COLLABORATION_COMMIT` from the §12.4.1 operation register, and the never-used `SegmentType.CONSULTATION` / `COLLABORATION` members. Both describe multi-agent interaction patterns the protocol does not define; registering their operations extended the protocol's vocabulary to cover behaviour it does not specify. Implementations that ledger such operations namespace them (`sel:CONSULTATION_COMMIT`) under the §12.4.1 prefix rule. **No conformant implementation is affected:** the reference implementation never emitted either operation, the segment types have no writer and zero instances in any known deployment, and the only downstream writer migrated to namespaced values before this release. |
+| 3.5.1 | 2026-08-20 | **PATCH (errata)** — §4.4.1 Episode Lifecycle States. The prior text read "ACTIVE, REBALANCING, SEALING, SEALED, SEALING_FAILED, REBALANCE_FAILED, ARCHIVED, EXPIRED". Four of those (`REBALANCING`, `SEALING_FAILED`, `REBALANCE_FAILED`, `EXPIRED`) have never existed in any implementation; seven real states were missing (`CREATED`, `PENDING_HITL`, `CLOSING`, `CLOSING_PENDING_SEAL`, `CLOSED`, `CRYSTALLIZATION_PENDING`, `CRYSTALLIZED`). Replaced with the closed set as a table, plus the clarification that **crystallization is a fact recorded by a `CrystallizationDelta`, not a state** — an implementation MUST NOT infer it from `episode_status`, and MAY restore the pre-lock status after crystallizing, which is required for correctness mid-closure. **Errata, not a semantic change:** the states were always these, and no conformant implementation could have used the four fictional ones. |
 | 3.2.2 | 2026-07-04 | **PATCH** — prose errata. Corrected the §20 hash-preimage descriptions to match the reference implementation: `EpisodeLink.content_hash`, `MembershipRecord.content_hash`, `ConformanceDeclaration.declaration_hash` are **SHA3-256** (not SHA-256), per the §5 protocol commitment; `MembershipRecord` binds `supersedes_record_id` + `succession_reason` (the prose omitted them); `EpisodeLink` excludes only `quarantine_resolved_at` / `quarantine_resolution` (the prose wrongly listed `health_state` / `health_checked_at` as excluded — they ARE hashed). Corrected the §21 Form-B attribution (the Ignis reference implementation uses SHA3-256 + declared field order, not SHA-256 + key-sorting). **The canonical hash form is unchanged — prose-only; every v3.2.1 implementation remains conformant.** |
 
 ## 19. Branch/Fork/Merge Taxonomy
