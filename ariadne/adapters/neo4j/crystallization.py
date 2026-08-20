@@ -317,10 +317,18 @@ async def archive_episode(
     segment_content_hashes: list[str],
     spine_signal_hashes: list[str],
     predecessor_hash: str,
+    redis_client=None,
 ) -> None:
     """
     Archives an episode. If ARIADNE_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE=true
     and the episode is not yet crystallized, auto-crystallizes before archiving.
+
+    `redis_client` is optional and additive. When supplied, the implicit
+    pre-archive crystallization runs through the coordinated write path and
+    emits its own CRYSTALLIZATION ledger entry — a crystallization genuinely
+    happened, so the ledger should say so rather than leaving it implied by an
+    archive entry. When omitted, behaviour is exactly as before: the
+    crystallization happens unledgered.
     """
     if not ARIADNE_ENABLED:
         return
@@ -332,18 +340,12 @@ async def archive_episode(
             logger.info(
                 f"Ariadne: Auto-crystallizing episode {episode_id} before archive"
             )
-            locked = await acquire_crystallization_lock(driver, episode_id)
-            if not locked:
-                raise AriadneGovernanceError(
-                    f"Cannot archive episode {episode_id}: failed to acquire "
-                    f"crystallization lock for implicit pre-archive crystallization."
-                )
-            try:
+            async def _build_delta():
                 sealed_chain_root = compute_spine_hash_for_episode(
                     segment_content_hashes, spine_signal_hashes
                 )
                 chain_position = await get_next_valid_chain_position(driver, episode_id)
-                delta = build_crystallization_delta(
+                return build_crystallization_delta(
                     episode_id=UUID(episode_id),
                     predecessor_hash=predecessor_hash,
                     sealed_chain_root=sealed_chain_root,
@@ -351,11 +353,34 @@ async def archive_episode(
                     chain_position=chain_position,
                     version_vector=version_vector,
                 )
-                await write_crystallization_delta(driver, delta)
-                await release_crystallization_lock(driver, episode_id, success=True)
-            except Exception:
-                await release_crystallization_lock(driver, episode_id, success=False)
-                raise
+
+            if redis_client is not None:
+                # Ledgered path: the implicit crystallization gets its own
+                # CRYSTALLIZATION entry, and the lock sequence is owned by the
+                # coordinated helper rather than duplicated here.
+                from ariadne.adapters.neo4j.wil import execute_crystallization
+
+                intent_id = await execute_crystallization(
+                    redis_client, driver, episode_id, _build_delta
+                )
+                if not intent_id:
+                    raise AriadneGovernanceError(
+                        f"Cannot archive episode {episode_id}: failed to acquire "
+                        f"crystallization lock for implicit pre-archive crystallization."
+                    )
+            else:
+                locked = await acquire_crystallization_lock(driver, episode_id)
+                if not locked:
+                    raise AriadneGovernanceError(
+                        f"Cannot archive episode {episode_id}: failed to acquire "
+                        f"crystallization lock for implicit pre-archive crystallization."
+                    )
+                try:
+                    await write_crystallization_delta(driver, await _build_delta())
+                    await release_crystallization_lock(driver, episode_id, success=True)
+                except Exception:
+                    await release_crystallization_lock(driver, episode_id, success=False)
+                    raise
         else:
             raise AriadneGovernanceError(
                 f"Archive rejected: Episode {episode_id} is not crystallized and "
