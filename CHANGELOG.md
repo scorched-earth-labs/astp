@@ -9,6 +9,17 @@ The next change-set queues here.
 ### Clarified (errata — PATCH)
 - **Segment parentage vs. proof-chain parentage.** New §3.4.1 states explicitly that a Segment's `parent_node_id` is its **`EpisodeNode`** (an upward anchor), that segments order by `sequence_index` with no segment→segment edge, and that the canonical materialization is an ordered `(Episode)-[:CONTAINS {sequence_index}]->(Segment)` fan-out (derive next/prev at read time, don't persist a chain). A reciprocal note at §16.5.3 distinguishes this from the proof-chain rule `B.parent_node_id == A.node_id`, which links whole nodes causally (e.g. episode→episode). **No canonical-form change** — this clarifies existing semantics (G-2 reparenting prohibition; §5.2 leaf-hash preimage). Surfaced by a reference-implementation question ([ariadne-samples #1](https://github.com/scorched-earth-labs/ariadne-samples/issues/1)): an adapter graph showed a segment→segment containment chain instead of the canonical episode→segment fan-out.
 
+## [4.1.0] — 2026-08-20
+
+**MINOR.** SPEC §4.7 `AttachmentNode` — external content injected into an Episode's context, recorded so the injection is verifiable after the fact.
+
+- Narrow by design: episode, content hash, media type, locator, who and when.
+- **Kind is a property, not a node type.** A document, an image and an audio file are one node distinguished by `media_type`. Separate node types per artifact kind would contradict §1 ("agnostic to node type") and force a protocol revision for every new format.
+- `content_hash` is over the content **as received**, never an extraction — hashing text pulled from a PDF proves the extraction unchanged while leaving the PDF unverified.
+- `ATTACHMENT_COMMIT` registered (Tier 1), with writer and coordinated write.
+
+**Additive** — no existing node, operation or conformance requirement changes. `DocumentNode` remains as legacy in the reference implementation; its docstring claimed protocol status the specification never conferred, and its `drive_url` / `content_text` / `char_count` fields are precisely why that claim was untrue.
+
 ## [4.0.0] — 2026-08-20
 
 **MAJOR.** Ledgering obligations (SPEC §12.4.2), deferred since 3.4.0. Requires a ratifying **Episode of Record**.

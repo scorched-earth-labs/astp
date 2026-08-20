@@ -16,6 +16,7 @@ from uuid import UUID
 
 from ariadne.core.schema import (
     AriadneGovernanceError,
+    AttachmentNode,
     CodicilNode,
     DocumentNode,
     EpisodeNode,
@@ -555,6 +556,50 @@ async def create_closure_record_node(driver, closure: EpisodeClosureRecord) -> N
             "episode_id": str(closure.episode_id),
             "closure_id": str(closure.closure_id),
             "sealed_at": closure.sealed_at.isoformat(),
+        })
+
+
+async def create_attachment_node(driver, attachment: AttachmentNode) -> None:
+    """Persist an attachment — external content injected into an Episode (SPEC §4.7).
+
+    G-1 is NOT enforced. Attaching is not a spine write: an AttachmentNode
+    records that content was injected into an Episode's context, and does not
+    extend the segment chain or alter the Merkle spine. Guarding it as though
+    it were content would forbid attaching to a closed episode for no integrity
+    reason, since nothing about the sealed record changes.
+    """
+    if not _ariadne_guard():
+        return
+    params = {
+        "attachment_id": str(attachment.attachment_id),
+        "episode_id": str(attachment.episode_id),
+        "content_hash": attachment.content_hash,
+        "media_type": attachment.media_type,
+        "content_ref": attachment.content_ref,
+        "attached_by": attachment.attached_by,
+        "attached_at": attachment.attached_at.isoformat(),
+        "schema_version": attachment.schema_version,
+    }
+    async with driver.session() as session:
+        await session.run("""
+            MERGE (a:AriadneAttachment {attachment_id: $attachment_id})
+            ON CREATE SET
+              a.episode_id     = $episode_id,
+              a.content_hash   = $content_hash,
+              a.media_type     = $media_type,
+              a.content_ref    = $content_ref,
+              a.attached_by    = $attached_by,
+              a.attached_at    = $attached_at,
+              a.schema_version = $schema_version
+        """, params)
+        await session.run("""
+            MATCH (e:AriadneEpisode {episode_id: $episode_id})
+            MATCH (a:AriadneAttachment {attachment_id: $attachment_id})
+            MERGE (a)-[:ATTACHED_TO {attached_at: $attached_at}]->(e)
+        """, {
+            "episode_id": str(attachment.episode_id),
+            "attachment_id": str(attachment.attachment_id),
+            "attached_at": attachment.attached_at.isoformat(),
         })
 
 
