@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from ariadne.core.schema import (
+    AttachmentNode,
     CodicilNode,
     EpisodeClosureRecord,
     SegmentNode,
@@ -153,3 +154,37 @@ class TestUpdateEpisodeStatus:
 
         for field in ("sealed_at", "archived_at", "spine_hash"):
             assert field in _UPDATABLE_EPISODE_FIELDS
+
+
+class TestAttachmentWriterParity:
+    BODY = _writer_body("create_attachment_node", "create_codicil_node")
+
+    @pytest.mark.parametrize("field", sorted(AttachmentNode.model_fields))
+    def test_field_is_bound_as_a_parameter(self, field):
+        assert field in _persisted_params(self.BODY), (
+            f"AttachmentNode.{field} is declared but create_attachment_node "
+            "never binds it"
+        )
+
+    def test_every_field_is_set_in_cypher(self):
+        expected = set(AttachmentNode.model_fields) - {"attachment_id"}  # MERGE key
+        missing = sorted(expected - _cypher_assignments(self.BODY))
+        assert missing == [], f"declared but never SET: {missing}"
+
+    def test_links_to_the_episode(self):
+        assert "ATTACHED_TO" in self.BODY
+
+    def test_g1_is_not_enforced(self):
+        """Attaching is not a spine write — see the writer's docstring."""
+        assert "enforce_G1_write_guard" not in self.BODY
+
+    def test_carries_no_vendor_or_text_specific_fields(self):
+        """The mistake AttachmentNode exists to avoid.
+
+        DocumentNode claimed protocol status while carrying drive_url (a
+        vendor) and content_text / char_count (assuming the attachment is
+        text). Those are what made the claim untrue, so their absence here is
+        the point of the node, not an oversight.
+        """
+        for leaked in ("drive_url", "content_text", "char_count", "filename"):
+            assert leaked not in AttachmentNode.model_fields

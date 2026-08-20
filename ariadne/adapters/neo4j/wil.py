@@ -271,6 +271,48 @@ async def execute_episode_create(
     return str(intent.intent_id)
 
 
+async def execute_attachment_commit(
+    redis_client,
+    neo4j_driver,
+    attachment,
+    pre_state_hash: str = "",
+    post_state_hash: str = "",
+) -> str:
+    """
+    Coordinated write for ATTACHMENT_COMMIT (SPEC §12.4, Tier 1).
+
+    Returns intent_id.
+
+    `post_state_hash` defaults to the attachment's own content_hash — the
+    meaningful commitment is to the injected content, since that is the thing
+    whose later change the record exists to detect.
+    """
+    if not ARIADNE_ENABLED:
+        return ""
+
+    from ariadne.adapters.neo4j.writer import create_attachment_node
+
+    stores = [StoreLayer.NEO4J]
+    intent = await declare_write_intent(
+        redis_client, WILOperation.ATTACHMENT_COMMIT, attachment.episode_id,
+        stores, pre_state_hash, post_state_hash or attachment.content_hash,
+    )
+
+    try:
+        await create_attachment_node(neo4j_driver, attachment)
+        await record_store_completion(
+            redis_client, str(intent.intent_id), StoreLayer.NEO4J
+        )
+        await complete_write_intent(
+            redis_client, neo4j_driver, str(intent.intent_id)
+        )
+    except Exception as e:
+        await fail_write_intent(redis_client, str(intent.intent_id), str(e))
+        raise
+
+    return str(intent.intent_id)
+
+
 async def execute_codicil_append(
     redis_client,
     neo4j_driver,

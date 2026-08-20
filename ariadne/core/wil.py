@@ -61,6 +61,7 @@ class WILOperation(str, Enum):
     EPISODE_ARCHIVE = "EPISODE_ARCHIVE"
     EPISODE_CLOSE = "EPISODE_CLOSE"                  # Episode sealed (closure)
     CODICIL_APPEND = "CODICIL_APPEND"                # Codicil added to sealed episode
+    ATTACHMENT_COMMIT = "ATTACHMENT_COMMIT"          # External content injected (S4.7)
     # Branch / Fork / Merge lifecycle (SPEC S19).
     #
     # Every BFM ledger write goes through `_write_branch_wil` in

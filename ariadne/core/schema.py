@@ -315,12 +315,56 @@ class ConsultationParticipantNode(BaseModel):
     schema_version: str = ARIADNE_SCHEMA_VERSION
 
 
+class AttachmentNode(BaseModel):
+    """
+    External content injected into an Episode's context (SPEC §4.7).
+
+    A file, an image, a transcript, a fetched page — recorded so the injection
+    is verifiable after the fact. The protocol's concern is narrow: the Episode
+    reasoned over content it does not itself contain, and the record must show
+    what that content was in a form that detects later change.
+
+    Kind is a PROPERTY, not a node type. A document, an image and an audio file
+    are this one node distinguished by `media_type`. Separate node types per
+    artifact kind would contradict §1 and force a protocol revision for every
+    new format an implementation wants to attach.
+
+    `content_hash` is over the attached content AS RECEIVED, never over an
+    extraction of it — hashing text pulled from a PDF proves the extraction
+    unchanged while leaving the PDF unverified.
+
+    Implementations may carry more (filename, byte size, source system,
+    retrieval URL); that is implementation surface and no verifier may rely on
+    it. See DocumentNode below for what happens when those fields are mistaken
+    for protocol surface.
+    """
+    attachment_id: UUID = Field(default_factory=uuid4)
+    episode_id: UUID
+    content_hash: str  # SHA3-256 of the attached content, as received
+    media_type: Optional[str] = None  # IANA media type, e.g. "image/png"
+    content_ref: Optional[str] = None  # implementation-defined locator
+    attached_by: str = ""  # agent_id or user_id
+    attached_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    schema_version: str = ARIADNE_SCHEMA_VERSION
+
+
 class DocumentNode(BaseModel):
     """
-    First-class document attachment in Ariadne.
-    Provides verifiable integrity of data injection — the hash proves
-    the document content hasn't changed since attachment.
-    Protocol-level primitive: any Ariadne implementation needs this.
+    LEGACY. Superseded by AttachmentNode (SPEC §4.7).
+
+    This docstring used to read "Protocol-level primitive: any Ariadne
+    implementation needs this." That was never true — the claim was asserted
+    here and never conferred by the specification, which did not mention this
+    node at all.
+
+    The shape shows why: `drive_url` names a vendor, and `content_text` /
+    `char_count` assume the attachment is text. Neither belongs in a protocol
+    node. What the protocol actually needs from an attachment is narrower —
+    episode, content hash, who attached it, when — and that is AttachmentNode.
+
+    Retained because implementations have live data and writers behind it.
+    New code should use AttachmentNode; the surplus fields belong on an
+    implementation-side record.
     """
     document_id: UUID = Field(default_factory=uuid4)
     episode_id: UUID
