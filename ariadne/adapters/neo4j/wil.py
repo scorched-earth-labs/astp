@@ -319,6 +319,138 @@ async def execute_codicil_append(
     return str(intent.intent_id)
 
 
+async def execute_episode_archive(
+    redis_client,
+    neo4j_driver,
+    episode_id,
+    archiving_agent,
+    version_vector,
+    segment_content_hashes,
+    spine_signal_hashes,
+    predecessor_hash,
+    pre_state_hash: str = "",
+    post_state_hash: str = "",
+) -> str:
+    """
+    Coordinated write for EPISODE_ARCHIVE (SPEC S12.4, Tier 1).
+
+    Returns intent_id.
+
+    Delegates to `archive_episode`, passing the Redis client through so the
+    implicit pre-archive crystallization emits its own CRYSTALLIZATION entry.
+    Archiving is therefore a compound operation in the ledger — one
+    CRYSTALLIZATION entry nested inside an open EPISODE_ARCHIVE entry — and
+    that nesting is accurate rather than incidental: the archive genuinely was
+    in progress while the crystallization completed. Collapsing both into a
+    single entry would lose which of the two failed if one did.
+    """
+    if not ARIADNE_ENABLED:
+        return ""
+
+    from ariadne.adapters.neo4j.crystallization import archive_episode
+
+    stores = [StoreLayer.NEO4J]
+    intent = await declare_write_intent(
+        redis_client, WILOperation.EPISODE_ARCHIVE, episode_id,
+        stores, pre_state_hash, post_state_hash,
+    )
+
+    try:
+        await archive_episode(
+            neo4j_driver,
+            str(episode_id),
+            archiving_agent,
+            version_vector,
+            segment_content_hashes,
+            spine_signal_hashes,
+            predecessor_hash,
+            redis_client=redis_client,
+        )
+        await record_store_completion(
+            redis_client, str(intent.intent_id), StoreLayer.NEO4J
+        )
+        await complete_write_intent(
+            redis_client, neo4j_driver, str(intent.intent_id)
+        )
+    except Exception as e:
+        await fail_write_intent(redis_client, str(intent.intent_id), str(e))
+        raise
+
+    return str(intent.intent_id)
+
+
+async def execute_crystallization(
+    redis_client,
+    neo4j_driver,
+    episode_id,
+    build_delta,
+    pre_state_hash: str = "",
+    post_state_hash: str = "",
+) -> str:
+    """
+    Coordinated write for CRYSTALLIZATION (SPEC S12.4, Tier 1).
+
+    Returns intent_id, or "" if the crystallization lock could not be acquired.
+
+    `build_delta` is an async callable invoked AFTER the lock is held, because
+    the delta's chain position is only stable once the episode is pinned in
+    CRYSTALLIZATION_PENDING. Taking a prebuilt delta would invite a caller to
+    compute the position against an episode another writer is still extending.
+
+    The intent spans the whole lock -> delta -> release sequence rather than
+    just the delta write. That sequence is the atomic unit: an interruption
+    partway through leaves the episode stuck in CRYSTALLIZATION_PENDING, and an
+    incomplete entry beside a pinned episode is precisely the signature a
+    recovery needs. Ledgering only the delta write would leave the stuck state
+    unexplained.
+    """
+    if not ARIADNE_ENABLED:
+        return ""
+
+    from ariadne.adapters.neo4j.crystallization import (
+        acquire_crystallization_lock,
+        release_crystallization_lock,
+        write_crystallization_delta,
+    )
+
+    stores = [StoreLayer.NEO4J]
+    intent = await declare_write_intent(
+        redis_client, WILOperation.CRYSTALLIZATION, episode_id,
+        stores, pre_state_hash, post_state_hash,
+    )
+
+    locked = await acquire_crystallization_lock(neo4j_driver, str(episode_id))
+    if not locked:
+        # Not a failure of the write — the episode was not in a crystallizable
+        # state (wrong status, or unresolved HITL gates). Nothing was written,
+        # so the intent is failed rather than left dangling as a false
+        # recovery candidate.
+        await fail_write_intent(
+            redis_client, str(intent.intent_id),
+            "crystallization lock not acquired",
+        )
+        return ""
+
+    try:
+        delta = await build_delta()
+        await write_crystallization_delta(neo4j_driver, delta)
+        await release_crystallization_lock(neo4j_driver, str(episode_id), success=True)
+        await record_store_completion(
+            redis_client, str(intent.intent_id), StoreLayer.NEO4J
+        )
+        await complete_write_intent(
+            redis_client, neo4j_driver, str(intent.intent_id)
+        )
+    except Exception as e:
+        # Release BEFORE failing the intent: leaving the episode pinned in
+        # CRYSTALLIZATION_PENDING would block every subsequent write to it.
+        await release_crystallization_lock(neo4j_driver, str(episode_id), success=False)
+        await fail_write_intent(redis_client, str(intent.intent_id), str(e))
+        raise
+
+    return str(intent.intent_id)
+
+
 async def execute_episode_close(
     redis_client,
     neo4j_driver,

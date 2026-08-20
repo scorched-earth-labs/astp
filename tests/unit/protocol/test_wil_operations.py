@@ -125,6 +125,61 @@ class TestWILOperationVocabulary:
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         assert "WILOperation.CODICIL_APPEND" in source
 
+    def test_crystallization_ledgers_the_whole_lock_sequence(self):
+        """The intent must span acquire -> delta -> release, not just the write.
+
+        An interruption partway leaves the episode pinned in
+        CRYSTALLIZATION_PENDING; an incomplete entry beside a pinned episode is
+        the signature a recovery needs. Ledgering only the delta write would
+        leave the stuck state unexplained.
+        """
+        from ariadne.adapters.neo4j import wil as wil_adapter
+
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        body = source[source.index("async def execute_crystallization"):
+                      source.index("async def execute_episode_close")]
+        assert "acquire_crystallization_lock" in body
+        assert "write_crystallization_delta" in body
+        assert "release_crystallization_lock" in body
+        # Compare CALL sites, not first occurrence — the names also appear in
+        # the function's import block, which sits above everything.
+        assert (body.index("await declare_write_intent(")
+                < body.index("await acquire_crystallization_lock("))
+
+    def test_crystallization_releases_the_lock_before_failing(self):
+        """Order matters: a lock left held blocks every later write."""
+        from ariadne.adapters.neo4j import wil as wil_adapter
+
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        body = source[source.index("async def execute_crystallization"):
+                      source.index("async def execute_episode_close")]
+        handler = body[body.index("except Exception as e:"):]
+        assert (handler.index("await release_crystallization_lock(")
+                < handler.index("await fail_write_intent("))
+
+    def test_failed_lock_fails_the_intent(self):
+        """A lock that was never acquired wrote nothing, so the entry must not
+        be left dangling as a false recovery candidate."""
+        from ariadne.adapters.neo4j import wil as wil_adapter
+
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        body = source[source.index("async def execute_crystallization"):
+                      source.index("async def execute_episode_close")]
+        assert "if not locked:" in body
+        after = body[body.index("if not locked:"):]
+        assert "fail_write_intent" in after[:600]
+
+    def test_archive_ledgers_its_implicit_crystallization(self):
+        """Archiving may auto-crystallize; when it does, that is a real
+        crystallization and gets its own entry rather than being implied."""
+        from ariadne.adapters.neo4j import wil as wil_adapter
+
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        body = source[source.index("async def execute_episode_archive"):
+                      source.index("async def execute_crystallization")]
+        assert "archive_episode" in body
+        assert "redis_client=redis_client" in body
+
     def test_episode_close_is_emitted_by_the_library(self):
         from ariadne.adapters.neo4j import wil as wil_adapter
 
@@ -220,6 +275,35 @@ class TestSpecRegisterAgreement:
         register = self._spec_register()
         for name in BFM_OPERATIONS:
             assert register[name] == 2, f"{name} registered Tier {register[name]}"
+
+    def test_every_registered_operation_is_emitted(self):
+        """The 4.0.0 readiness gate.
+
+        §12.4.2 defers "which operations MUST be ledgered" to 4.0.0 because
+        stating it while the reference implementation ledgered almost none of
+        them would publish a requirement this library fails. That is no longer
+        true: every registered operation now has a write path that emits it.
+
+        If this fails, either a new operation was registered without a writer —
+        which recreates exactly the gap §12.4.2 exists to acknowledge — or a
+        writer stopped emitting one.
+        """
+        import re as _re
+        from pathlib import Path as _Path
+
+        root = _Path(__file__).resolve().parents[3] / "ariadne"
+        source = "\n".join(
+            p.read_text(encoding="utf-8") for p in root.rglob("*.py")
+        )
+        emitted = set(_re.findall(r"WILOperation\.([A-Z_]+)", source))
+        registered = {m.value for m in WILOperation}
+
+        unemitted = sorted(registered - emitted)
+        assert unemitted == [], (
+            f"registered but never emitted by this library: {unemitted}. "
+            "Either wire a write path or reconsider whether the operation "
+            "belongs in the register."
+        )
 
     def test_close_and_seal_are_distinct_operations(self):
         """Closing produces a closure record and CLOSED; sealing produces a
