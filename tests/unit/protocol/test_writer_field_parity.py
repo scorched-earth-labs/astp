@@ -17,7 +17,12 @@ from pathlib import Path
 
 import pytest
 
-from ariadne.core.schema import CodicilNode, SegmentNode, SignalNode
+from ariadne.core.schema import (
+    CodicilNode,
+    EpisodeClosureRecord,
+    SegmentNode,
+    SignalNode,
+)
 
 WRITER = Path(__file__).resolve().parents[3] / "ariadne" / "adapters" / "neo4j" / "writer.py"
 SOURCE = WRITER.read_text(encoding="utf-8")
@@ -102,3 +107,49 @@ class TestCodicilWriterParity:
 
     def test_links_the_codicil_to_its_episode(self):
         assert "HAS_CODICIL" in self.BODY
+
+
+class TestClosureRecordWriterParity:
+    """create_closure_record_node had no implementation until now."""
+
+    BODY = _writer_body("create_closure_record_node", "create_codicil_node")
+
+    @pytest.mark.parametrize("field", sorted(EpisodeClosureRecord.model_fields))
+    def test_field_is_bound_as_a_parameter(self, field):
+        assert field in _persisted_params(self.BODY), (
+            f"EpisodeClosureRecord.{field} is declared on the model but "
+            "create_closure_record_node never binds it"
+        )
+
+    def test_every_field_is_set_in_cypher(self):
+        expected = set(EpisodeClosureRecord.model_fields) - {"closure_id"}  # MERGE key
+        missing = sorted(expected - _cypher_assignments(self.BODY))
+        assert missing == [], f"declared but never SET on the node: {missing}"
+
+    def test_links_closure_to_episode(self):
+        """Edge direction is closure -> episode, matching the live graph."""
+        assert "SEALS_EPISODE" in self.BODY
+        assert "(cl)-[:SEALS_EPISODE" in self.BODY
+
+
+class TestUpdateEpisodeStatus:
+    """Property names cannot be parameterised in Cypher, so the field set is
+    an allowlist rather than a passthrough."""
+
+    def test_rejects_unknown_fields(self):
+        import asyncio
+
+        from ariadne.core.schema import AriadneGovernanceError, EpisodeStatus
+        from ariadne.adapters.neo4j.writer import update_episode_status
+
+        with pytest.raises(AriadneGovernanceError):
+            asyncio.run(update_episode_status(
+                object(), "ep-1", EpisodeStatus.CLOSED,
+                **{"sealed_at) SET e.pwned = true //": "x"},
+            ))
+
+    def test_allowlist_covers_the_lifecycle_fields(self):
+        from ariadne.adapters.neo4j.writer import _UPDATABLE_EPISODE_FIELDS
+
+        for field in ("sealed_at", "archived_at", "spine_hash"):
+            assert field in _UPDATABLE_EPISODE_FIELDS

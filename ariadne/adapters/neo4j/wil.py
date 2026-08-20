@@ -319,6 +319,65 @@ async def execute_codicil_append(
     return str(intent.intent_id)
 
 
+async def execute_episode_close(
+    redis_client,
+    neo4j_driver,
+    closure,
+    pre_state_hash: str = "",
+    post_state_hash: str = "",
+) -> str:
+    """
+    Coordinated write for EPISODE_CLOSE (SPEC S12.4, Tier 1).
+
+    Returns intent_id.
+
+    Closing writes the closure record AND transitions the episode to CLOSED.
+    Both land inside one declared intent because they are one logical
+    operation: a closure record without the transition describes a close that
+    did not happen, and a transition without the record loses why it happened.
+    An interruption between them is exactly what `completed_at=null` is for.
+
+    Distinct from EPISODE_SEAL. Closing produces an EpisodeClosureRecord and
+    the CLOSED state; sealing produces a SealNode, the spine hash and the
+    SEALED state. Both are registered operations and they are not
+    interchangeable.
+    """
+    if not ARIADNE_ENABLED:
+        return ""
+
+    from ariadne.core.schema import EpisodeStatus
+    from ariadne.adapters.neo4j.writer import (
+        create_closure_record_node,
+        update_episode_status,
+    )
+
+    stores = [StoreLayer.NEO4J]
+    intent = await declare_write_intent(
+        redis_client, WILOperation.EPISODE_CLOSE, closure.episode_id,
+        stores, pre_state_hash, post_state_hash,
+    )
+
+    try:
+        await create_closure_record_node(neo4j_driver, closure)
+        await update_episode_status(
+            neo4j_driver,
+            closure.episode_id,
+            EpisodeStatus.CLOSED,
+            sealed_at=closure.sealed_at.isoformat(),
+        )
+        await record_store_completion(
+            redis_client, str(intent.intent_id), StoreLayer.NEO4J
+        )
+        await complete_write_intent(
+            redis_client, neo4j_driver, str(intent.intent_id)
+        )
+    except Exception as e:
+        await fail_write_intent(redis_client, str(intent.intent_id), str(e))
+        raise
+
+    return str(intent.intent_id)
+
+
 async def execute_signal_commit(
     redis_client,
     neo4j_driver,

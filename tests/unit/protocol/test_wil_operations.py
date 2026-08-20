@@ -125,6 +125,24 @@ class TestWILOperationVocabulary:
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         assert "WILOperation.CODICIL_APPEND" in source
 
+    def test_episode_close_is_emitted_by_the_library(self):
+        from ariadne.adapters.neo4j import wil as wil_adapter
+
+        assert hasattr(wil_adapter, "execute_episode_close")
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        assert "WILOperation.EPISODE_CLOSE" in source
+
+    def test_episode_close_writes_record_and_transition_together(self):
+        """Both halves inside one intent — see the docstring on the function."""
+        from ariadne.adapters.neo4j import wil as wil_adapter
+
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        body = source[source.index("async def execute_episode_close"):
+                      source.index("async def execute_signal_commit")]
+        assert "create_closure_record_node" in body
+        assert "update_episode_status" in body
+        assert "MERGE (cl:AriadneClosureRecord" not in body
+
     def test_codicil_append_delegates_to_the_writer(self):
         from ariadne.adapters.neo4j import wil as wil_adapter
 
@@ -202,6 +220,14 @@ class TestSpecRegisterAgreement:
         register = self._spec_register()
         for name in BFM_OPERATIONS:
             assert register[name] == 2, f"{name} registered Tier {register[name]}"
+
+    def test_close_and_seal_are_distinct_operations(self):
+        """Closing produces a closure record and CLOSED; sealing produces a
+        SealNode, the spine hash and SEALED. Registering both means neither may
+        stand in for the other."""
+        register = self._spec_register()
+        assert register["EPISODE_CLOSE"] == 1
+        assert register["EPISODE_SEAL"] == 1
 
     def test_coordinated_writes_are_tier_1(self):
         """Everything this library declares an intent for must be Tier 1.
