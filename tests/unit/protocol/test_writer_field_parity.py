@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from ariadne.core.schema import (
+    AmendmentLink,
     AttachmentNode,
     CodicilNode,
     EpisodeClosureRecord,
@@ -188,3 +189,106 @@ class TestAttachmentWriterParity:
         """
         for leaked in ("drive_url", "content_text", "char_count", "filename"):
             assert leaked not in AttachmentNode.model_fields
+
+
+class TestAmendmentLinkWriterParity:
+    """The last abstract adapter method that had no implementation."""
+
+    BODY = _writer_body("create_amendment_link_node", "create_attachment_node")
+
+    @pytest.mark.parametrize("field", sorted(AmendmentLink.model_fields))
+    def test_field_is_bound_as_a_parameter(self, field):
+        assert field in _persisted_params(self.BODY), (
+            f"AmendmentLink.{field} is declared but create_amendment_link_node "
+            "never binds it"
+        )
+
+    def test_every_field_is_set_in_cypher(self):
+        expected = set(AmendmentLink.model_fields) - {"amendment_id"}  # MERGE key
+        missing = sorted(expected - _cypher_assignments(self.BODY))
+        assert missing == [], f"declared but never SET: {missing}"
+
+    def test_writes_both_directions(self):
+        """AMENDS to the source, PRODUCES to the new episode.
+
+        The link is not symmetric: following provenance backwards wants the
+        source, asking "what came of this" wants the amendment. One edge would
+        make the other direction a scan.
+        """
+        assert "AMENDS" in self.BODY
+        assert "PRODUCES" in self.BODY
+
+    def test_g1_is_not_enforced(self):
+        """The source is sealed by definition — that is the precondition for
+        amending it, not an obstacle. Nothing about the sealed record changes."""
+        assert "enforce_G1_write_guard" not in self.BODY
+
+
+class TestAdapterSurfaceComplete:
+    """Every abstract adapter method should have a Neo4j implementation.
+
+    Four were missing when this work started — create_codicil,
+    create_closure_record, update_episode_status and create_amendment_link —
+    and each one is why some consumer hand-wrote Cypher instead of calling the
+    adapter. A declared-but-unimplemented method is worse than an absent one:
+    it looks like a supported path.
+    """
+
+    #: Implementations whose names diverge from the abstract method.
+    ALIASES = {
+        "initialize_schema": "initialize_ariadne_schema",
+        "create_document": "write_document_node_sync",  # sync, by design
+    }
+
+    #: Declared for a concept the protocol no longer defines.
+    #:
+    #: v3.5.0 retired consultation and collaboration from the protocol as SEL
+    #: interaction patterns, removing their WIL operations and SegmentType
+    #: members. It did NOT remove these three abstract methods, nor the
+    #: ConsultationNode / ExchangeEntry / ConsultationParticipantNode types they
+    #: reference — which appear nowhere in SPEC.md either. That removal was
+    #: incomplete.
+    #:
+    #: Finishing it is a cross-repo migration: 26 references in ignis-os,
+    #: including bdi_bridge importing ExchangeEntry from the protocol schema, so
+    #: the types must move downstream before they can leave here. Recorded
+    #: rather than fixed in passing, and pinned so the gap cannot grow.
+    KNOWN_UNIMPLEMENTED = {
+        "create_consultation",
+        "create_exchange_entry",
+        "create_consultation_participant",
+    }
+
+    def _unimplemented(self) -> list[str]:
+        import re as _re
+
+        root = Path(__file__).resolve().parents[3] / "ariadne"
+        base = (root / "adapters" / "base.py").read_text(encoding="utf-8")
+        abstract = _re.findall(r"@abstractmethod\s*\n\s*async def (\w+)\(", base)
+
+        impl = ""
+        for path in (root / "adapters" / "neo4j").glob("*.py"):
+            impl += path.read_text(encoding="utf-8")
+        defined = set(_re.findall(r"^(?:async )?def (\w+)\(", impl, _re.M))
+
+        missing = []
+        for name in abstract:
+            if self.ALIASES.get(name) in defined:
+                continue
+            if any(name in d or d in name for d in defined):
+                continue
+            missing.append(name)
+        return sorted(missing)
+
+    def test_no_unexpected_abstract_method_lacks_an_implementation(self):
+        unexpected = sorted(set(self._unimplemented()) - self.KNOWN_UNIMPLEMENTED)
+        assert unexpected == [], (
+            f"abstract adapter methods with no Neo4j implementation: {unexpected}"
+        )
+
+    def test_the_known_gap_has_not_grown(self):
+        """And shrinks the list when one is closed, rather than going stale."""
+        stale = sorted(self.KNOWN_UNIMPLEMENTED - set(self._unimplemented()))
+        assert stale == [], (
+            f"these are implemented now — remove them from KNOWN_UNIMPLEMENTED: {stale}"
+        )
