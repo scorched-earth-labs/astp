@@ -9,6 +9,19 @@ The next change-set queues here.
 ### Clarified (errata — PATCH)
 - **Segment parentage vs. proof-chain parentage.** New §3.4.1 states explicitly that a Segment's `parent_node_id` is its **`EpisodeNode`** (an upward anchor), that segments order by `sequence_index` with no segment→segment edge, and that the canonical materialization is an ordered `(Episode)-[:CONTAINS {sequence_index}]->(Segment)` fan-out (derive next/prev at read time, don't persist a chain). A reciprocal note at §16.5.3 distinguishes this from the proof-chain rule `B.parent_node_id == A.node_id`, which links whole nodes causally (e.g. episode→episode). **No canonical-form change** — this clarifies existing semantics (G-2 reparenting prohibition; §5.2 leaf-hash preimage). Surfaced by a reference-implementation question ([ariadne-samples #1](https://github.com/scorched-earth-labs/ariadne-samples/issues/1)): an adapter graph showed a segment→segment containment chain instead of the canonical episode→segment fan-out.
 
+## [4.2.0] — 2026-08-21
+
+**MINOR.** Restores `CONSULTATION_COMMIT` to the §12.4.1 register (Tier 1) and corrects a contradiction.
+
+v3.5.0 removed the operation on the stated ground that "the protocol does not define" consultation. **It does, and always has:** G-8 and G-9 have governed consultation since v1, and `compute_consultation_node_hash` / `compute_exchange_chain_hash` are protocol hash functions. SPEC.md asserted both positions at once until now.
+
+- One operation covers the consultation node, its ordered exchange entries and the consulted agent's participation record — they commit together, so they are one operation rather than three.
+- **Collaboration gets no separate operation.** It is a `ConsultationType`, so a collaborative session commits as a consultation and the type distinguishes it; a second register name would encode in the ledger what the node already records.
+- §12.4 clarifies that an operation's **tier turns on whether an interruption leaves recoverable work, not on store count** — a multi-record write to one store is Tier 1 when a partial write leaves a chain stopping mid-sequence. The register already assigned tiers this way; the definitions had said "more than one store".
+- Reference implementation gains `create_consultation_node`, `create_exchange_entry_node`, `create_consultation_participant_node` and `execute_consultation_commit`. These were the last abstract adapter methods without implementations, and they were unimplemented only because of the same mistaken premise.
+
+**Additive** — no existing operation, node or conformance requirement changes.
+
 ## [4.1.1] — 2026-08-20
 
 **PATCH.** `create_amendment_link_node` — the last abstract adapter method with no Neo4j implementation.

@@ -19,6 +19,9 @@ import pytest
 
 from ariadne.core.schema import (
     AmendmentLink,
+    ConsultationNode,
+    ConsultationParticipantNode,
+    ExchangeEntry,
     AttachmentNode,
     CodicilNode,
     EpisodeClosureRecord,
@@ -240,24 +243,14 @@ class TestAdapterSurfaceComplete:
         "create_document": "write_document_node_sync",  # sync, by design
     }
 
-    #: Declared for a concept the protocol no longer defines.
+    #: Abstract methods with no Neo4j implementation.
     #:
-    #: v3.5.0 retired consultation and collaboration from the protocol as SEL
-    #: interaction patterns, removing their WIL operations and SegmentType
-    #: members. It did NOT remove these three abstract methods, nor the
-    #: ConsultationNode / ExchangeEntry / ConsultationParticipantNode types they
-    #: reference — which appear nowhere in SPEC.md either. That removal was
-    #: incomplete.
-    #:
-    #: Finishing it is a cross-repo migration: 26 references in ignis-os,
-    #: including bdi_bridge importing ExchangeEntry from the protocol schema, so
-    #: the types must move downstream before they can leave here. Recorded
-    #: rather than fixed in passing, and pinned so the gap cannot grow.
-    KNOWN_UNIMPLEMENTED = {
-        "create_consultation",
-        "create_exchange_entry",
-        "create_consultation_participant",
-    }
+    #: Empty, and it should stay that way. It briefly held the three
+    #: consultation methods, on the belief that v3.5.0 had retired consultation
+    #: from the protocol. It had not: G-8 and G-9 have governed consultation
+    #: since v1, so the retirement premise was wrong and the methods were
+    #: implemented rather than removed (4.2.0).
+    KNOWN_UNIMPLEMENTED: set[str] = set()
 
     def _unimplemented(self) -> list[str]:
         import re as _re
@@ -292,3 +285,38 @@ class TestAdapterSurfaceComplete:
         assert stale == [], (
             f"these are implemented now — remove them from KNOWN_UNIMPLEMENTED: {stale}"
         )
+
+
+class TestConsultationWriterParity:
+    """Consultation is protocol surface — G-8 and G-9 have governed it since v1."""
+
+    CONSULTATION = _writer_body("create_consultation_node", "create_exchange_entry_node")
+    ENTRY = _writer_body("create_exchange_entry_node", "create_consultation_participant_node")
+    PARTICIPANT = _writer_body("create_consultation_participant_node", "create_amendment_link_node")
+
+    @pytest.mark.parametrize("field", sorted(ConsultationNode.model_fields))
+    def test_consultation_field_is_bound(self, field):
+        assert field in _persisted_params(self.CONSULTATION)
+
+    @pytest.mark.parametrize("field", sorted(ExchangeEntry.model_fields))
+    def test_entry_field_is_bound(self, field):
+        assert field in _persisted_params(self.ENTRY)
+
+    @pytest.mark.parametrize("field", sorted(ConsultationParticipantNode.model_fields))
+    def test_participant_field_is_bound(self, field):
+        assert field in _persisted_params(self.PARTICIPANT)
+
+    def test_consultation_lives_in_the_initiating_episode(self):
+        """D2 — the consultation is a branch on the initiator's episode."""
+        assert "INITIATED" in self.CONSULTATION
+
+    def test_entries_hang_off_the_consultation(self):
+        assert "CONTAINS_ENTRY" in self.ENTRY
+
+    def test_participant_hangs_off_the_consulted_episode(self):
+        """D3 — the consulted agent records participation, not the exchange."""
+        assert "PARTICIPATED_IN" in self.PARTICIPANT
+
+    def test_the_chain_field_is_written(self):
+        """previous_hash is what G-8 governs; without it there is no chain."""
+        assert "previous_hash" in _persisted_params(self.ENTRY)

@@ -1,7 +1,7 @@
 # ASTP — AI State Tree Protocol Specification
 
-**Version:** 4.1.1
-**Status:** Stable. The full normative protocol is defined in this document's body. (v4.1.0 adds **§4.7 AttachmentNode** — external content injected into an Episode, recorded so the injection is verifiable — and registers `ATTACHMENT_COMMIT`. Additive; kind is a `media_type` property rather than a node type per §1. (**v4.0.0 is a MAJOR release.** §12.4.2 now states the ledgering obligations deferred since 3.4.0: **G-39** — an implementation MUST record a ledger entry for every registered operation it performs. This is conformance-breaking by construction and requires a ratifying **Episode of Record** per [`VERSIONING.md`](./VERSIONING.md). It also makes a missing entry mean something: from a conforming implementation, the operation did not occur. v3.5.1 is **errata**: §4.4.1 now states the Episode lifecycle states the protocol actually defines. The prior one-line list named four states no implementation has ever had and omitted seven that exist, including the entire closure workflow. No semantic change — the states were always these. v3.5.0 removes `CONSULTATION_COMMIT` and `COLLABORATION_COMMIT` from the §12.4.1 operation register, and the unused `SegmentType.CONSULTATION` / `COLLABORATION` members, as multi-agent interaction patterns the protocol does not define; implementations that ledger them namespace them per the §12.4.1 prefix rule. v3.4.0 added **§12.4 Ledgered Operations** — the closed register of WIL operation values and the Tier 1 / Tier 2 entry forms, with G-37 and G-38 governing the *form* of an entry whenever one is written; **which operations an implementation MUST ledger remains deferred to 4.0.0** per §12.4.2.) v3.3.0 added the departure-fork **orphan-recovery** surface at §19.3.7 — the `ForkOrphanMarker` node, per-class recovery field mutations, and the one permitted retroactive spine write — additively; no existing canonical form changes, so every v3.2.x-conformant implementation remains conformant. Detection cadence is non-normative.) The Phase D departure-fork lifecycle (v3.2.0) is at §19.3.5–19.3.7; cross-episode linking + grouping (v3.0.0) at §20; the Layer 3 Workflow & Execution DAG (v3.1.0) at §21. The v3.2.1 integration pass folded the former standalone amendments into the SPEC body — editorial only, no normative change. The historical amendment documents ([`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) → §20, [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) → §21) are retained for provenance only. Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
+**Version:** 4.2.0
+**Status:** Stable. The full normative protocol is defined in this document's body. (v4.2.0 restores `CONSULTATION_COMMIT` to the §12.4.1 register and corrects a contradiction: v3.5.0 removed it on the stated ground that the protocol does not define consultation, while **G-8 and G-9 have governed consultation since v1**. §12.4.1 and the governance section now agree, and §12.4 states that an operation's tier turns on whether an interruption leaves recoverable work, not on store count. (v4.1.0 adds **§4.7 AttachmentNode** — external content injected into an Episode, recorded so the injection is verifiable — and registers `ATTACHMENT_COMMIT`. Additive; kind is a `media_type` property rather than a node type per §1. (**v4.0.0 is a MAJOR release.** §12.4.2 now states the ledgering obligations deferred since 3.4.0: **G-39** — an implementation MUST record a ledger entry for every registered operation it performs. This is conformance-breaking by construction and requires a ratifying **Episode of Record** per [`VERSIONING.md`](./VERSIONING.md). It also makes a missing entry mean something: from a conforming implementation, the operation did not occur. v3.5.1 is **errata**: §4.4.1 now states the Episode lifecycle states the protocol actually defines. The prior one-line list named four states no implementation has ever had and omitted seven that exist, including the entire closure workflow. No semantic change — the states were always these. v3.5.0 removes `CONSULTATION_COMMIT` and `COLLABORATION_COMMIT` from the §12.4.1 operation register, and the unused `SegmentType.CONSULTATION` / `COLLABORATION` members, as multi-agent interaction patterns the protocol does not define; implementations that ledger them namespace them per the §12.4.1 prefix rule. v3.4.0 added **§12.4 Ledgered Operations** — the closed register of WIL operation values and the Tier 1 / Tier 2 entry forms, with G-37 and G-38 governing the *form* of an entry whenever one is written; **which operations an implementation MUST ledger remains deferred to 4.0.0** per §12.4.2.) v3.3.0 added the departure-fork **orphan-recovery** surface at §19.3.7 — the `ForkOrphanMarker` node, per-class recovery field mutations, and the one permitted retroactive spine write — additively; no existing canonical form changes, so every v3.2.x-conformant implementation remains conformant. Detection cadence is non-normative.) The Phase D departure-fork lifecycle (v3.2.0) is at §19.3.5–19.3.7; cross-episode linking + grouping (v3.0.0) at §20; the Layer 3 Workflow & Execution DAG (v3.1.0) at §21. The v3.2.1 integration pass folded the former standalone amendments into the SPEC body — editorial only, no normative change. The historical amendment documents ([`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) → §20, [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) → §21) are retained for provenance only. Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-06-07
 **Supersedes:** SPEC-v1.md (0.1.0-draft)
@@ -707,6 +707,15 @@ The distinction is not stylistic. A Tier 2 entry is a provenance breadcrumb; a
 Tier 1 entry is a recovery instrument. Treating a Tier 2 entry as a recovery
 candidate would replay an operation that never failed.
 
+**The tier turns on whether an interruption leaves recoverable work, not on
+store count.** Multiple stores are the common reason it does, and the usual
+case, but not the test. An operation that writes several dependent records to
+one store — a consultation and its ordered exchange chain, where a partial
+write leaves a chain that stops mid-sequence — is Tier 1, because
+`completed_at=null` says something true and useful about it. An operation that
+commits indivisibly to one store is Tier 2 however important it is, because
+there is no partial state for an incomplete entry to describe.
+
 **G-37.** An implementation that ledgers a Tier 1 operation MUST declare the
 write intent before the first store write, and MUST NOT mark completion before
 every store named in `stores_involved` has recorded completion.
@@ -736,6 +745,7 @@ and an implementation MUST NOT ledger one under the other's name.
 | `EPISODE_CLOSE` | 1 |
 | `CODICIL_APPEND` | 1 |
 | `ATTACHMENT_COMMIT` | 1 |
+| `CONSULTATION_COMMIT` | 1 |
 | `BRANCH_CREATE` | 2 |
 | `BRANCH_ABANDON` | 2 |
 | `FORK_CREATE` | 2 |
@@ -752,11 +762,23 @@ write an operation value absent from this table unless that value carries an
 implementation-specific namespace prefix, so protocol operations and extension
 operations remain distinguishable at read time without out-of-band knowledge.
 
-Multi-agent interaction patterns such as consultation and collaboration are
-deliberately absent. The protocol does not define them, so registering their
-operations here would extend the protocol's vocabulary to cover behaviour it
-does not specify. Implementations that ledger such operations namespace them
-(`sel:CONSULTATION_COMMIT`), which is what the prefix rule above is for.
+`CONSULTATION_COMMIT` covers the whole consultation write — the consultation
+node, its ordered exchange entries and the consulted agent's participation
+record. They commit together, so they are one operation rather than three.
+
+Consultation is protocol surface, governed by G-8 and G-9 since v1. A previous
+release removed this operation on the stated ground that "the protocol does not
+define" consultation, which contradicted the governance section in the same
+document; §12.4.1 and G-8/G-9 now agree.
+
+A *collaborative* consultation has no separate operation. Collaboration is a
+`ConsultationType`, so a collaborative session commits as a consultation and
+the type distinguishes it — a second operation name would encode in the
+register what the node already records.
+
+Interaction patterns the protocol genuinely does not define — an
+implementation's own routing, escalation or session semantics — are namespaced
+under the prefix rule above rather than registered here.
 
 #### 12.4.2 Ledgering Obligations
 
@@ -1149,6 +1171,7 @@ This test should be run bidirectionally (A→B and B→A).
 | 4.0.0 | 2026-08-20 | **MAJOR** — Ledgering obligations (§12.4.2), deferred since 3.4.0. New governance rule **G-39**: an implementation MUST record a ledger entry for every §12.4.1 operation it performs; performing one without an entry is a conformance violation, not a degraded mode. The obligation is scoped to operations *performed*, so an implementation owes nothing for capabilities it does not implement. Ledger writes MAY be best-effort with respect to availability, but an implementation MUST surface a gap rather than absorb it — the distinction is between one that cannot record and knows it, and one that does not record and cannot tell. **Consequence:** a missing entry from a conforming implementation now means the operation did not occur; that inference was explicitly unavailable before. It remains unavailable for records written before this version, and an implementation MUST NOT retroactively assert coverage over a period it did not have it. Tier 1 entries with `completed_at=null` past the provisional window continue to record an interrupted write — strictly more information than either a completed entry or none. **Breaking:** every 3.x-conformant implementation that performs a registered operation without ledgering it becomes non-conformant. Requires a ratifying Episode of Record. |
 | 4.1.0 | 2026-08-20 | **MINOR** — §4.7 `AttachmentNode`: external content injected into an Episode's context, recorded so the injection is verifiable after the fact. Narrow by design — episode, content hash, media type, locator, who and when. **Kind is a property, not a node type**: a document, an image and an audio file are one node distinguished by `media_type`, since separate types per artifact kind would contradict §1 and force a protocol revision per format. `content_hash` is over the content **as received**, never an extraction of it. `ATTACHMENT_COMMIT` registered (Tier 1). **Additive** — no existing node, operation or conformance requirement changes. `DocumentNode` remains in the reference implementation as legacy; its docstring claimed protocol status the specification never conferred, and its `drive_url` / `content_text` / `char_count` fields are why that claim was untrue. |
 | 4.1.1 | 2026-08-20 | **PATCH** — reference-implementation completeness: `create_amendment_link_node`, the last abstract adapter method with no Neo4j implementation. No normative change. |
+| 4.2.0 | 2026-08-21 | **MINOR** — Restores `CONSULTATION_COMMIT` to the §12.4.1 register (Tier 1) and corrects the contradiction v3.5.0 introduced: that release removed the operation on the stated ground that "the protocol does not define" consultation, while **G-8 and G-9 have governed consultation since v1** and `compute_consultation_node_hash` / `compute_exchange_chain_hash` are protocol hash functions. §12.4.1 and the governance section now agree. One operation covers the consultation node, its ordered exchange entries and the consulted agent's participation record, because they commit together. **Collaboration gets no separate operation** — it is a `ConsultationType`, so a collaborative session commits as a consultation and the type distinguishes it. §12.4 additionally clarifies that an operation's **tier turns on whether an interruption leaves recoverable work, not on store count**: a multi-record write to a single store is Tier 1 when a partial write leaves a chain that stops mid-sequence. Reference implementation gains `create_consultation_node`, `create_exchange_entry_node`, `create_consultation_participant_node` and `execute_consultation_commit` — the last abstract adapter methods without implementations, which were only ever unimplemented because of the same mistaken premise. **Additive.** |
 | 3.2.2 | 2026-07-04 | **PATCH** — prose errata. Corrected the §20 hash-preimage descriptions to match the reference implementation: `EpisodeLink.content_hash`, `MembershipRecord.content_hash`, `ConformanceDeclaration.declaration_hash` are **SHA3-256** (not SHA-256), per the §5 protocol commitment; `MembershipRecord` binds `supersedes_record_id` + `succession_reason` (the prose omitted them); `EpisodeLink` excludes only `quarantine_resolved_at` / `quarantine_resolution` (the prose wrongly listed `health_state` / `health_checked_at` as excluded — they ARE hashed). Corrected the §21 Form-B attribution (the Ignis reference implementation uses SHA3-256 + declared field order, not SHA-256 + key-sorting). **The canonical hash form is unchanged — prose-only; every v3.2.1 implementation remains conformant.** |
 
 ## 19. Branch/Fork/Merge Taxonomy
