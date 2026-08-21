@@ -9,6 +9,12 @@ The next change-set queues here.
 ### Clarified (errata — PATCH)
 - **Segment parentage vs. proof-chain parentage.** New §3.4.1 states explicitly that a Segment's `parent_node_id` is its **`EpisodeNode`** (an upward anchor), that segments order by `sequence_index` with no segment→segment edge, and that the canonical materialization is an ordered `(Episode)-[:CONTAINS {sequence_index}]->(Segment)` fan-out (derive next/prev at read time, don't persist a chain). A reciprocal note at §16.5.3 distinguishes this from the proof-chain rule `B.parent_node_id == A.node_id`, which links whole nodes causally (e.g. episode→episode). **No canonical-form change** — this clarifies existing semantics (G-2 reparenting prohibition; §5.2 leaf-hash preimage). Surfaced by a reference-implementation question ([ariadne-samples #1](https://github.com/scorched-earth-labs/ariadne-samples/issues/1)): an adapter graph showed a segment→segment containment chain instead of the canonical episode→segment fan-out.
 
+## [4.2.1] — 2026-08-21
+
+**PATCH.** `write_attachment_node_sync` — sync variant of `create_attachment_node`, for callers that are not async and cannot become so without restructuring their caller in turn. Exists for the same reason `write_document_node_sync` does, and writes the same node and edge, so the two variants are indistinguishable in the graph.
+
+Documents its own limit: a caller performing an attachment owes an `ATTACHMENT_COMMIT` entry under G-39, and this function cannot produce one because write-intent coordination is async by necessity. A sync caller must surface that its write is unledgered rather than absorb the gap (§12.4.2).
+
 ## [4.2.0] — 2026-08-21
 
 **MINOR.** Restores `CONSULTATION_COMMIT` to the §12.4.1 register (Tier 1) and corrects a contradiction.

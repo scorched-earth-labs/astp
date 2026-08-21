@@ -34,7 +34,14 @@ SOURCE = WRITER.read_text(encoding="utf-8")
 
 
 def _writer_body(fn_name: str, next_fn: str) -> str:
-    return SOURCE[SOURCE.index(f"async def {fn_name}"): SOURCE.index(f"async def {next_fn}")]
+    """Slice one writer out of the module. Handles sync and async defs alike."""
+    def _at(name: str) -> int:
+        for form in (f"async def {name}", f"def {name}"):
+            idx = SOURCE.find(form)
+            if idx != -1:
+                return idx
+        raise AssertionError(f"writer not found: {name}")
+    return SOURCE[_at(fn_name):_at(next_fn)]
 
 
 def _persisted_params(body: str) -> set[str]:
@@ -320,3 +327,30 @@ class TestConsultationWriterParity:
     def test_the_chain_field_is_written(self):
         """previous_hash is what G-8 governs; without it there is no chain."""
         assert "previous_hash" in _persisted_params(self.ENTRY)
+
+
+class TestSyncAttachmentWriter:
+    """The sync variant must write the same node as the async one."""
+
+    ASYNC_BODY = _writer_body("create_attachment_node", "create_codicil_node")
+    SYNC_BODY = _writer_body("write_attachment_node_sync", "write_document_node_sync")
+
+    @pytest.mark.parametrize("field", sorted(AttachmentNode.model_fields))
+    def test_field_is_bound(self, field):
+        assert field in _persisted_params(self.SYNC_BODY)
+
+    def test_writes_the_same_label_and_edge_as_the_async_writer(self):
+        """Two writers producing different graphs would be worse than one
+        writer nobody can call."""
+        for token in ("AriadneAttachment", "ATTACHED_TO"):
+            assert token in self.SYNC_BODY
+            assert token in self.ASYNC_BODY
+
+    def test_documents_that_it_cannot_ledger(self):
+        """G-39 obliges an ATTACHMENT_COMMIT entry, and coordination is async.
+
+        A sync caller must surface that its write is unledgered rather than
+        absorb the gap (§12.4.2), so the writer says so where a caller will
+        read it.
+        """
+        assert "G-39" in self.SYNC_BODY
