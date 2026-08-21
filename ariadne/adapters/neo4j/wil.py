@@ -271,6 +271,67 @@ async def execute_episode_create(
     return str(intent.intent_id)
 
 
+async def execute_consultation_commit(
+    redis_client,
+    neo4j_driver,
+    consultation,
+    entries=(),
+    participant=None,
+    pre_state_hash: str = "",
+    post_state_hash: str = "",
+) -> str:
+    """
+    Coordinated write for CONSULTATION_COMMIT (SPEC §12.4, Tier 2).
+
+    Returns intent_id.
+
+    Tier 2, not Tier 1: the consultation, its exchange entries and the
+    participation record all land in one authoritative store, so there is no
+    cross-store ordering to protect. A single completed entry at commit is the
+    correct form (G-38).
+
+    Entries are written in sequence order because each one's `previous_hash`
+    references the prior entry's `content_hash` — writing them out of order
+    would build the chain backwards and G-8 exists to catch exactly that.
+
+    `participant` is the consulted agent's record (D3) and is optional: a
+    consultation with no distinct consulted episode has none.
+    """
+    if not ARIADNE_ENABLED:
+        return ""
+
+    from ariadne.adapters.neo4j.writer import (
+        create_consultation_node,
+        create_consultation_participant_node,
+        create_exchange_entry_node,
+    )
+
+    stores = [StoreLayer.NEO4J]
+    intent = await declare_write_intent(
+        redis_client, WILOperation.CONSULTATION_COMMIT, consultation.episode_id,
+        stores, pre_state_hash,
+        post_state_hash or getattr(consultation, "consultation_node_hash", "") or "",
+    )
+
+    try:
+        await create_consultation_node(neo4j_driver, consultation)
+        for entry in sorted(entries, key=lambda e: e.sequence):
+            await create_exchange_entry_node(neo4j_driver, entry)
+        if participant is not None:
+            await create_consultation_participant_node(neo4j_driver, participant)
+        await record_store_completion(
+            redis_client, str(intent.intent_id), StoreLayer.NEO4J
+        )
+        await complete_write_intent(
+            redis_client, neo4j_driver, str(intent.intent_id)
+        )
+    except Exception as e:
+        await fail_write_intent(redis_client, str(intent.intent_id), str(e))
+        raise
+
+    return str(intent.intent_id)
+
+
 async def execute_attachment_commit(
     redis_client,
     neo4j_driver,

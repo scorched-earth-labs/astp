@@ -19,6 +19,9 @@ from ariadne.core.schema import (
     AriadneGovernanceError,
     AttachmentNode,
     CodicilNode,
+    ConsultationNode,
+    ConsultationParticipantNode,
+    ExchangeEntry,
     DocumentNode,
     EpisodeNode,
     EpisodeClosureRecord,
@@ -557,6 +560,167 @@ async def create_closure_record_node(driver, closure: EpisodeClosureRecord) -> N
             "episode_id": str(closure.episode_id),
             "closure_id": str(closure.closure_id),
             "sealed_at": closure.sealed_at.isoformat(),
+        })
+
+
+async def create_consultation_node(driver, consultation: ConsultationNode) -> None:
+    """Persist a consultation — a cross-agent exchange within an Episode.
+
+    Consultation is protocol surface: G-8 and G-9 have governed it since v1,
+    and compute_consultation_node_hash / compute_exchange_chain_hash are
+    protocol hash functions. v3.5.0 removed its WIL operations on the premise
+    that the protocol does not define consultation; that premise contradicted
+    the governance section and is corrected in 4.2.0.
+
+    G-1 is not enforced: a consultation is a branch event, not a spine append
+    (D2), so it does not extend the segment chain.
+    """
+    if not _ariadne_guard():
+        return
+    params = {
+        "consultation_id": str(consultation.consultation_id),
+        "episode_id": str(consultation.episode_id),
+        "consultation_type": consultation.consultation_type.value,
+        "initiating_agent": consultation.initiating_agent,
+        "consulting_agent": consultation.consulting_agent,
+        "initiated_at": consultation.initiated_at.isoformat(),
+        "resolved_at": (
+            consultation.resolved_at.isoformat() if consultation.resolved_at else None
+        ),
+        "initiating_context_hash": consultation.initiating_context_hash,
+        "consultation_prompt": consultation.consultation_prompt,
+        "consultation_prompt_hash": consultation.consultation_prompt_hash,
+        "resolution_type": consultation.resolution_type,
+        "resolution_hash": consultation.resolution_hash,
+        "consultation_node_hash": consultation.consultation_node_hash,
+        "schema_version": consultation.schema_version,
+    }
+
+    async with driver.session() as session:
+        await session.run("""
+            MERGE (c:AriadneConsultation {consultation_id: $consultation_id})
+            ON CREATE SET
+              c.episode_id               = $episode_id,
+              c.consultation_type        = $consultation_type,
+              c.initiating_agent         = $initiating_agent,
+              c.consulting_agent         = $consulting_agent,
+              c.initiated_at             = $initiated_at,
+              c.resolved_at              = $resolved_at,
+              c.initiating_context_hash  = $initiating_context_hash,
+              c.consultation_prompt      = $consultation_prompt,
+              c.consultation_prompt_hash = $consultation_prompt_hash,
+              c.resolution_type          = $resolution_type,
+              c.resolution_hash          = $resolution_hash,
+              c.consultation_node_hash   = $consultation_node_hash,
+              c.schema_version           = $schema_version
+        """, params)
+        # INITIATED: the consultation lives in the INITIATING agent's episode
+        # (D2); the consulted agent records a participation node instead (D3).
+        await session.run("""
+            MATCH (e:AriadneEpisode {episode_id: $episode_id})
+            MATCH (c:AriadneConsultation {consultation_id: $consultation_id})
+            MERGE (e)-[:INITIATED {initiated_at: $initiated_at}]->(c)
+        """, {
+            "episode_id": str(consultation.episode_id),
+            "consultation_id": str(consultation.consultation_id),
+            "initiated_at": consultation.initiated_at.isoformat(),
+        })
+
+
+async def create_exchange_entry_node(driver, entry: ExchangeEntry) -> None:
+    """Persist one turn in a consultation's hash-chained exchange.
+
+    Each entry's previous_hash references the prior entry's content_hash
+    ("GENESIS" for the first), which is what G-8 governs. The chain is why
+    consultation is protocol surface at all: an ordered exchange whose
+    integrity is verifiable is a protocol concern, whatever the interaction
+    pattern layered on top is called.
+    """
+    if not _ariadne_guard():
+        return
+    params = {
+        "entry_id": str(entry.entry_id),
+        "consultation_id": str(entry.consultation_id),
+        "sequence": entry.sequence,
+        "timestamp": entry.timestamp.isoformat(),
+        "speaker": entry.speaker,
+        "role": entry.role.value,
+        "content": entry.content,
+        "content_hash": entry.content_hash,
+        "previous_hash": entry.previous_hash,
+        "round_number": entry.round_number,
+    }
+    async with driver.session() as session:
+        await session.run("""
+            MERGE (ex:AriadneExchangeEntry {entry_id: $entry_id})
+            ON CREATE SET
+              ex.consultation_id = $consultation_id,
+              ex.sequence        = $sequence,
+              ex.timestamp       = $timestamp,
+              ex.speaker         = $speaker,
+              ex.role            = $role,
+              ex.content         = $content,
+              ex.content_hash    = $content_hash,
+              ex.previous_hash   = $previous_hash,
+              ex.round_number    = $round_number
+        """, params)
+        await session.run("""
+            MATCH (c:AriadneConsultation {consultation_id: $consultation_id})
+            MATCH (ex:AriadneExchangeEntry {entry_id: $entry_id})
+            MERGE (c)-[:CONTAINS_ENTRY {sequence: $sequence}]->(ex)
+        """, {
+            "consultation_id": str(entry.consultation_id),
+            "entry_id": str(entry.entry_id),
+            "sequence": entry.sequence,
+        })
+
+
+async def create_consultation_participant_node(
+    driver, participant: ConsultationParticipantNode
+) -> None:
+    """Record participation on the CONSULTED agent's episode.
+
+    D3: the consulted agent records that it participated, not the full
+    exchange — the exchange belongs to the initiating agent's episode. Two
+    records of one consultation from opposite sides, neither duplicating the
+    other.
+    """
+    if not _ariadne_guard():
+        return
+    params = {
+        "participant_id": str(participant.participant_id),
+        "consultation_id": str(participant.consultation_id),
+        "episode_id": str(participant.episode_id),
+        "initiating_agent": participant.initiating_agent,
+        "initiating_episode_id": str(participant.initiating_episode_id),
+        "participated_at": participant.participated_at.isoformat(),
+        "resolved_at": (
+            participant.resolved_at.isoformat() if participant.resolved_at else None
+        ),
+        "consultation_type": participant.consultation_type.value,
+        "schema_version": participant.schema_version,
+    }
+    async with driver.session() as session:
+        await session.run("""
+            MERGE (p:AriadneConsultationParticipant {participant_id: $participant_id})
+            ON CREATE SET
+              p.consultation_id       = $consultation_id,
+              p.episode_id            = $episode_id,
+              p.initiating_agent      = $initiating_agent,
+              p.initiating_episode_id = $initiating_episode_id,
+              p.participated_at       = $participated_at,
+              p.resolved_at           = $resolved_at,
+              p.consultation_type     = $consultation_type,
+              p.schema_version        = $schema_version
+        """, params)
+        await session.run("""
+            MATCH (e:AriadneEpisode {episode_id: $episode_id})
+            MATCH (p:AriadneConsultationParticipant {participant_id: $participant_id})
+            MERGE (e)-[:PARTICIPATED_IN {participated_at: $participated_at}]->(p)
+        """, {
+            "episode_id": str(participant.episode_id),
+            "participant_id": str(participant.participant_id),
+            "participated_at": participant.participated_at.isoformat(),
         })
 
 

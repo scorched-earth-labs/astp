@@ -117,6 +117,34 @@ class TestWILOperationVocabulary:
         assert "create_episode_node" in body
         assert "MERGE (e:AriadneEpisode" not in body
 
+    def test_consultation_commit_is_emitted_by_the_library(self):
+        from ariadne.adapters.neo4j import wil as wil_adapter
+
+        assert hasattr(wil_adapter, "execute_consultation_commit")
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        assert "WILOperation.CONSULTATION_COMMIT" in source
+
+    def test_consultation_commit_writes_entries_in_sequence(self):
+        """Each entry's previous_hash references the prior entry's content_hash.
+
+        Writing them out of order builds the chain backwards, which is the
+        failure G-8 exists to catch.
+        """
+        from ariadne.adapters.neo4j import wil as wil_adapter
+
+        source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
+        body = source[source.index("async def execute_consultation_commit"):
+                      source.index("async def execute_attachment_commit")]
+        assert "sorted(entries, key=lambda e: e.sequence)" in body
+
+    def test_collaboration_has_no_separate_operation(self):
+        """Collaboration is a ConsultationType, not an operation.
+
+        A second register name would encode in the ledger what the node already
+        records, and the two would drift.
+        """
+        assert "COLLABORATION_COMMIT" not in {m.value for m in WILOperation}
+
     def test_attachment_commit_is_emitted_by_the_library(self):
         from ariadne.adapters.neo4j import wil as wil_adapter
 
