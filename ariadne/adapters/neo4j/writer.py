@@ -969,6 +969,60 @@ async def create_branch_episode(
         })
 
 
+def write_attachment_node_sync(driver, attachment: AttachmentNode) -> None:
+    """Sync variant of `create_attachment_node` (SPEC §4.7).
+
+    Exists for the same reason `write_document_node_sync` does — callers that
+    are not async and cannot become so without restructuring their caller in
+    turn. Same node and edge as the async writer, so the two are
+    indistinguishable in the graph.
+
+    NOTE: this writes the node only. A caller performing an attachment owes an
+    `ATTACHMENT_COMMIT` ledger entry under G-39, and this function cannot
+    produce one — write-intent coordination is async by necessity. A sync
+    caller must therefore either surface that its write is unledgered, or move
+    to `execute_attachment_commit`. Silently attaching without an entry is the
+    gap §12.4.2 forbids absorbing.
+    """
+    if not _ariadne_guard():
+        return
+
+    params = {
+        "attachment_id": str(attachment.attachment_id),
+        "episode_id": str(attachment.episode_id),
+        "content_hash": attachment.content_hash,
+        "media_type": attachment.media_type,
+        "content_ref": attachment.content_ref,
+        "attached_by": attachment.attached_by,
+        "attached_at": attachment.attached_at.isoformat(),
+        "schema_version": attachment.schema_version,
+    }
+    try:
+        with driver.session() as session:
+            session.run("""
+                MERGE (a:AriadneAttachment {attachment_id: $attachment_id})
+                ON CREATE SET
+                  a.episode_id     = $episode_id,
+                  a.content_hash   = $content_hash,
+                  a.media_type     = $media_type,
+                  a.content_ref    = $content_ref,
+                  a.attached_by    = $attached_by,
+                  a.attached_at    = $attached_at,
+                  a.schema_version = $schema_version
+            """, params)
+            session.run("""
+                MATCH (e:AriadneEpisode {episode_id: $episode_id})
+                MATCH (a:AriadneAttachment {attachment_id: $attachment_id})
+                MERGE (a)-[:ATTACHED_TO {attached_at: $attached_at}]->(e)
+            """, {
+                "episode_id": str(attachment.episode_id),
+                "attachment_id": str(attachment.attachment_id),
+                "attached_at": attachment.attached_at.isoformat(),
+            })
+    except Exception as e:
+        logger.warning(f"Ariadne: attachment write failed (non-fatal): {e}")
+
+
 def write_document_node_sync(driver, document: DocumentNode) -> None:
     """
     Create an AriadneDocument node and ATTACHED_TO edge to its episode.
