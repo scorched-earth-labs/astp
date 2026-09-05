@@ -67,7 +67,7 @@ These come up constantly and aren't obvious from local context:
 
 - **Dual Index**: `sequence_index` (immutable temporal position) is in the leaf hash preimage. `tree_leaf_index` (mutable structural position) is **not**. Never swap which one goes into the hash. See `ariadne/protocol/leaf_hash.py`.
 - **Hash preimage stability within a major version**: any change to leaf-hash construction, spine Merkle algorithm, or `ContentDelta`/`StructuralDelta` core fields is a breaking protocol change and needs an amendment doc (`AMENDMENT-vN.0-*.md`) with a ratifying Episode of Record, not a quiet code change.
-- **Governance rules G-1 through G-17+**: enforced inline in `ariadne/core/schema.py` and `ariadne/protocol/governance.py`. Each rule throws a specific subclass of `AriadneProtocolError`. Don't bypass them — adapters are required to surface the violation.
+- **Governance rules (`G-*`, numbered in `SPEC.md`)**: enforced inline in `ariadne/core/schema.py` and `ariadne/protocol/governance.py`. Each rule throws a specific subclass of `AriadneProtocolError`. Don't bypass them — adapters are required to surface the violation.
 - **Reparenting is forbidden**, not "discouraged". `parent_node_id` is in the leaf hash. To "fix" parentage, create a new node and deprecate the old one.
 - **Sealed nodes are immutable**. The pattern for amending a sealed record is always forward: new node + deprecation/succession edge. There is no in-place edit path.
 - **Crystallization is a state transition, not a receipt**. `CrystallizationDeltaNode` is a block-header analog: immutable after creation, corrections flow forward through successor episodes.
