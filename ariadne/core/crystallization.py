@@ -118,6 +118,13 @@ class CrystallizationContent(BaseModel):
     schema_version: str             # Schema version at crystallization time
     crystallization_scope: CrystallizationScope
     successor_episode_id: Optional[str] = None  # For BRANCH scope: parent episode
+    # SPEC 4.3.0 §5.8 — which spine algorithm and leaf ordering produced
+    # sealed_chain_root. Diagnostic metadata OUTSIDE the content-hash preimage
+    # (same precedent as the retroactive flags in 3.3.0): a verifier reads them
+    # to pick the reproduction function; they cannot make a bad root verify.
+    # None on records written before 4.3.0 (interpret as legacy per §5.8).
+    spine_algorithm_version: Optional[int] = None
+    ordering_version: Optional[int] = None
 
 
 # ── CrystallizationDeltaNode ────────────────────────────────────────────────
@@ -197,6 +204,8 @@ def build_crystallization_delta(
     schema_version: str = "1.0.0",
     crystallization_scope: CrystallizationScope = CrystallizationScope.EPISODE,
     successor_episode_id: Optional[str] = None,
+    spine_algorithm_version: Optional[int] = None,
+    ordering_version: Optional[int] = None,
 ) -> CrystallizationDeltaNode:
     """
     Factory function — the only sanctioned way to create a crystallization delta.
@@ -211,6 +220,8 @@ def build_crystallization_delta(
         schema_version=schema_version,
         crystallization_scope=crystallization_scope,
         successor_episode_id=successor_episode_id,
+        spine_algorithm_version=spine_algorithm_version,
+        ordering_version=ordering_version,
     )
     content_hash = compute_crystallization_content_hash(content)
     node_hash = compute_crystallization_node_hash(content_hash, predecessor_hash)

@@ -95,6 +95,10 @@ class CognitiveNode(BaseModel):
     # Temporal
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     sealed_at: Optional[datetime] = None
+    # SPEC 4.3.0 §5.8: which content/leaf hash construction produced this node's
+    # hashes. NOT in the leaf-hash preimage (§5.2 preimage is closed); a verifier
+    # reads it to select the reproduction function. Default 1 = the §5.2 form.
+    hash_version: int = 1
 
     # Graph position (immutable — reparenting is a governance violation)
     parent_node_id: Optional[UUID] = None

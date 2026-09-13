@@ -187,6 +187,7 @@ The protocol is one normative document (`SPEC.md`) plus, per feature surface, a 
 | Branch / Fork / Merge + **Departure Fork** | §19 | [`IMPLEMENTATION-BFM.md`](./IMPLEMENTATION-BFM.md) | [`CONFORMANCE-BFM.md`](./CONFORMANCE-BFM.md) |
 | Cross-Episode Linking & Grouping | §20 | [`IMPLEMENTATION-CROSS-EPISODE-LINKING.md`](./IMPLEMENTATION-CROSS-EPISODE-LINKING.md) | [`CONFORMANCE-CROSS-EPISODE-LINKING.md`](./CONFORMANCE-CROSS-EPISODE-LINKING.md) |
 | Layer 3 — Workflow & Execution DAG | §21 | [`IMPLEMENTATION-LAYER3.md`](./IMPLEMENTATION-LAYER3.md) | [`CONFORMANCE-LAYER3.md`](./CONFORMANCE-LAYER3.md) |
+| Reproducibility — spine leaf set, episode root, version identifiers | §5.6–§5.8, §9.3, G-1 | — | [`CONFORMANCE-REPRODUCIBILITY.md`](./CONFORMANCE-REPRODUCIBILITY.md) |
 | Trust Infrastructure (Phase 3) | §16 | [`IMPLEMENTATION-PHASE3.md`](./IMPLEMENTATION-PHASE3.md) | [`CONFORMANCE.md`](./CONFORMANCE.md) |
 
 Supporting: [`VERSIONING.md`](./VERSIONING.md) (canonical version policy), [`GLOSSARY.md`](./GLOSSARY.md), [`VISION.md`](./VISION.md).
