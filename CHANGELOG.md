@@ -6,6 +6,43 @@ All notable changes to the Ariadne protocol. Version numbering follows [VERSIONI
 
 The next change-set queues here.
 
+## [4.3.0] — 2026-09-13
+
+**MINOR.** Reproducibility. Motivated by the first corpus-scale re-verification of the
+reference deployment's 62 sealed Episodes (2026-09-13): 45 spine roots rebuilt from
+stored nodes; 8 rebuildable only under the pre-2026-04-01 tree implementation (the
+function had been replaced in place before the versioning rule existed); 4 rebuildable
+only by searching orderings of same-timestamp signals (the seal ordered SPINE signals by
+arrival time — an ordering key signals do not reliably have); one post-closure append
+that the reference G-1 guard did not refuse because it covered SEALING/SEALED/ARCHIVED
+but not CLOSED. No evidence of content tampering. Every item below is additive.
+
+### Added
+- **§5.6 Episode Spine Leaf Set** — the spine is the Episode's non-ephemeral Segments in
+  `sequence_index` order and nothing else; signals are not spine leaves. `sequence_index`
+  is the sole ordering key and is total, so no tiebreak exists to get wrong.
+- **§5.7 Episode Root** — publishes the three-component root
+  `SHA3-256("NODE:" ‖ spine_root ‖ signal_manifest_hash ‖ exclusion_hash)` (previously an
+  internal design). The signal manifest and exclusion set are order-independent sets
+  with domain-separated constructions and empty-set sentinels.
+- **§5.8 Version identifiers** — optional `hash_version` on `CognitiveNode`,
+  `spine_algorithm_version` and `ordering_version` on `CrystallizationDelta`. Outside every
+  hash preimage; absent means pre-4.3.0. Backfill is an annotation, never a re-seal.
+- **§9.3 Reproducibility obligation** — a verifier holding only stored nodes MUST be able to
+  recompute the sealed roots; a stored-root lookup is not a verification.
+- **`CONFORMANCE-REPRODUCIBILITY.md`** — new `RP-*` family (RP-001…RP-004) and
+  `tests/unit/protocol/test_reproducibility_conformance.py`.
+- Reference implementation: `compute_spine_root_v2`, `compute_signal_manifest_hash`,
+  `compute_exclusion_hash`, version constants; `compute_spine_hash` (ordering version 1)
+  is retained unchanged so historical seals remain reproducible.
+
+### Changed
+- **G-1** — states that appends are refused from `CLOSING_PENDING_SEAL` onward, including
+  `CLOSED`, `CRYSTALLIZATION_PENDING`, `SEALING`, `SEALED`, `ARCHIVED`; codicils are the sole
+  sanctioned post-closure append. Reference `enforce_G1_write_guard` widened to match
+  (`G1_FROZEN_STATES`). This is a clarification of §4.4.1, which already said a `CLOSED`
+  Episode admits only codicils.
+
 ### Changed (editorial — no normative change)
 - **Public naming residue.** The four `CONFORMANCE*.md` titles and their intro/footer lines still said "Ariadne Protocol"; they now say ASTP, matching the SPEC/README rebrand (v3.2.2 era). Code identifiers, package paths, HKDF info strings, Redis key prefixes and Neo4j labels are unchanged by design — "Ariadne" remains the internal codename.
 - **README drift.** The README restated the protocol version (`3.2.2`, while SPEC was 4.2.1) and the governance range ("G-1 through G-9", while SPEC defines through G-39). Both now defer to `SPEC.md` instead of restating it. The package structure tree now shows the `protocol/` and `nodes/` layers and the namespace firewall.

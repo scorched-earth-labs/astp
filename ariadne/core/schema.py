@@ -475,10 +475,62 @@ def compute_spine_hash(segment_content_hashes: list[str], spine_signal_hashes: l
     return compute_spine_hash_adaptive(segment_content_hashes, spine_signal_hashes)
 
 
+# ── Versioned spine / episode root (SPEC 4.3.0, §5.6–§5.8) ───────────────────
+#
+# Hash functions are never modified in place; they are versioned. The functions
+# above (``compute_spine_hash``) remain the ORDERING_VERSION 1 form — segments
+# followed by SPINE-placed signals ordered by received_at — and stay callable so
+# seals produced under them remain reproducible. The v2 form below is the
+# specified one: the spine is segments only, in sequence_index order; signals
+# commit through the signal manifest, which is a set (order-independent).
+
+SPINE_ALGORITHM_VERSION_LEGACY = 0   # pre-2026-04-01 iterative Merkle (see git fd37300^)
+SPINE_ALGORITHM_VERSION_CURRENT = 1  # Adaptive Merkle Tree
+ORDERING_VERSION_LEGACY = 1          # segments + SPINE signals by received_at (ties unresolved)
+ORDERING_VERSION_CURRENT = 2         # segments only, sequence_index; signals in the manifest
+
+SIGNAL_MANIFEST_DOMAIN = b"SIGNAL_MANIFEST:v1:"
+EXCLUSION_DOMAIN = b"EXCLUSION:v1:"
+EMPTY_SET_SENTINEL = b"EMPTY"
+
+
+def compute_spine_root_v2(segment_content_hashes: list[str], episode_id: Optional[str] = None) -> str:
+    """ORDERING_VERSION 2 spine root: the Merkle root over the Episode's non-ephemeral
+    segments in ``sequence_index`` order — and nothing else. Signals are not spine
+    leaves (SPEC §5.6). Uses the Adaptive Merkle Tree (SPINE_ALGORITHM_VERSION 1).
+    Deterministic: the only ordering key is ``sequence_index``, which is unique
+    per Episode by construction (§4.1 dual index)."""
+    if not segment_content_hashes:
+        raise ValueError("Cannot compute spine root: no segment leaves provided")
+    from ariadne.core.merkle import compute_adaptive_spine_hash
+    root, _ = compute_adaptive_spine_hash(list(segment_content_hashes), [], episode_id=episode_id)
+    return root
+
+
+def compute_signal_manifest_hash(signal_content_hashes: list[str]) -> str:
+    """The signal manifest is a SET: SHA3-256 over the domain prefix and the
+    signal content hashes sorted lexicographically, ``|``-joined. Order of
+    arrival, timestamps and ties play no part, so the manifest is reproducible
+    from stored nodes alone (SPEC §5.7). Empty set hashes the sentinel."""
+    hashes = sorted(set(signal_content_hashes))
+    body = "|".join(hashes).encode() if hashes else EMPTY_SET_SENTINEL
+    return sha3_256(SIGNAL_MANIFEST_DOMAIN + body)
+
+
+def compute_exclusion_hash(excluded_content_hashes: list[str]) -> str:
+    """Hash of the set of content hashes deliberately excluded from the spine
+    (EPHEMERAL-tier segments, per the epistemic record). Same set construction as
+    the signal manifest under its own domain prefix (SPEC §5.7)."""
+    hashes = sorted(set(excluded_content_hashes))
+    body = "|".join(hashes).encode() if hashes else EMPTY_SET_SENTINEL
+    return sha3_256(EXCLUSION_DOMAIN + body)
+
+
 def compute_episode_root_hash(spine_hash: str, signal_manifest_hash: str, exclusion_hash: str) -> str:
     """
     episode_root_hash = H(NODE: spine_hash || signal_manifest_hash || exclusion_hash)
-    This is the canonical three-component root per CLO-CONSOLIDATED-1.1 S5.3.
+    The three-component Episode root (SPEC §5.7; formerly internal
+    CLO-CONSOLIDATED-1.1 S5.3, published in 4.3.0).
     """
     return sha3_256(
         b"NODE:" +
@@ -495,9 +547,30 @@ class AriadneGovernanceError(Exception):
     pass
 
 
+# States in which an Episode admits no new segments or signals (SPEC §4.4.1,
+# G-1). CLOSED is the state the record is fixed in: from CLOSED onward the only
+# admissible content is a codicil (§4.9). CLOSING still permits final
+# contributions; CLOSING_PENDING_SEAL does not ("all contributions in").
+G1_FROZEN_STATES: frozenset = frozenset({
+    EpisodeStatus.CLOSING_PENDING_SEAL,
+    EpisodeStatus.CLOSED,
+    EpisodeStatus.CRYSTALLIZATION_PENDING,
+    EpisodeStatus.SEALING,
+    EpisodeStatus.SEALED,
+    EpisodeStatus.ARCHIVED,
+})
+
+
 def enforce_G1_write_guard(episode_status: EpisodeStatus) -> None:
-    """Rule G-1: No segment or signal may be written to SEALING, SEALED, or ARCHIVED episodes."""
-    if episode_status in (EpisodeStatus.SEALING, EpisodeStatus.SEALED, EpisodeStatus.ARCHIVED):
+    """Rule G-1: no segment or signal may be appended to an Episode whose record is
+    fixed. Refuses in every state of ``G1_FROZEN_STATES``; codicils use their own
+    path and are not subject to this guard.
+
+    History: before SPEC 4.3.0 this guard covered only SEALING/SEALED/ARCHIVED and
+    missed CLOSED, the state the reference deployment actually seals into. One
+    post-closure append in the production corpus (2026-03-27) got through it.
+    """
+    if episode_status in G1_FROZEN_STATES:
         raise AriadneGovernanceError(
             f"G-1 violation: Cannot write to episode in {episode_status} state."
         )

@@ -157,6 +157,30 @@ Specific Layer 3 node types are codified in pending Amendment v3.0 (Workflow & E
 
 The ordered hash chain of leaf hashes within a cognitive node's tree. Each leaf hash is computed from its node's `content_hash` plus position-binding fields (see *`leaf_hash`*). The Merkle root of the spine is the node tree's integrity fingerprint. The spine is the proof; the content blobs are the payload — the spine carries hashes and pointers, not bytes.
 
+### Spine Leaf Set
+
+**What is, and is not, a leaf of an Episode's spine.** Exactly the Episode's non-ephemeral Segments, ordered by `sequence_index`. Signals are not leaves (they commit through the *Signal Manifest*); `EPHEMERAL` segments are not leaves (they commit through the *Exclusion Set*). `sequence_index` is the only ordering key and is unique per Episode, so the order is total with no tiebreak. Defined in SPEC §5.6; reference function `compute_spine_root_v2`.
+
+### Signal Manifest
+
+**The order-independent commitment to an Episode's SPINE-placed Signals.** `SHA3-256("SIGNAL_MANIFEST:v1:" || sorted content hashes joined by "|")`; the empty set hashes a sentinel. A set, not a sequence: membership binds, arrival order and timestamps do not. One of the three components of the *Episode Root*. SPEC §5.7; `compute_signal_manifest_hash`.
+
+### Exclusion Set
+
+**The commitment to what was deliberately left out of the spine** — the content hashes of `EPHEMERAL` segments — so that the omission is itself verifiable. Same set construction as the Signal Manifest under the `EXCLUSION:v1:` domain. SPEC §5.7; `compute_exclusion_hash`.
+
+### Episode Root
+
+**The three-component integrity commitment of a sealed Episode**: `SHA3-256("NODE:" || spine_root || signal_manifest_hash || exclusion_hash)`. `sealed_chain_root` on the CrystallizationDelta records the spine root; `episode_root_hash` on the Episode records the composition. SPEC §5.7; `compute_episode_root_hash`.
+
+### Version Identifiers (hash_version, spine_algorithm_version, ordering_version)
+
+**Which construction produced a record's hashes.** `hash_version` on every CognitiveNode; `spine_algorithm_version` (0 legacy iterative Merkle, 1 Adaptive Merkle Tree) and `ordering_version` (1 legacy segments-then-signals-by-arrival, 2 segments-only per §5.6) on the CrystallizationDelta. Diagnostic metadata outside every hash preimage — a verifier reads them to pick the reproduction function; altering them cannot make a tampered root verify. Absent means pre-4.3.0. SPEC §5.8.
+
+### Reproducibility Obligation
+
+**A sealed root must be rebuildable from stored nodes alone.** A verifier with only the Segments, Signals and seal record (with its version identifiers) recomputes `spine_root` and `episode_root_hash`; any construction needing insertion order, a store's default sort, or a cache is non-conformant. Returning a *stored* root is an anchor lookup, not a verification. SPEC §9.3; conformance family `RP-*`.
+
 ### Merkle Tree / Merkle Root
 
 A binary tree of hashes computed bottom-up from the leaf hashes. The root is a single hash that summarizes the entire tree — change any leaf, the root changes. Used as the cryptographic fingerprint of an episode (`episode_root_hash`).
@@ -439,3 +463,9 @@ For lookup. Each term links back to its categorical definition above.
 ---
 
 *This glossary is a living document. When you encounter a term in code, in `SPEC.md`, or in an amendment that isn't defined here — or whose definition here is unclear — that's a gap worth raising. Each gap is documentation feedback from the implementation surface.*
+- **Episode Root** — §5 (Hash Chain)
+- **Exclusion Set** — §5 (Hash Chain)
+- **Reproducibility Obligation** — §5 (Hash Chain)
+- **Signal Manifest** — §5 (Hash Chain)
+- **Spine Leaf Set** — §5 (Hash Chain)
+- **Version Identifiers** — §5 (Hash Chain)
