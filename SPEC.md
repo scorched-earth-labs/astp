@@ -33,7 +33,7 @@ The protocol is agnostic to both cognitive architecture and node type. A system 
 | **Adapter** | A database-specific implementation of persistence operations. |
 | **ASI** | Adapter Service Interface. The abstract contract any conforming adapter must implement. |
 | **Governance Rule** | A protocol invariant that any conforming implementation must enforce. |
-| **Namespace Firewall** | The inviolable rule that the protocol layer (`ariadne.protocol.*`) never imports from node-type layers (`ariadne.nodes.*`). |
+| **Namespace Firewall** | The inviolable rule that the protocol layer (`astp.protocol.*`) never imports from node-type layers (`astp.nodes.*`). |
 | **Protocol Surface** | The set of primitives, invariants, and interfaces where no differential is permitted across conforming implementations. |
 | **Implementation Space** | Architectural choices where conforming implementations MAY differ (payload schemas, storage adapters, signing algorithms, etc.). |
 
@@ -90,7 +90,7 @@ Interoperability does NOT require that implementations can read each other's pay
 ### 3.1 The Three-Layer Model
 
 ```
-PROTOCOL LAYER — Node-Generic (ariadne.protocol.*)
+PROTOCOL LAYER — Node-Generic (astp.protocol.*)
   CognitiveNode, CognitiveEdge, NodePayload ABC
   Position-binding leaf hash, Merkle tree, delta records, audit chain
   Governance rules, verification, version vectors
@@ -100,7 +100,7 @@ INSTANTIATION LAYER — Node Type Registry
   NodeTypeDefinition, open enum registration
   "episode" ← Phase 1    "signal" ← Phase 2    "agent" ← Phase 2
 
-NODE TYPE LAYER — Type-Specific Extensions (ariadne.nodes.*)
+NODE TYPE LAYER — Type-Specific Extensions (astp.nodes.*)
   EpisodePayload implements NodePayload
   Episode lifecycle state machine
   → Dependency: Node Type Layer → Protocol Layer only. Never reverse.
@@ -519,7 +519,7 @@ Logical clock values must be strictly monotonically increasing across audit reco
 
 ### G-6: Namespace Firewall
 
-The protocol layer (`ariadne.protocol.*`) MUST NOT import from any node-type layer (`ariadne.nodes.*`). This is enforced by automated testing.
+The protocol layer (`astp.protocol.*`) MUST NOT import from any node-type layer (`astp.nodes.*`). This is enforced by automated testing.
 
 ### G-7 through G-9: Signal Governance (inherited from v1)
 
@@ -1176,7 +1176,7 @@ This is the concrete expression of the cross-architecture interoperability guara
 
 ## 17. Conformance Testing
 
-The `ariadne.protocol.verification` module provides the `DeltaVerifier` — the five-test gate that any conforming implementation must pass.
+The `astp.protocol.verification` module provides the `DeltaVerifier` — the five-test gate that any conforming implementation must pass.
 
 ### 17.1 Phase 1-2 Conformance (Five-Test Gate)
 

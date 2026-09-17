@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from ariadne.core.schema import (
+from astp.core.schema import (
     AmendmentLink,
     ConsultationNode,
     ConsultationParticipantNode,
@@ -42,7 +42,7 @@ from ariadne.core.schema import (
     SignalNode,
 )
 
-WRITER = Path(__file__).resolve().parents[3] / "ariadne" / "adapters" / "neo4j" / "writer.py"
+WRITER = Path(__file__).resolve().parents[3] / "astp" / "adapters" / "neo4j" / "writer.py"
 SOURCE = WRITER.read_text(encoding="utf-8")
 
 
@@ -164,8 +164,8 @@ class TestUpdateEpisodeStatus:
     def test_rejects_unknown_fields(self):
         import asyncio
 
-        from ariadne.core.schema import AriadneGovernanceError, EpisodeStatus
-        from ariadne.adapters.neo4j.writer import update_episode_status
+        from astp.core.schema import AriadneGovernanceError, EpisodeStatus
+        from astp.adapters.neo4j.writer import update_episode_status
 
         with pytest.raises(AriadneGovernanceError):
             asyncio.run(update_episode_status(
@@ -174,7 +174,7 @@ class TestUpdateEpisodeStatus:
             ))
 
     def test_allowlist_covers_the_lifecycle_fields(self):
-        from ariadne.adapters.neo4j.writer import _UPDATABLE_EPISODE_FIELDS
+        from astp.adapters.neo4j.writer import _UPDATABLE_EPISODE_FIELDS
 
         for field in ("sealed_at", "archived_at", "spine_hash"):
             assert field in _UPDATABLE_EPISODE_FIELDS
@@ -275,7 +275,7 @@ class TestAdapterSurfaceComplete:
     def _unimplemented(self) -> list[str]:
         import re as _re
 
-        root = Path(__file__).resolve().parents[3] / "ariadne"
+        root = Path(__file__).resolve().parents[3] / "astp"
         base = (root / "adapters" / "base.py").read_text(encoding="utf-8")
         abstract = _re.findall(r"@abstractmethod\s*\n\s*async def (\w+)\(", base)
 

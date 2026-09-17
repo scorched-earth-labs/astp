@@ -23,7 +23,7 @@ a verifier tried to reproduce the roots.
 A conforming implementation MUST pass all vectors marked **REQUIRED**. Format follows
 [CONFORMANCE.md §1](CONFORMANCE.md).
 
-Reference implementation: `ariadne/core/schema.py` (`compute_spine_root_v2`,
+Reference implementation: `astp/core/schema.py` (`compute_spine_root_v2`,
 `compute_signal_manifest_hash`, `compute_exclusion_hash`, `compute_episode_root_hash`,
 `enforce_G1_write_guard`), tested in
 `tests/unit/protocol/test_reproducibility_conformance.py`.

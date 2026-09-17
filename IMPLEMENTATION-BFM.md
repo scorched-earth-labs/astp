@@ -26,7 +26,7 @@ What is implementation-space:
 ## 2. Module Layout
 
 ```
-ariadne/
+astp/
 ├── core/
 │   ├── branching.py             # All BFM schema types + hash functions + governance
 │   ├── branch_operations.py     # create/abandon/fork/resolve/merge/aside/soliloquy + departure-fork ops
@@ -50,7 +50,7 @@ tests/unit/protocol/
 ### 3.1 Public API
 
 ```python
-from ariadne.core.branch_operations import create_branch, abandon_branch
+from astp.core.branch_operations import create_branch, abandon_branch
 
 result = create_branch(
     driver,
@@ -111,7 +111,7 @@ When `declaration_type == RETROACTIVE`:
 ### 4.1 Public API
 
 ```python
-from ariadne.core.branch_operations import (
+from astp.core.branch_operations import (
     create_fork, resolve_fork,
     find_common_ancestor, execute_merge, verify_merge_integrity,
 )
@@ -193,7 +193,7 @@ Phase D adds the **departure fork**, distinct from the speculative fork of §4.5
 ### 5.1 Public API
 
 ```python
-from ariadne.core.branch_operations import (
+from astp.core.branch_operations import (
     create_departure_fork,
     complete_departure_fork, abandon_departure_fork,
     declare_fork_return,
@@ -287,7 +287,7 @@ The branch point records where divergence *began* — not where it was declared.
 
 ### 5.7 Hash Domains
 
-Both preimages are `sha3_256(prefix + ":" + colon-joined fields)`; ground truth is `ariadne/core/branching.py`.
+Both preimages are `sha3_256(prefix + ":" + colon-joined fields)`; ground truth is `astp/core/branching.py`.
 
 | Node | Prefix | Preimage field order |
 |------|--------|----------------------|
@@ -300,7 +300,7 @@ The `DEPARTURE_FORK_POINT:` prefix is deliberately distinct from `FORK_POINT:` �
 
 The producer (§5.5) and return holds a cross-verifiable invariant at write time; **orphan recovery is its runtime enforcement** — it catches the partial-failure states the producer couldn't prevent (a crash between the two writes, a rolled-back status). Per the protocol/runtime split, this repo ships the **write primitives**; detection (which sweep, how often) and the detect→recover orchestration live in the consumer (ignis-os). **Detection cadence is not part of conformance** — only the shape of a conformant recovery is (SPEC §19.3.7).
 
-**Write primitives** (`ariadne/adapters/neo4j/writer.py`):
+**Write primitives** (`astp/adapters/neo4j/writer.py`):
 
 ```python
 write_fork_orphan_marker_sync(driver, marker)                 # any class: diagnostic marker (dedup on fork_id)
@@ -347,7 +347,7 @@ write. Diagnostic fields land on the point (`orphaned`, `retroactive`,
 ### 6.1 Public API
 
 ```python
-from ariadne.core.branch_operations import (
+from astp.core.branch_operations import (
     create_aside, close_aside,
     create_soliloquy, conclude_soliloquy,
 )
@@ -424,7 +424,7 @@ The deliberation chain itself stays on the `SoliloquySegmentNode`. Only the conc
 ### 7.1 Public API
 
 ```python
-from ariadne.core.coherence import (
+from astp.core.coherence import (
     CoherenceFingerprintRegistry,
     detect_branch_candidate,
     intercept_segment_write,

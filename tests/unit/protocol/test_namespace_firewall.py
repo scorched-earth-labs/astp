@@ -14,8 +14,8 @@
 """
 Namespace Firewall Test
 
-Enforces the inviolable rule: ariadne.protocol.* must NEVER import
-from ariadne.nodes.*. This is a structural test that scans the AST
+Enforces the inviolable rule: astp.protocol.* must NEVER import
+from astp.nodes.*. This is a structural test that scans the AST
 of all protocol-layer Python files.
 """
 
@@ -24,8 +24,8 @@ import os
 from pathlib import Path
 
 
-PROTOCOL_DIR = Path(__file__).parent.parent.parent.parent / "ariadne" / "protocol"
-FORBIDDEN_PREFIX = "ariadne.nodes"
+PROTOCOL_DIR = Path(__file__).parent.parent.parent.parent / "astp" / "protocol"
+FORBIDDEN_PREFIX = "astp.nodes"
 
 
 def _collect_imports(filepath: Path) -> list[str]:

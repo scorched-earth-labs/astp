@@ -248,7 +248,7 @@ Signal-combination algorithm, embedding-model selection, threshold-calibration s
 - **SPEC.md §20** — normative protocol surface (v3.2.1); internal §1–§12 numbering cited as `§20 →N`.
 - **IMPLEMENTATION-CROSS-EPISODE-LINKING.md** — Neo4j reference adapter (non-normative).
 - **CONFORMANCE-BFM.md** — sibling BFM vector set (SPEC §19); shares the cross-implementation-consistency vector format.
-- **`ariadne/core/hash_canonical.py`** — the shared canonicalizer that every `CEL-`/`MR-`/`CD-` hash vector references.
+- **`astp/core/hash_canonical.py`** — the shared canonicalizer that every `CEL-`/`MR-`/`CD-` hash vector references.
 
 ---
 

@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Derivative + hysteresis drift FSM (ariadne.core.drift_fsm) + its wiring into
+"""Derivative + hysteresis drift FSM (astp.core.drift_fsm) + its wiring into
 detect_branch_candidate.
 
 Pins Clotho's v4 model against the validated reference simulator
@@ -22,13 +22,13 @@ non-materializing turn so no driver is touched.
 """
 from __future__ import annotations
 
-from ariadne.core.drift_fsm import (
+from astp.core.drift_fsm import (
     DriftDetectionState,
     DriftFSMThresholds,
     advance_drift_fsm,
 )
-from ariadne.core.coherence import detect_branch_candidate
-from ariadne.core.branching import DetectionState
+from astp.core.coherence import detect_branch_candidate
+from astp.core.branching import DetectionState
 
 
 def _run(drifts, thresholds=None):

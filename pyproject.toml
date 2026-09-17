@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astp"
-version = "0.1.0"
+version = "0.2.0"
 description = "ASTP (AI State Tree Protocol) — a cognitive persistence protocol for multi-agent AI systems"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -43,7 +43,7 @@ Documentation = "https://github.com/scorched-earth-labs/astp/blob/main/SPEC.md"
 Repository = "https://github.com/scorched-earth-labs/astp"
 
 [tool.setuptools.packages.find]
-include = ["ariadne*"]
+include = ["astp*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ariadne.core.schema import EpisodeStatus
+from astp.core.schema import EpisodeStatus
 
 SPEC = Path(__file__).resolve().parents[3] / "SPEC.md"
 

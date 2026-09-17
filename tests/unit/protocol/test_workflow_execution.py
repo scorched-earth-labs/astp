@@ -14,7 +14,7 @@
 """
 Amendment v3.0 — Layer 3 Workflow & Execution DAG schema + governance unit tests.
 
-Covers the protocol-core surface of `ariadne.core.workflow_execution`:
+Covers the protocol-core surface of `astp.core.workflow_execution`:
 - Enum vocabulary (WorkflowStatus, ExecutionStatus, SkillStatus, ErrorType, PrecedesEdgeType)
 - WorkflowDeclaration / ExecutionNode / SkillInvocation instantiation
 - Hash preimage determinism + exclusion discipline (§8, §9)
@@ -38,8 +38,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from ariadne.core.branching import CognitiveDeltaType
-from ariadne.core.workflow_execution import (
+from astp.core.branching import CognitiveDeltaType
+from astp.core.workflow_execution import (
     ErrorType,
     ExecutionNode,
     ExecutionRecordedDelta,

@@ -10,7 +10,7 @@
 
 ## 1. Purpose and Relationship to SPEC.md
 
-SPEC §21 defines the protocol surface of **Layer 3 — the Workflow & Execution DAG**: the forensic provenance record of *how* an Episode's cognition was carried out — which autonomous workflows were declared, which discrete execution steps ran, which skills were invoked, and where execution failed. It is the third cryptographic layer, cryptographically **isolated** from the Merkle Spine (Layers 1/2): it references them by `node_id` only and never participates in Spine hashing. This document describes **how Scorched Earth Labs implemented that surface** — the `ariadne.core.workflow_execution` protocol-type module and the Ignis OS reference storage adapter. It is not normative: another adapter (relational, document, graph) may differ in storage layout while remaining spec-conforming.
+SPEC §21 defines the protocol surface of **Layer 3 — the Workflow & Execution DAG**: the forensic provenance record of *how* an Episode's cognition was carried out — which autonomous workflows were declared, which discrete execution steps ran, which skills were invoked, and where execution failed. It is the third cryptographic layer, cryptographically **isolated** from the Merkle Spine (Layers 1/2): it references them by `node_id` only and never participates in Spine hashing. This document describes **how Scorched Earth Labs implemented that surface** — the `astp.core.workflow_execution` protocol-type module and the Ignis OS reference storage adapter. It is not normative: another adapter (relational, document, graph) may differ in storage layout while remaining spec-conforming.
 
 What is normative from this file:
 
@@ -22,7 +22,7 @@ What is normative from this file:
 
 What is implementation-space:
 
-- The concrete byte serialization. The reference canonicalizer (`ariadne/core/hash_canonical.py`) uses `sort_keys=False` field-ordered JSON (`separators=(",", ":")`, `ensure_ascii=False`, UTC-ISO8601 datetimes, UUID→str, Enum→`.value`) hashed with **SHA3-256**. This is a variant of SPEC §21 §8 Form B (canonical JSON) but with SHA3-256 rather than SHA-256 and caller-ordered rather than key-sorted fields. Another implementation may choose Form A (length-prefixed concatenation) and produce different bytes — legally, per SPEC §21 §8: cross-implementation hash *equivalence* is a non-goal at Layer 3; cross-implementation *verifiability* (documented, reproducible serialization) is the requirement.
+- The concrete byte serialization. The reference canonicalizer (`astp/core/hash_canonical.py`) uses `sort_keys=False` field-ordered JSON (`separators=(",", ":")`, `ensure_ascii=False`, UTC-ISO8601 datetimes, UUID→str, Enum→`.value`) hashed with **SHA3-256**. This is a variant of SPEC §21 §8 Form B (canonical JSON) but with SHA3-256 rather than SHA-256 and caller-ordered rather than key-sorted fields. Another implementation may choose Form A (length-prefixed concatenation) and produce different bytes — legally, per SPEC §21 §8: cross-implementation hash *equivalence* is a non-goal at Layer 3; cross-implementation *verifiability* (documented, reproducible serialization) is the requirement.
 - Neo4j labels, edge storage, indexes, and constraint names (SPEC §21 Appendix A, reproduced in §6 below).
 - The identity of the CIA and its enforcement mechanism (the Ignis reference names the `ignis_mcp_server` MCP server; SPEC §21 §3 permits any unique entity).
 - Which chain key anchors the Layer 3 audit chain (the Ignis reference uses `episode_id`).
@@ -32,7 +32,7 @@ What is implementation-space:
 ## 2. Module Layout
 
 ```
-ariadne/
+astp/
 ├── core/
 │   ├── workflow_execution.py   # Layer 3 schema types + enums + hash functions + governance + delta payloads
 │   ├── hash_canonical.py       # shared canonicalizer — hash_preimage(model, ordered_fields)
@@ -50,7 +50,7 @@ tests/unit/protocol/
 ### 3.1 The three node types
 
 ```python
-from ariadne.core.workflow_execution import (
+from astp.core.workflow_execution import (
     WorkflowDeclaration, ExecutionNode, SkillInvocation,
     WorkflowStatus, ExecutionStatus, SkillStatus, ErrorType, PrecedesEdgeType,
     LAYER_3_SCHEMA_VERSION,   # "3.0.0"
@@ -68,7 +68,7 @@ A `WorkflowDeclaration` with zero child `ExecutionNode`s is a valid forensic sta
 ### 3.2 Governance guards
 
 ```python
-from ariadne.core.workflow_execution import (
+from astp.core.workflow_execution import (
     Layer3GovernanceError,
     enforce_workflow_status_transition,   # (current: WorkflowStatus, target: WorkflowStatus) -> None
     enforce_execution_error_consistency,  # (node: ExecutionNode) -> None
@@ -88,7 +88,7 @@ from ariadne.core.workflow_execution import (
 ### 3.3 Hash stamping
 
 ```python
-from ariadne.core.workflow_execution import (
+from astp.core.workflow_execution import (
     compute_workflow_declaration_content_hash, stamp_workflow_declaration_hash,
     compute_execution_node_content_hash,      stamp_execution_node_hash,
     compute_skill_invocation_content_hash,    stamp_skill_invocation_hash,
@@ -103,7 +103,7 @@ The `stamp_*` helpers compute and set `content_hash` in place and return the ins
 
 ## 4. Content-Hash Preimages — Exact Field Orders
 
-Ground truth is `ariadne/core/workflow_execution.py`; each order below is the literal tuple passed to `hash_preimage(node, ordered_fields)`. The serialization form is implementation-space (SPEC §21 §8); the **field set and its order** are the protocol commitment (W-L3-2). Field order is caller-controlled (`sort_keys=False`) — the tuple order *is* the preimage order.
+Ground truth is `astp/core/workflow_execution.py`; each order below is the literal tuple passed to `hash_preimage(node, ordered_fields)`. The serialization form is implementation-space (SPEC §21 §8); the **field set and its order** are the protocol commitment (W-L3-2). Field order is caller-controlled (`sort_keys=False`) — the tuple order *is* the preimage order.
 
 ### 4.1 `WorkflowDeclaration` — `compute_workflow_declaration_content_hash()`
 
@@ -148,7 +148,7 @@ status, error_detail
 
 ## 5. Per-Operation Writes and the Audit Chain
 
-Every Layer 3 write is anchored to the protocol audit chain by one of four `CognitiveDeltaType` values (defined in `ariadne/core/branching.py`; SPEC §21 §11). **`cia_identifier` is mandatory on every one** — it is the field that makes the sole-writer principle (§3) verifiable: a verifier walking the chain confirms every L3 write came from the declared CIA and no other principal contributed.
+Every Layer 3 write is anchored to the protocol audit chain by one of four `CognitiveDeltaType` values (defined in `astp/core/branching.py`; SPEC §21 §11). **`cia_identifier` is mandatory on every one** — it is the field that makes the sole-writer principle (§3) verifiable: a verifier walking the chain confirms every L3 write came from the declared CIA and no other principal contributed.
 
 | Operation | Delta type | Delta payload class | Required forward fields |
 |-----------|-----------|---------------------|-------------------------|

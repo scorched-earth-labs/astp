@@ -14,7 +14,7 @@
 """
 Amendment v2.0 — Episode Grouping schema + governance unit tests.
 
-Covers the protocol-core surface of `ariadne.core.grouping`:
+Covers the protocol-core surface of `astp.core.grouping`:
 - Enum vocabulary (MembershipRole, GroupingSystem)
 - Capability, MembershipRecord, ConformanceDeclaration instantiation
 - Content hash properties (determinism, role inclusion per Gap 6,
@@ -37,8 +37,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from ariadne.core.branching import CognitiveDeltaType
-from ariadne.core.grouping import (
+from astp.core.branching import CognitiveDeltaType
+from astp.core.grouping import (
     Capability,
     ConformanceDeclaration,
     DeclarationSupersededDelta,

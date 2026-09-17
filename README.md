@@ -37,7 +37,7 @@ ASTP is not a vector database, a RAG system, or a session memory layer. It is a 
 ## Structure
 
 ```
-ariadne/
+astp/
 ├── protocol/                # Node-generic layer — operates on CognitiveNode only
 │   ├── node.py              # CognitiveNode + NodePayload abstraction
 │   ├── leaf_hash.py         # Position-binding leaf hash
@@ -62,7 +62,7 @@ ariadne/
         └── rebalance.py, retrieval_audit.py
 ```
 
-Two invariants shape the tree. The **namespace firewall**: `ariadne.protocol.*` never imports from `ariadne.nodes.*` (enforced by test). And the dependency is strictly one-directional: adapters import the protocol core; the protocol core has no database dependencies.
+Two invariants shape the tree. The **namespace firewall**: `astp.protocol.*` never imports from `astp.nodes.*` (enforced by test). And the dependency is strictly one-directional: adapters import the protocol core; the protocol core has no database dependencies.
 
 ---
 
@@ -104,7 +104,7 @@ A cross-agent exchange recorded as a first-class protocol node, not an applicati
 Any database can serve as an ASTP backend by implementing the `AriadneAdapter` interface:
 
 ```python
-from ariadne.adapters.base import AriadneAdapter
+from astp.adapters.base import AriadneAdapter
 
 class MyDatabaseAdapter(AriadneAdapter):
     # Implement the ASI methods
@@ -119,13 +119,13 @@ A conforming adapter must:
 4. Support idempotent writes for WIL recovery
 5. Fail loudly on errors — never silently swallow writes
 
-The Neo4j adapter in `ariadne/adapters/neo4j/` is the reference implementation. See `SPEC.md` for the full conformance requirements.
+The Neo4j adapter in `astp/adapters/neo4j/` is the reference implementation. See `SPEC.md` for the full conformance requirements.
 
 ---
 
 ## Conformance Testing
 
-The `ariadne.core.contracts` module provides a three-layer conformance framework:
+The `astp.core.contracts` module provides a three-layer conformance framework:
 
 | Layer | Verifies |
 |-------|----------|

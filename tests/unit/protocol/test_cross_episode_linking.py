@@ -14,7 +14,7 @@
 """
 Amendment v2.0 — Cross-Episode Linking schema + governance unit tests.
 
-Covers the protocol-core surface of `ariadne.core.cross_episode`:
+Covers the protocol-core surface of `astp.core.cross_episode`:
 - Enum vocabulary (LinkType, LinkHealthState, QuarantineResolution, SignalType)
 - `EpisodeLink` instantiation + field validation
 - `compute_episode_link_content_hash` — determinism, mutability isolation
@@ -41,12 +41,12 @@ import pytest
 # real writer, so the flag must be true.
 os.environ.setdefault("ARIADNE_ENABLED", "true")
 import importlib
-from ariadne.adapters.neo4j import writer as _ariadne_writer
+from astp.adapters.neo4j import writer as _ariadne_writer
 importlib.reload(_ariadne_writer)
 _ariadne_writer.ARIADNE_ENABLED = True
 
-from ariadne.core.branching import CognitiveDeltaType
-from ariadne.core.cross_episode import (
+from astp.core.branching import CognitiveDeltaType
+from astp.core.cross_episode import (
     CandidateRejectedDelta,
     EpisodeLink,
     LinkAcceptedDelta,
@@ -494,7 +494,7 @@ class _FakeDriver:
 
 class TestProposeLinkCandidate:
     def test_emits_link_proposed_audit_event(self):
-        from ariadne.core.cross_episode import propose_link_candidate
+        from astp.core.cross_episode import propose_link_candidate
 
         driver = _FakeDriver()
         src = str(uuid4())
@@ -524,7 +524,7 @@ class TestProposeLinkCandidate:
         assert rec["episode_id"] == src
 
     def test_records_thresholds_at_proposal_time(self):
-        from ariadne.core.cross_episode import propose_link_candidate
+        from astp.core.cross_episode import propose_link_candidate
         import json as _json
 
         driver = _FakeDriver()
@@ -549,7 +549,7 @@ class TestProposeLinkCandidate:
 
 class TestRecordCandidateRejection:
     def test_emits_candidate_rejected_audit_event(self):
-        from ariadne.core.cross_episode import record_candidate_rejection
+        from astp.core.cross_episode import record_candidate_rejection
 
         driver = _FakeDriver()
         audit_id = record_candidate_rejection(
@@ -571,7 +571,7 @@ class TestRecordCandidateRejection:
 
 class TestRecordLinkRejection:
     def test_carries_proposed_audit_event_id_for_correlation(self):
-        from ariadne.core.cross_episode import record_link_rejection
+        from astp.core.cross_episode import record_link_rejection
         import json as _json
 
         driver = _FakeDriver()

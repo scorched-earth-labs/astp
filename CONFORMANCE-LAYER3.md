@@ -262,7 +262,7 @@ The Behavioral tier is **NOT REQUIRED** for protocol conformance; the audit-the-
 - **SPEC.md §21** — normative protocol surface (v3.2.1); §2 Spine isolation, §3 CIA / G-36, §4–§6 schemas, §7 edges, §8 hash preimages, §9 immutability, §10 state machine, §11 audit registry, §12 three-tier conformance, Appendix B conformance checklist.
 - **IMPLEMENTATION-LAYER3.md** — Ignis reference adapter (non-normative); exact hash-preimage field orders, Neo4j storage layout, reference CIA.
 - **CONFORMANCE-BFM.md** — Branch/Fork/Merge conformance vectors (§19).
-- Ground-truth code: `ariadne/core/workflow_execution.py` (schemas + `compute_*_content_hash` functions), `ariadne/core/hash_canonical.py` (reference canonicalizer), `ariadne/core/branching.py` (`CognitiveDeltaType` Layer 3 audit values).
+- Ground-truth code: `astp/core/workflow_execution.py` (schemas + `compute_*_content_hash` functions), `astp/core/hash_canonical.py` (reference canonicalizer), `astp/core/branching.py` (`CognitiveDeltaType` Layer 3 audit values).
 
 ---
 

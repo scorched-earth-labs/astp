@@ -6,6 +6,11 @@ All notable changes to the Ariadne protocol. Version numbering follows [VERSIONI
 
 The next change-set queues here.
 
+### Changed (reference package — no protocol change)
+
+- The Python import package is renamed `ariadne` → `astp`, matching the distribution name (package version 0.2.0). `from ariadne.…` becomes `from astp.…`; nothing else about the API moves.
+- **Not renamed, deliberately:** the HKDF `info` strings (`ariadne.workspace.v1`, `ariadne.node.v1:{node_type}`, `ariadne.seal.v1`), the coordinator key prefix (`ariadne::`), the graph labels (`Ariadne*`), the `ARIADNE_ENABLED` flag, and the `Ariadne*` class names. The first three are inputs to derived keys or names of stored data; `tests/unit/protocol/test_wire_constants.py` pins them.
+
 ## [4.3.0] — 2026-09-13
 
 **MINOR.** Reproducibility. Motivated by the first corpus-scale re-verification of the

@@ -31,7 +31,7 @@ What is implementation-space:
 ## 2. Module Layout
 
 ```
-ariadne/
+astp/
 ├── core/
 │   ├── cross_episode.py         # EpisodeLink + Signal + LinkType/LinkHealthState/QuarantineResolution
 │   │                            #   + hash fn + governance + Part-I operation layer (assert / propose / reject)
@@ -49,13 +49,13 @@ tests/unit/protocol/
 └── test_grouping.py               # MembershipRecord / ConformanceDeclaration schema, hash, SemVer, succession
 ```
 
-`ariadne/core/*` is the protocol-level type module — adapter modules import **from** core, never the reverse. The operation-layer functions in `cross_episode.py` / `grouping.py` defer their adapter imports to call time so the type module stays importable in schema-only environments.
+`astp/core/*` is the protocol-level type module — adapter modules import **from** core, never the reverse. The operation-layer functions in `cross_episode.py` / `grouping.py` defer their adapter imports to call time so the type module stays importable in schema-only environments.
 
 ---
 
 ## 3. The Canonicalizer — Shared Across All §20 Hashes
 
-Unlike the BFM family (SPEC §19), which builds each preimage as a `PREFIX:`-tagged colon-joined string, **every §20 content hash is computed by `hash_preimage(model, ordered_fields)`** in `ariadne/core/hash_canonical.py`. The mechanism is:
+Unlike the BFM family (SPEC §19), which builds each preimage as a `PREFIX:`-tagged colon-joined string, **every §20 content hash is computed by `hash_preimage(model, ordered_fields)`** in `astp/core/hash_canonical.py`. The mechanism is:
 
 1. For each field name in `ordered_fields` (in order), read the model attribute and pass it through `canonical_value()`.
 2. Assemble an ordered `dict` field_name → canonical value.
@@ -93,7 +93,7 @@ There is **no domain-prefix string** in any §20 hash. Domain separation is prov
 ### 4.1 Public API
 
 ```python
-from ariadne.core.cross_episode import (
+from astp.core.cross_episode import (
     EpisodeLink, Signal, LinkType, LinkHealthState, QuarantineResolution,
     assert_episode_link,
     propose_link_candidate, record_candidate_rejection, record_link_rejection,
@@ -191,7 +191,7 @@ There is **no automatic** `QUARANTINED → BROKEN`: exit from quarantine require
 ### 5.1 Public API
 
 ```python
-from ariadne.core.grouping import (
+from astp.core.grouping import (
     MembershipRecord, MembershipRole, GroupingSystem,
     assert_membership_record,
     compute_membership_record_content_hash, stamp_membership_record_hash,
@@ -235,7 +235,7 @@ asserted_by, membership_role, supersedes_record_id, succession_reason
 ### 6.1 Public API
 
 ```python
-from ariadne.core.grouping import (
+from astp.core.grouping import (
     ConformanceDeclaration, Capability,
     register_conformance_declaration, bump_conformance_declaration,
     enforce_semver_format, classify_version_bump,
@@ -281,7 +281,7 @@ Declaration audit events anchor to a **synthetic chain key** `declaration:{group
 
 ## 7. Audit-Chain Substrate
 
-All §20 operation-layer functions advance a tamper-evident audit chain via `ariadne/core/audit_chain.py`:
+All §20 operation-layer functions advance a tamper-evident audit chain via `astp/core/audit_chain.py`:
 
 - `next_delta_sequence(driver, chain_key)` → next monotonic per-chain sequence (1 for empty; per §20 →11.5.3 sequences are within-Episode completeness proof, never cross-Episode ordering).
 - `prior_audit_hash(driver, chain_key)` → hash of the most recent record on the chain, or `GENESIS_HASH` (`"GENESIS"`) if empty.

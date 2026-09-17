@@ -30,7 +30,7 @@ from pathlib import Path
 
 SOURCE = (
     Path(__file__).resolve().parents[3]
-    / "ariadne" / "adapters" / "neo4j" / "crystallization.py"
+    / "astp" / "adapters" / "neo4j" / "crystallization.py"
 ).read_text(encoding="utf-8")
 
 

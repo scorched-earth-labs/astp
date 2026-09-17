@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Unit tests for the segment node type (ariadne.nodes.segment).
+"""Unit tests for the segment node type (astp.nodes.segment).
 
 Covers the minimal inline SegmentPayload, the create_segment_node convenience,
 self-registration on import, hash determinism (metadata excluded), validation,
@@ -19,16 +19,16 @@ round-trip, and an RARI-shaped episode→segments audit-trail scenario.
 """
 import pytest
 
-from ariadne.core.schema import sha3_256
-from ariadne.nodes import create_node
-from ariadne.nodes.episode import create_episode_node
-from ariadne.nodes.segment import SegmentPayload, create_segment_node
-from ariadne.protocol.node import CognitiveNode
-from ariadne.protocol.registry import REGISTRY
+from astp.core.schema import sha3_256
+from astp.nodes import create_node
+from astp.nodes.episode import create_episode_node
+from astp.nodes.segment import SegmentPayload, create_segment_node
+from astp.protocol.node import CognitiveNode
+from astp.protocol.registry import REGISTRY
 
 
 def test_segment_type_registered_on_import():
-    # Importing ariadne.nodes.segment (above) self-registered the type.
+    # Importing astp.nodes.segment (above) self-registered the type.
     assert REGISTRY.is_registered("segment")
     assert REGISTRY.get("segment").temporal_profile == "point"
 

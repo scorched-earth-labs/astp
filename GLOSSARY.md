@@ -12,7 +12,7 @@ Several ASTP terms have a **structural relationship** that's easy to miss readin
 
 > **`EpisodeNode`, `SegmentNode`, `SignalNode`, `HITLEventNode`, `ConsultationNode`, `CrystallizationDeltaNode`** are *colloquial names* for `CognitiveNode` instances with type-specific `NodePayload` subclasses. They are not separate classes parallel to `CognitiveNode` — they are parameterizations of it. See `CognitiveNode` and `NodePayload` for the underlying model.
 
-The legacy `EpisodeNode` / `SegmentNode` / `SignalNode` standalone classes in `ariadne/core/schema.py` are Phase 1 artifacts being migrated to the `CognitiveNode + NodePayload` shape. New implementations should target the `ariadne/protocol/` surface (`CognitiveNode`, `NodePayload`), not the legacy `core/schema.py` classes. See SPEC §4 for the canonical model.
+The legacy `EpisodeNode` / `SegmentNode` / `SignalNode` standalone classes in `astp/core/schema.py` are Phase 1 artifacts being migrated to the `CognitiveNode + NodePayload` shape. New implementations should target the `astp/protocol/` surface (`CognitiveNode`, `NodePayload`), not the legacy `core/schema.py` classes. See SPEC §4 for the canonical model.
 
 ---
 
@@ -33,7 +33,7 @@ Key fields:
 - `leaf_hash` (string, computed once at creation, never recomputed)
 - `payload` (serialized dict) — the type-specific data; protocol never reads internal fields
 
-Defined in `ariadne/protocol/node.py`. See SPEC §4.1.
+Defined in `astp/protocol/node.py`. See SPEC §4.1.
 
 ### NodePayload
 
@@ -42,11 +42,11 @@ Defined in `ariadne/protocol/node.py`. See SPEC §4.1.
 - `to_content_hash_input()` — canonical byte representation used for `content_hash`; must be deterministic
 - `to_dict()` — serialization for storage
 
-This is the abstraction boundary that lets new node types slot into the protocol without protocol-layer changes. Defined in `ariadne/protocol/node.py`.
+This is the abstraction boundary that lets new node types slot into the protocol without protocol-layer changes. Defined in `astp/protocol/node.py`.
 
 ### CognitiveEdge
 
-A typed, directed edge between cognitive nodes. Edges carry semantic meaning (e.g. `CONTAINS`, `PRECEDES`, `REFERENCES`) and are typed by both the edge itself and the nodes it connects. Defined in `ariadne/protocol/node.py`.
+A typed, directed edge between cognitive nodes. Edges carry semantic meaning (e.g. `CONTAINS`, `PRECEDES`, `REFERENCES`) and are typed by both the edge itself and the nodes it connects. Defined in `astp/protocol/node.py`.
 
 ---
 
@@ -58,7 +58,7 @@ Each of the following is a **`CognitiveNode` with `node_type=<type>` and a type-
 
 A `CognitiveNode` with `node_type="episode"` and an `EpisodePayload`. An **Episode** is a bounded unit of agent work — the first node type the protocol supports, and the entry point for most cognitive activity. Episodes have a formal lifecycle (see *Episode Lifecycle*).
 
-Defined via `ariadne/nodes/episode/payload.py` (`EpisodePayload`). See SPEC §4.4.
+Defined via `astp/nodes/episode/payload.py` (`EpisodePayload`). See SPEC §4.4.
 
 ### SegmentNode
 
@@ -274,7 +274,7 @@ A coordination protocol for multi-store writes that guarantees ordering and reco
 
 An interrupted write at any phase **must be recoverable** — all writes must be idempotent. The WIL state machine tracks each write through these phases and replays incomplete writes on recovery.
 
-Defined in `ariadne/core/wil.py`. See SPEC for the full WIL contract.
+Defined in `astp/core/wil.py`. See SPEC for the full WIL contract.
 
 ---
 
@@ -350,7 +350,7 @@ The architectural invariant enforced by G-2: a node's position in the graph is i
 
 ### Namespace Firewall
 
-The architectural invariant that `ariadne.protocol.*` modules cannot import from `ariadne.nodes.*`. Enforced by a test (`tests/unit/protocol/test_namespace_firewall.py`); a failure is a protocol-layer leak, not a style issue. Keeps the protocol layer node-generic. See CLAUDE.md.
+The architectural invariant that `astp.protocol.*` modules cannot import from `astp.nodes.*`. Enforced by a test (`tests/unit/protocol/test_namespace_firewall.py`); a failure is a protocol-layer leak, not a style issue. Keeps the protocol layer node-generic. See CLAUDE.md.
 
 ---
 
@@ -358,7 +358,7 @@ The architectural invariant that `ariadne.protocol.*` modules cannot import from
 
 ### AriadneAdapter
 
-The abstract interface any storage backend must implement to serve as an ASTP adapter. Provides methods for writing nodes, querying the graph, computing hashes, and recovering from WIL state. Defined in `ariadne/adapters/base.py`.
+The abstract interface any storage backend must implement to serve as an ASTP adapter. Provides methods for writing nodes, querying the graph, computing hashes, and recovering from WIL state. Defined in `astp/adapters/base.py`.
 
 ### ASI — Adapter Service Interface
 
@@ -366,7 +366,7 @@ The formal name for the abstract contract that any conforming adapter must imple
 
 ### Reference Implementation
 
-The Neo4j adapter in `ariadne/adapters/neo4j/`. Serves as the worked example of a conforming adapter — implementing its own ASI methods, the WIL state machine, crystallization, and the namespace firewall. Used as ground truth for the conformance test vectors.
+The Neo4j adapter in `astp/adapters/neo4j/`. Serves as the worked example of a conforming adapter — implementing its own ASI methods, the WIL state machine, crystallization, and the namespace firewall. Used as ground truth for the conformance test vectors.
 
 ### Conformance Layers
 

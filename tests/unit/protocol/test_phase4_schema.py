@@ -29,7 +29,7 @@ Pure unit tests (no driver). Verifies:
 
 import pytest
 
-from ariadne.core.branching import (
+from astp.core.branching import (
     AriadneGovernanceError,
     CoherenceFingerprint,
     ConfirmationCache,

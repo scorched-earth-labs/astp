@@ -29,8 +29,8 @@ from pathlib import Path
 
 import pytest
 
-from ariadne.core.wil import WILOperation
-from ariadne.core.branch_operations import _write_branch_wil
+from astp.core.wil import WILOperation
+from astp.core.branch_operations import _write_branch_wil
 
 
 # Every operation `_write_branch_wil` is called with across branch_operations.py.
@@ -101,7 +101,7 @@ class TestWILOperationVocabulary:
         It previously had none: callers wrote the segment directly and the
         absence of a ledger entry was indistinguishable from a lost one.
         """
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         assert hasattr(wil_adapter, "execute_segment_commit")
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
@@ -114,7 +114,7 @@ class TestWILOperationVocabulary:
         nothing recorded that it was meant to. An interrupted create was
         indistinguishable from one that never started.
         """
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         assert hasattr(wil_adapter, "execute_episode_create")
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
@@ -122,7 +122,7 @@ class TestWILOperationVocabulary:
 
     def test_episode_create_delegates_to_the_writer(self):
         """Must call create_episode_node, not carry a second copy of the MERGE."""
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_episode_create"):
@@ -131,7 +131,7 @@ class TestWILOperationVocabulary:
         assert "MERGE (e:AriadneEpisode" not in body
 
     def test_consultation_commit_is_emitted_by_the_library(self):
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         assert hasattr(wil_adapter, "execute_consultation_commit")
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
@@ -143,7 +143,7 @@ class TestWILOperationVocabulary:
         Writing them out of order builds the chain backwards, which is the
         failure G-8 exists to catch.
         """
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_consultation_commit"):
@@ -159,14 +159,14 @@ class TestWILOperationVocabulary:
         assert "COLLABORATION_COMMIT" not in {m.value for m in WILOperation}
 
     def test_attachment_commit_is_emitted_by_the_library(self):
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         assert hasattr(wil_adapter, "execute_attachment_commit")
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         assert "WILOperation.ATTACHMENT_COMMIT" in source
 
     def test_attachment_commit_delegates_to_the_writer(self):
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_attachment_commit"):
@@ -176,7 +176,7 @@ class TestWILOperationVocabulary:
 
     def test_codicil_append_is_emitted_by_the_library(self):
         """CODICIL_APPEND had neither a ledger entry nor a writer to ledger."""
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         assert hasattr(wil_adapter, "execute_codicil_append")
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
@@ -190,7 +190,7 @@ class TestWILOperationVocabulary:
         the signature a recovery needs. Ledgering only the delta write would
         leave the stuck state unexplained.
         """
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_crystallization"):
@@ -205,7 +205,7 @@ class TestWILOperationVocabulary:
 
     def test_crystallization_releases_the_lock_before_failing(self):
         """Order matters: a lock left held blocks every later write."""
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_crystallization"):
@@ -217,7 +217,7 @@ class TestWILOperationVocabulary:
     def test_failed_lock_fails_the_intent(self):
         """A lock that was never acquired wrote nothing, so the entry must not
         be left dangling as a false recovery candidate."""
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_crystallization"):
@@ -229,7 +229,7 @@ class TestWILOperationVocabulary:
     def test_archive_ledgers_its_implicit_crystallization(self):
         """Archiving may auto-crystallize; when it does, that is a real
         crystallization and gets its own entry rather than being implied."""
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_episode_archive"):
@@ -238,7 +238,7 @@ class TestWILOperationVocabulary:
         assert "redis_client=redis_client" in body
 
     def test_episode_close_is_emitted_by_the_library(self):
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         assert hasattr(wil_adapter, "execute_episode_close")
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
@@ -246,7 +246,7 @@ class TestWILOperationVocabulary:
 
     def test_episode_close_writes_record_and_transition_together(self):
         """Both halves inside one intent — see the docstring on the function."""
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_episode_close"):
@@ -256,7 +256,7 @@ class TestWILOperationVocabulary:
         assert "MERGE (cl:AriadneClosureRecord" not in body
 
     def test_codicil_append_delegates_to_the_writer(self):
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_codicil_append"):
@@ -271,7 +271,7 @@ class TestWILOperationVocabulary:
         coordinated write that duplicated the MERGE would bypass both — a
         ledger entry is not a licence to skip governance.
         """
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_segment_commit"):
@@ -352,7 +352,7 @@ class TestSpecRegisterAgreement:
         import re as _re
         from pathlib import Path as _Path
 
-        root = _Path(__file__).resolve().parents[3] / "ariadne"
+        root = _Path(__file__).resolve().parents[3] / "astp"
         source = "\n".join(
             p.read_text(encoding="utf-8") for p in root.rglob("*.py")
         )
@@ -383,7 +383,7 @@ class TestSpecRegisterAgreement:
         would be lying about its own shape.
         """
         import re as _re
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         coordinated = set(_re.findall(

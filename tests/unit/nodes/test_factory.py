@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Unit tests for the generic cognitive node factory (ariadne.nodes.factory).
+"""Unit tests for the generic cognitive node factory (astp.nodes.factory).
 
 Covers the one governed creation path shared by every node type: governance
 (node-type registration), payload validation, deterministic content hashing,
@@ -20,12 +20,12 @@ register_node_type extensibility hook.
 """
 import pytest
 
-from ariadne.core.schema import sha3_256
-from ariadne.nodes import create_node, register_node_type
-from ariadne.nodes.episode import EpisodePayload, create_episode_node
-from ariadne.protocol.errors import GovernanceViolation
-from ariadne.protocol.node import CognitiveNode
-from ariadne.protocol.registry import REGISTRY
+from astp.core.schema import sha3_256
+from astp.nodes import create_node, register_node_type
+from astp.nodes.episode import EpisodePayload, create_episode_node
+from astp.protocol.errors import GovernanceViolation
+from astp.protocol.node import CognitiveNode
+from astp.protocol.registry import REGISTRY
 
 
 def _episode_payload():

@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from ariadne.core.schema import (
+from astp.core.schema import (
     EpisodeStatus,
     G1_FROZEN_STATES,
     ORDERING_VERSION_CURRENT,
@@ -44,13 +44,13 @@ from ariadne.core.schema import (
     enforce_G1_write_guard,
     sha3_256,
 )
-from ariadne.core.crystallization import (
+from astp.core.crystallization import (
     CrystallizationScope,
     EpisodeVersionVector,
     build_crystallization_delta,
     compute_crystallization_content_hash,
 )
-from ariadne.protocol.node import CognitiveNode
+from astp.protocol.node import CognitiveNode
 
 
 def _h(i: int) -> str:
@@ -77,7 +77,7 @@ class TestRP001SpineRootFromStoredNodesOnly:
         v1_with_signals = compute_spine_hash(SEGMENTS, SIGNALS)
         assert v2 != v1_with_signals
         # v2 equals the adaptive tree over segments alone
-        from ariadne.core.merkle import compute_adaptive_spine_hash
+        from astp.core.merkle import compute_adaptive_spine_hash
         assert v2 == compute_adaptive_spine_hash(SEGMENTS, [], episode_id=EPISODE)[0]
 
     def test_sequence_order_is_binding(self):
@@ -149,7 +149,7 @@ class TestRP003VersionTagsSelectTheFunction:
         assert compute_crystallization_content_hash(tagged) == compute_crystallization_content_hash(legacy)
 
     def test_cognitive_node_carries_hash_version_outside_leaf_preimage(self):
-        from ariadne.protocol.leaf_hash import compute_leaf_hash_from_node
+        from astp.protocol.leaf_hash import compute_leaf_hash_from_node
         base = dict(node_type="segment", sequence_index=3, content_hash=_h(1), authored_by="a",
                     created_at=datetime(2026, 9, 13, tzinfo=timezone.utc), payload={})
         n1 = CognitiveNode(**base)

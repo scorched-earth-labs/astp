@@ -24,7 +24,7 @@ from uuid import uuid4
 
 import pytest
 
-from ariadne.core.branching import (
+from astp.core.branching import (
     AriadneGovernanceError,
     BranchReturnEdge,
     ConflictManifest,

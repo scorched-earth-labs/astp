@@ -21,25 +21,25 @@ must pass for Phase 3 Protocol Conformance (Level 1).
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from ariadne.core.schema import sha3_256
-from ariadne.protocol.keys import (
+from astp.core.schema import sha3_256
+from astp.protocol.keys import (
     derive_workspace_key, derive_node_key, derive_seal_key,
     NodeKeyRecord, enforce_key_version_monotonicity,
 )
-from ariadne.protocol.anchor import (
+from astp.protocol.anchor import (
     AnchorCommitment, build_anchor_commitment,
 )
-from ariadne.protocol.witness import (
+from astp.protocol.witness import (
     WitnessRole, WitnessRecord, compute_witness_commitment,
     verify_witness_commitment, enforce_witness_threshold,
 )
-from ariadne.protocol.chain_proof import (
+from astp.protocol.chain_proof import (
     ProofLink, ProofChain, ChainVerificationResult,
     compute_chain_root, build_proof_chain, verify_proof_chain,
 )
-from ariadne.protocol.merkle import MerkleTree
-from ariadne.protocol.leaf_hash import compute_leaf_hash
-from ariadne.protocol.errors import GovernanceViolation, MonotonicityViolation
+from astp.protocol.merkle import MerkleTree
+from astp.protocol.leaf_hash import compute_leaf_hash
+from astp.protocol.errors import GovernanceViolation, MonotonicityViolation
 
 
 # ── Reference Values ─────────────────────────────────────────────────────────
@@ -297,8 +297,8 @@ class TestWitnessSignatures:
 
 def _make_test_tree_and_root(content: str = "test") -> tuple:
     """Helper: build a simple Merkle tree and return (root, inclusion_proof)."""
-    from ariadne.protocol.merkle import MerkleTree, InclusionProof
-    from ariadne.protocol.leaf_hash import compute_leaf_hash
+    from astp.protocol.merkle import MerkleTree, InclusionProof
+    from astp.protocol.leaf_hash import compute_leaf_hash
     from uuid import UUID
 
     node_id = UUID(NODE_ID)
