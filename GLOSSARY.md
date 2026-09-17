@@ -394,6 +394,10 @@ Test cases stated in the `CONFORMANCE*.md` documents — inputs plus the propert
 
 For protocol amendments: the ASTP Episode that **ratifies** the change cryptographically. The amendment document is the human-readable description; the Episode of Record is the authoritative cryptographic anchor. Amendments without an Episode of Record are drafts, not ratified surface. See `VERSIONING.md`.
 
+### Resolved Signal Order
+
+An optional **annotation** on a `CrystallizationDelta` (`resolved_signal_order`, SPEC §5.8.1): the order of same-timestamp SPINE-placed Signals that reproduces a seal made under `ordering_version` 1, which did not determine that order. Outside every hash preimage; written by a verification run, never by a re-seal; and checked, never trusted — a verifier uses it only if it is a reordering of the stored Signal hashes that reproduces the sealed root. Its absence says nothing against a seal. Distinct from a §5.8 version identifier, which names a construction rather than supplying one of its inputs.
+
 ### Schema Version
 
 The version of an individual node-type's payload schema, recorded as the `schema_version` field on `CognitiveNode`. Distinct from the protocol's overall version (which lives in `SPEC.md`'s header).

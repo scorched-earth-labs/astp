@@ -32,4 +32,4 @@ Packages:
 __version__ = "0.2.0"
 
 # The SPEC.md version this package implements.
-PROTOCOL_VERSION = "4.4.0"
+PROTOCOL_VERSION = "4.5.0"

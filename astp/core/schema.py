@@ -505,6 +505,70 @@ def compute_spine_root_v2(segment_content_hashes: list[str], episode_id: Optiona
     return root
 
 
+def reproduce_spine_root(
+    segment_content_hashes: list[str],
+    signal_content_hashes_in_order: list[str],
+    *,
+    spine_algorithm_version: int,
+    ordering_version: int,
+    episode_id: Optional[str] = None,
+) -> str:
+    """Recompute a sealed spine root under the construction its §5.8 tags name.
+
+    This is the selection SPEC §9.3 asks of a verifier: the tags pick the
+    function, nothing else does. ``spine_algorithm_version`` 1 prepends the
+    Episode-identifier leaf and therefore requires ``episode_id``; version 0 has
+    no such leaf. ``ordering_version`` 1 appends the SPINE-placed signals, in the
+    order given, after the segments; version 2 has segments only and ignores
+    the signals argument. Unknown values are refused rather than guessed at.
+    """
+    if spine_algorithm_version not in (SPINE_ALGORITHM_VERSION_LEGACY, SPINE_ALGORITHM_VERSION_CURRENT):
+        raise ValueError(f"unknown spine_algorithm_version {spine_algorithm_version!r}")
+    if ordering_version not in (ORDERING_VERSION_LEGACY, ORDERING_VERSION_CURRENT):
+        raise ValueError(f"unknown ordering_version {ordering_version!r}")
+    if spine_algorithm_version == SPINE_ALGORITHM_VERSION_CURRENT and not episode_id:
+        raise ValueError("spine_algorithm_version 1 includes the Episode-identifier leaf: episode_id is required")
+
+    from astp.core.merkle import compute_adaptive_spine_hash
+
+    signals = list(signal_content_hashes_in_order) if ordering_version == ORDERING_VERSION_LEGACY else []
+    uid = episode_id if spine_algorithm_version == SPINE_ALGORITHM_VERSION_CURRENT else None
+    root, _ = compute_adaptive_spine_hash(list(segment_content_hashes), signals, episode_id=uid)
+    return root
+
+
+def check_resolved_signal_order(
+    resolved_signal_order: list[str],
+    *,
+    segment_content_hashes: list[str],
+    stored_signal_content_hashes: list[str],
+    sealed_root: str,
+    spine_algorithm_version: int,
+    ordering_version: int,
+    episode_id: Optional[str] = None,
+) -> bool:
+    """Whether a ``resolved_signal_order`` annotation is admissible (SPEC §5.8).
+
+    The annotation is checked, never trusted. It is admissible only if the seal
+    is ``ordering_version`` 1, the listed hashes are exactly the Episode's stored
+    SPINE-placed signal hashes in some order, and that order reproduces
+    ``sealed_root``. An inadmissible annotation is simply ignored — it cannot
+    make a root verify that would not otherwise, and its absence or rejection
+    says nothing against the seal.
+    """
+    if ordering_version != ORDERING_VERSION_LEGACY:
+        return False
+    if sorted(resolved_signal_order) != sorted(stored_signal_content_hashes):
+        return False
+    return reproduce_spine_root(
+        segment_content_hashes,
+        resolved_signal_order,
+        spine_algorithm_version=spine_algorithm_version,
+        ordering_version=ordering_version,
+        episode_id=episode_id,
+    ) == sealed_root
+
+
 def compute_signal_manifest_hash(signal_content_hashes: list[str]) -> str:
     """The signal manifest is a SET: SHA3-256 over the domain prefix and the
     signal content hashes sorted lexicographically, ``|``-joined. Order of

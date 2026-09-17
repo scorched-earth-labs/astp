@@ -10,6 +10,21 @@ The next change-set queues here.
 
 - `verify_proof_chain` verified each link's inclusion proof against the root *the proof* named, never against the link's own `spine_root`, so a chain whose links carried valid proofs for unrelated trees verified. §16.5.3 (1) has always required the proof to verify against `link.spine_root`; the reference implementation now does.
 
+## [4.5.0] — 2026-09-17
+
+**MINOR.** `resolved_signal_order` — an optional annotation that records the order of same-timestamp Signals a seal made under `ordering_version` 1 depended on. Additive: nothing already conformant changes, and no sealed root changes.
+
+4.4.1 stated that `ordering_version` 1 does not determine that order, so such a seal is reproducible only by search. This release says what an implementation may do once the search has succeeded: write down what it found, so the next verifier checks one ordering instead of looking for it.
+
+### Added
+- **§5.8.1 `resolved_signal_order`.** An annotation on the `CrystallizationDelta`, not a version identifier — an identifier names a construction, the annotation supplies an input the construction left undetermined. It is outside every hash preimage; written by a verification run, never by a re-seal; and **checked, never trusted**: a verifier MUST NOT use it unless it is a reordering of the Episode's stored SPINE-placed Signal hashes that reproduces `sealed_chain_root`, and MUST ignore one that is not. A false annotation cannot make a root verify; it can only fail to help. It has no meaning under `ordering_version` 2 and MUST be ignored there. Its absence carries no adverse inference — a seal resolved by search reproduces to the same root as an annotated one. Because the listed values are unsalted content hashes, an exported proof that withholds the leaf list MUST withhold the annotation too. §9.3 refers to it.
+- **`CONFORMANCE-REPRODUCIBILITY.md` 1.2.0 — RP-005 … RP-008**, with expected digests: an admissible annotation reproduces a tie-order seal under both `spine_algorithm_version` values (RP-005); a wrong order, a foreign hash, and a correct order over a tampered record are each inadmissible (RP-006); an `ordering_version` 2 seal ignores a stray annotation (RP-007); a seal resolved by search is reported as reproduced, and is kept distinct from a root that no ordering reproduces (RP-008).
+- **`GLOSSARY.md`:** *Resolved Signal Order*.
+- Reference package: `reproduce_spine_root` — the §9.3 selection of a reproduction function from a seal's §5.8 identifiers, refusing identifiers it does not know — and `check_resolved_signal_order`. The tests pin the RP-005 … RP-008 digests.
+
+### Provenance
+- Admitted on a demonstration rather than on argument: on 2026-09-17 the reference deployment recorded the annotation for its four tie-order seals — among them the 4.0.0 Episode of Record — and a clean verification run then reproduced all four from the recorded order, with no search.
+
 ## [4.4.1] — 2026-09-17
 
 **PATCH (errata).** The spine and Episode-root constructions are now stated byte-exactly, **as the reference implementation has always built them**. No construction changes; no sealed root changes. Where the text and the code disagreed, the text is corrected to the code, because §9.3 obliges a verifier to reproduce existing seals and the code is what made them. Constructions that should be different are a matter for the next MAJOR, not for an erratum.

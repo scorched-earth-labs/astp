@@ -1,6 +1,6 @@
 # ASTP — Reproducibility Conformance Test Vectors
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Status:** Working Draft
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-17
@@ -126,16 +126,57 @@ Reference implementation: `astp/core/schema.py` (`compute_spine_root_v2`,
 
 ---
 
-## 6. Governance Rule Enforcement Matrix
+## 6. Resolved Signal Order (§5.8.1)
+
+These vectors share one fixture. Segments: the seven of RP-001. SPINE-placed Signals: the five of RP-002, `SHA3-256("leaf-100")` … `SHA3-256("leaf-104")`, stored in that (arrival) order, of which the middle three — `leaf-101`, `leaf-102`, `leaf-103` — share a timestamp. At seal time the Signals were folded in the order `leaf-100, leaf-103, leaf-101, leaf-102, leaf-104`. `episode_id` as in RP-001. `ordering_version` 1.
+
+```
+sealed_chain_root, spine_algorithm_version 1     1dda20e990cf757302e67f96173703a2a0f846feb2c6c0f34870a2e173aeed33
+sealed_chain_root, spine_algorithm_version 0     863ded60b9adce9cf3703b8892c5bf5263fa09153a81aa21778517789f9aa2c2
+root under the stored (arrival) order, version 1 2ff4e255c1e7470aa8a30a8b1fbde6cecb690e1d4ffaefb31a0ae26b6fce44ba   (≠ sealed: the seal is a tie-order seal)
+```
+
+**RP-005** — An Admissible Annotation Reproduces the Seal Without a Search
+- **Class:** REQUIRED for implementations that read or write `resolved_signal_order`
+- **Spec Reference:** §5.8.1, §9.3
+- **Description:** Given the fixture and `resolved_signal_order = [leaf-100, leaf-103, leaf-101, leaf-102, leaf-104]` (as content hashes), a verifier recomputes the spine once, under the seal's identifiers, and obtains the sealed root — for `spine_algorithm_version` 1 and, with the corresponding sealed root, for version 0.
+- **Expected Output:** the two `sealed_chain_root` values above; the annotation is reported admissible; no ordering other than the recorded one is tried.
+- **Failure Condition:** Either root differs; the verifier searches despite an admissible annotation.
+
+**RP-006** — An Annotation Is Checked, Never Trusted
+- **Class:** REQUIRED for implementations that read `resolved_signal_order`
+- **Spec Reference:** §5.8.1
+- **Description:** Three inadmissible annotations against the `spine_algorithm_version` 1 fixture. (a) *Wrong order:* `[leaf-100, leaf-101, leaf-103, leaf-102, leaf-104]` — a reordering of the stored Signals that does not reproduce the root. (b) *Foreign hash:* the correct order with its last entry replaced by `SHA3-256("x")`, which is not a Signal of the Episode. (c) *Tampered record:* the correct order, but the first Segment's content hash replaced by `SHA3-256("t")`.
+- **Expected Output:** each annotation is reported inadmissible and is ignored. In (a) and (b) the verifier proceeds as if no annotation were present and may still reproduce the seal by search. In (c) the seal does not reproduce under any order: the correct annotation does not rescue a tampered record.
+- **Failure Condition:** Any of the three is accepted; (c) verifies.
+
+**RP-007** — An `ordering_version` 2 Seal Ignores a Stray Annotation
+- **Class:** REQUIRED for implementations that read `resolved_signal_order`
+- **Spec Reference:** §5.8.1
+- **Description:** A seal tagged `ordering_version` 2 over the RP-001 segments (sealed root as in RP-001, `spine_algorithm_version` 1) whose delta nonetheless carries a `resolved_signal_order`.
+- **Expected Output:** the annotation is ignored; the seal verifies exactly as RP-001, to `3cdbc3f20a909338a55a5b9687d72ce4b6f74ad1d3784a377c91b1bba06f2491`.
+- **Failure Condition:** The annotation alters the recomputation or the outcome.
+
+**RP-008** — Absence of an Annotation Carries No Adverse Inference
+- **Class:** REQUIRED
+- **Spec Reference:** §5.8.1, §9.3
+- **Description:** The `spine_algorithm_version` 1 fixture with **no** annotation. Searching the orderings of the tied group (3! = 6) finds the sealed order. Separately, the same fixture with a sealed root that no ordering reproduces.
+- **Expected Output:** the first seal reproduces to the same `sealed_chain_root` as in RP-005 and is reported as reproduced — no weaker for having been found by search. The second is reported as not reproducible. The two outcomes MUST be distinguishable: "reproduced without an annotation" is not "could not be reproduced".
+- **Failure Condition:** A search-resolved seal is reported as weaker than, or different in root from, an annotated one; the two outcomes are conflated.
+
+---
+
+## 7. Governance Rule Enforcement Matrix
 
 | Governance Rule | Description | Test Vectors | Class |
 |----------------|-------------|-------------|-------|
 | **G-1** | Write guard — no appends to a fixed record | RP-004 | REQUIRED |
 | §9.3 | Reproducibility obligation | RP-001, RP-002, RP-003 | REQUIRED |
+| §5.8.1 | `resolved_signal_order` is checked, never trusted; absence carries no inference | RP-005, RP-006, RP-007, RP-008 | REQUIRED (RP-005–007 for implementations that use the annotation) |
 
-## 7. Out of Scope
+## 8. Out of Scope
 
-- Reproduction of seals written under `ordering_version` 1 with colliding arrival timestamps. Such seals are reproducible only by search; an implementation MAY record a verified-by-search attestation (§5.8) but no vector requires it.
+- How an implementation finds the order of same-timestamp Signals for an `ordering_version` 1 seal (search strategy, caps, scheduling). §6 covers what may be recorded once it is found and how a recorded order must be checked; a seal whose tied groups are too large to search, and which has no admissible annotation, is not reproducible, and no vector requires otherwise.
 - Re-sealing of historical records. Prohibited by §5.8 — a re-seal is a post-closure mutation.
 
 ---

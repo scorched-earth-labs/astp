@@ -287,3 +287,102 @@ class TestSpineTreeAsSpecified:
     def test_empty_leaf_list_has_no_root(self):
         with pytest.raises(ValueError):
             compute_spine_root_v2([])
+
+
+# ── RP-005 … RP-008: resolved_signal_order (SPEC §5.8.1) ──────────────────────
+
+ARRIVAL = SIGNALS                                                   # stored order; 101–103 share a timestamp
+SEALED_ORDER = [SIGNALS[0], SIGNALS[3], SIGNALS[1], SIGNALS[2], SIGNALS[4]]
+TIE_ROOT_ALG1 = "1dda20e990cf757302e67f96173703a2a0f846feb2c6c0f34870a2e173aeed33"
+TIE_ROOT_ALG0 = "863ded60b9adce9cf3703b8892c5bf5263fa09153a81aa21778517789f9aa2c2"
+ARRIVAL_ROOT_ALG1 = "2ff4e255c1e7470aa8a30a8b1fbde6cecb690e1d4ffaefb31a0ae26b6fce44ba"
+
+
+def _check(order, **override):
+    from astp.core.schema import check_resolved_signal_order
+
+    kw = dict(segment_content_hashes=SEGMENTS, stored_signal_content_hashes=ARRIVAL, sealed_root=TIE_ROOT_ALG1,
+              spine_algorithm_version=1, ordering_version=ORDERING_VERSION_LEGACY, episode_id=EPISODE)
+    kw.update(override)
+    return check_resolved_signal_order(order, **kw)
+
+
+class TestRP005AdmissibleAnnotation:
+    def test_pinned_roots(self):
+        from astp.core.schema import reproduce_spine_root
+
+        assert reproduce_spine_root(SEGMENTS, SEALED_ORDER, spine_algorithm_version=1,
+                                    ordering_version=1, episode_id=EPISODE) == TIE_ROOT_ALG1
+        assert reproduce_spine_root(SEGMENTS, SEALED_ORDER, spine_algorithm_version=0,
+                                    ordering_version=1) == TIE_ROOT_ALG0
+        assert reproduce_spine_root(SEGMENTS, ARRIVAL, spine_algorithm_version=1,
+                                    ordering_version=1, episode_id=EPISODE) == ARRIVAL_ROOT_ALG1 != TIE_ROOT_ALG1
+
+    def test_admissible_under_both_algorithm_versions(self):
+        assert _check(SEALED_ORDER) is True
+        assert _check(SEALED_ORDER, sealed_root=TIE_ROOT_ALG0, spine_algorithm_version=0, episode_id=None) is True
+
+
+class TestRP006CheckedNeverTrusted:
+    def test_wrong_order_is_inadmissible(self):
+        assert _check([SIGNALS[0], SIGNALS[1], SIGNALS[3], SIGNALS[2], SIGNALS[4]]) is False
+
+    def test_foreign_hash_is_inadmissible(self):
+        assert _check(SEALED_ORDER[:-1] + [sha3_256(b"x")]) is False
+
+    def test_correct_annotation_does_not_rescue_a_tampered_record(self):
+        assert _check(SEALED_ORDER, segment_content_hashes=[sha3_256(b"t")] + SEGMENTS[1:]) is False
+
+    def test_duplicated_or_dropped_members_are_inadmissible(self):
+        assert _check(SEALED_ORDER + [SIGNALS[0]]) is False
+        assert _check(SEALED_ORDER[:-1]) is False
+
+
+class TestRP007OrderingVersion2IgnoresTheAnnotation:
+    def test_annotation_is_never_admissible_on_a_v2_seal(self):
+        v2_root = compute_spine_root_v2(SEGMENTS, episode_id=EPISODE)
+        assert _check(SEALED_ORDER, sealed_root=v2_root, ordering_version=ORDERING_VERSION_CURRENT) is False
+
+    def test_v2_root_does_not_depend_on_signals_at_all(self):
+        from astp.core.schema import reproduce_spine_root
+
+        with_sigs = reproduce_spine_root(SEGMENTS, SEALED_ORDER, spine_algorithm_version=1,
+                                         ordering_version=2, episode_id=EPISODE)
+        assert with_sigs == TestPinnedDigests.RP001_SPINE_ROOT_ALG1
+
+
+class TestRP008AbsenceCarriesNoInference:
+    @staticmethod
+    def _search(sealed_root):
+        import itertools
+        from astp.core.schema import reproduce_spine_root
+
+        head, tied, tail = ARRIVAL[:1], ARRIVAL[1:4], ARRIVAL[4:]
+        for perm in itertools.permutations(tied):
+            order = head + list(perm) + tail
+            if reproduce_spine_root(SEGMENTS, order, spine_algorithm_version=1,
+                                    ordering_version=1, episode_id=EPISODE) == sealed_root:
+                return order
+        return None
+
+    def test_search_finds_the_same_root_an_annotation_would(self):
+        assert self._search(TIE_ROOT_ALG1) == SEALED_ORDER
+
+    def test_a_root_no_order_reproduces_is_a_different_outcome(self):
+        assert self._search(sha3_256(b"no ordering yields this")) is None
+
+
+class TestReproduceSpineRootRefusesToGuess:
+    def test_unknown_versions_are_refused(self):
+        from astp.core.schema import reproduce_spine_root
+
+        with pytest.raises(ValueError, match="spine_algorithm_version"):
+            reproduce_spine_root(SEGMENTS, [], spine_algorithm_version=7, ordering_version=2, episode_id=EPISODE)
+        with pytest.raises(ValueError, match="ordering_version"):
+            reproduce_spine_root(SEGMENTS, [], spine_algorithm_version=1, ordering_version=9, episode_id=EPISODE)
+
+    def test_algorithm_1_requires_the_episode_identifier(self):
+        from astp.core.schema import reproduce_spine_root
+
+        with pytest.raises(ValueError, match="episode_id is required"):
+            reproduce_spine_root(SEGMENTS, [], spine_algorithm_version=1, ordering_version=2)
