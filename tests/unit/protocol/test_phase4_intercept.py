@@ -24,25 +24,13 @@ Verifies:
   - registry.recent returns newest-first
 """
 
-import os
 from typing import Any, Dict, List
-from uuid import uuid4
 
-import pytest
-
-
-os.environ["ARIADNE_ENABLED"] = "true"
-
-import importlib  # noqa: E402
-from ariadne.adapters.neo4j import writer as ariadne_writer  # noqa: E402
-importlib.reload(ariadne_writer)
-ariadne_writer.ARIADNE_ENABLED = True
-
-from ariadne.core.branching import (  # noqa: E402
+from astp.core.branching import (
     DetectionState,
     IntentClass,
 )
-from ariadne.core.coherence import (  # noqa: E402
+from astp.core.coherence import (
     CoherenceFingerprintRegistry,
     detect_branch_candidate,
     intercept_segment_write,

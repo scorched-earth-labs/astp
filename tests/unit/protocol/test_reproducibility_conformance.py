@@ -18,18 +18,13 @@ SPEC 4.3.0 §5.6–§5.8 and §9.3. A sealed root MUST be reconstructible from
 stored nodes alone, with no out-of-band state; the signal manifest MUST be
 order-independent; version tags MUST select the reproduction function; and
 an Episode whose record is fixed MUST refuse new content.
-
-Background: the 2026-09-13 corpus-scale re-verification of 62 sealed
-Episodes found 4 seals reproducible only by searching same-timestamp signal
-orderings, 8 reproducible only under a replaced hash function, and one
-post-closure append. Every vector here targets one of those.
 """
 import random
 from datetime import datetime, timezone
 
 import pytest
 
-from ariadne.core.schema import (
+from astp.core.schema import (
     EpisodeStatus,
     G1_FROZEN_STATES,
     ORDERING_VERSION_CURRENT,
@@ -44,13 +39,13 @@ from ariadne.core.schema import (
     enforce_G1_write_guard,
     sha3_256,
 )
-from ariadne.core.crystallization import (
+from astp.core.crystallization import (
     CrystallizationScope,
     EpisodeVersionVector,
     build_crystallization_delta,
     compute_crystallization_content_hash,
 )
-from ariadne.protocol.node import CognitiveNode
+from astp.protocol.node import CognitiveNode
 
 
 def _h(i: int) -> str:
@@ -77,7 +72,7 @@ class TestRP001SpineRootFromStoredNodesOnly:
         v1_with_signals = compute_spine_hash(SEGMENTS, SIGNALS)
         assert v2 != v1_with_signals
         # v2 equals the adaptive tree over segments alone
-        from ariadne.core.merkle import compute_adaptive_spine_hash
+        from astp.core.merkle import compute_adaptive_spine_hash
         assert v2 == compute_adaptive_spine_hash(SEGMENTS, [], episode_id=EPISODE)[0]
 
     def test_sequence_order_is_binding(self):
@@ -149,7 +144,7 @@ class TestRP003VersionTagsSelectTheFunction:
         assert compute_crystallization_content_hash(tagged) == compute_crystallization_content_hash(legacy)
 
     def test_cognitive_node_carries_hash_version_outside_leaf_preimage(self):
-        from ariadne.protocol.leaf_hash import compute_leaf_hash_from_node
+        from astp.protocol.leaf_hash import compute_leaf_hash_from_node
         base = dict(node_type="segment", sequence_index=3, content_hash=_h(1), authored_by="a",
                     created_at=datetime(2026, 9, 13, tzinfo=timezone.utc), payload={})
         n1 = CognitiveNode(**base)
@@ -159,18 +154,235 @@ class TestRP003VersionTagsSelectTheFunction:
         assert compute_leaf_hash_from_node(n1) == compute_leaf_hash_from_node(n2)
 
 
-class TestRP004FixedRecordRefusesContent:
-    """RP-004 — G-1 refuses appends from CLOSING_PENDING_SEAL onward, including
-    CLOSED, the state the reference deployment seals into."""
+# RP-004's fixed and open states, as CONFORMANCE-REPRODUCIBILITY.md lists them.
+# Deliberately spelled out here rather than derived from G1_FROZEN_STATES, so
+# the vector checks the guard against the document and not against itself.
+RP004_FIXED_STATES = [
+    EpisodeStatus.CLOSING_PENDING_SEAL,
+    EpisodeStatus.CLOSED,
+    EpisodeStatus.CRYSTALLIZATION_PENDING,
+    EpisodeStatus.SEALING,
+    EpisodeStatus.SEALED,
+    EpisodeStatus.ARCHIVED,
+]
+RP004_OPEN_STATES = [
+    EpisodeStatus.CREATED,
+    EpisodeStatus.ACTIVE,
+    EpisodeStatus.PENDING_HITL,
+    EpisodeStatus.CLOSING,
+    EpisodeStatus.CRYSTALLIZED,
+]
 
-    @pytest.mark.parametrize("state", sorted(G1_FROZEN_STATES, key=lambda s: s.value))
+
+class TestRP004FixedRecordRefusesContent:
+    """RP-004 — G-1 refuses appends to an Episode whose record is fixed:
+    CLOSING_PENDING_SEAL onward, CLOSED included."""
+
+    @pytest.mark.parametrize("state", RP004_FIXED_STATES)
     def test_frozen_states_refuse(self, state):
         with pytest.raises(AriadneGovernanceError):
             enforce_G1_write_guard(state)
 
-    @pytest.mark.parametrize("state", [EpisodeStatus.CREATED, EpisodeStatus.ACTIVE, EpisodeStatus.CLOSING, EpisodeStatus.PENDING_HITL, EpisodeStatus.CRYSTALLIZED])
+    @pytest.mark.parametrize("state", RP004_OPEN_STATES)
     def test_open_states_admit(self, state):
         enforce_G1_write_guard(state)
 
+    def test_fixed_and_open_partition_the_lifecycle(self):
+        fixed, open_ = set(RP004_FIXED_STATES), set(RP004_OPEN_STATES)
+        assert fixed | open_ == set(EpisodeStatus)
+        assert fixed & open_ == set()
+
+    def test_guard_constant_matches_the_vector(self):
+        assert set(G1_FROZEN_STATES) == set(RP004_FIXED_STATES)
+
     def test_closed_is_frozen(self):
         assert EpisodeStatus.CLOSED in G1_FROZEN_STATES
+
+
+class TestPinnedDigests:
+    """Known-answer vectors: the expected values published in
+    CONFORMANCE-REPRODUCIBILITY.md (RP-001, RP-002).
+
+    Every other test in this file checks that the constructions agree with
+    themselves. These check that they have not changed. A change to a prefix,
+    an encoding, the odd-node rule or the hash function fails here and nowhere
+    else — which is the point.
+    """
+
+    RP001_SPINE_ROOT_ALG1 = "3cdbc3f20a909338a55a5b9687d72ce4b6f74ad1d3784a377c91b1bba06f2491"
+    RP001_SPINE_ROOT_ALG0 = "0654211304f104a768b81432567776c7f13f65b97e4937f114f5c65e8dbc5fed"
+    RP002_MANIFEST_5 = "0a4a4582ad36da24dcd21853b07ed97d13a8c223cf14845588861d9d5786b670"
+    RP002_MANIFEST_4 = "5b73a9aa0cf76aaa0399dce72733b48d5e441b7f236dc063d570eecdde5ff22d"
+    RP002_MANIFEST_EMPTY = "5188531fe69daafc79126dfa880419494179ca220d60d5dda2fee8279d4ae847"
+    RP002_EXCLUSION_EMPTY = "45849be4da47e279538916284a2ac74cd6acd60a67b9a8982992f97afa149be6"
+    RP002_EPISODE_ROOT = "49c1b61c22d00c185dceca5eb39f65bd88c2666281444687c59c48b0b199d7fe"
+
+    def test_inputs_are_what_the_document_says(self):
+        assert SEGMENTS[0] == "aa6c290f56f0f7eb3a8da563ae72efc5d10cc89b88a3112c612d8e3825e20aad"
+        assert sha3_256(EPISODE.encode()) == (
+            "0bdfe537564300a840a9b2279b3c4d0c8ca0e0c3b0c3d9c95c105852f991f222"
+        )
+
+    def test_rp001_spine_root_with_episode_identifier_leaf(self):
+        assert compute_spine_root_v2(SEGMENTS, episode_id=EPISODE) == self.RP001_SPINE_ROOT_ALG1
+
+    def test_rp001_spine_root_without_episode_identifier_leaf(self):
+        assert compute_spine_root_v2(SEGMENTS) == self.RP001_SPINE_ROOT_ALG0
+
+    def test_rp002_manifest(self):
+        assert compute_signal_manifest_hash(SIGNALS) == self.RP002_MANIFEST_5
+        assert compute_signal_manifest_hash(list(reversed(SIGNALS)) + SIGNALS[:2]) == self.RP002_MANIFEST_5
+        assert compute_signal_manifest_hash(SIGNALS[:4]) == self.RP002_MANIFEST_4
+
+    def test_rp002_empty_sets(self):
+        assert compute_signal_manifest_hash([]) == self.RP002_MANIFEST_EMPTY
+        assert compute_exclusion_hash([]) == self.RP002_EXCLUSION_EMPTY
+
+    def test_rp002_episode_root(self):
+        assert compute_episode_root_hash(
+            self.RP001_SPINE_ROOT_ALG1, self.RP002_MANIFEST_5, self.RP002_EXCLUSION_EMPTY
+        ) == self.RP002_EPISODE_ROOT
+
+
+class TestSpineTreeAsSpecified:
+    """SPEC §5.3–§5.6 and §5.8, re-implemented here from the prose with hashlib
+    only, and compared with the library across tree sizes. If the specification
+    text and the code ever describe different trees, this fails."""
+
+    @staticmethod
+    def _tree(inputs):
+        import hashlib
+
+        def h(b):
+            return hashlib.sha3_256(b).hexdigest()
+
+        level = [h(b"LEAF:" + x.encode("ascii")) for x in inputs]
+        while len(level) > 1:
+            level = [
+                h(b"NODE:" + level[i].encode("ascii") + level[i + 1].encode("ascii"))
+                if i + 1 < len(level)
+                else level[i]  # unpaired node is carried up unchanged
+                for i in range(0, len(level), 2)
+            ]
+        return level[0]
+
+    @pytest.mark.parametrize("n", [1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 33, 64, 65])
+    def test_algorithm_0_is_the_bare_tree(self, n):
+        leaves = [_h(i) for i in range(n)]
+        assert compute_spine_root_v2(leaves) == self._tree(leaves)
+        assert compute_spine_hash(leaves, []) == self._tree(leaves)
+
+    @pytest.mark.parametrize("n", [1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 33, 64, 65])
+    def test_algorithm_1_prepends_the_episode_identifier_leaf(self, n):
+        leaves = [_h(i) for i in range(n)]
+        expected = self._tree([sha3_256(EPISODE.encode("utf-8"))] + leaves)
+        assert compute_spine_root_v2(leaves, episode_id=EPISODE) == expected
+
+    def test_ordering_version_1_appends_signals_after_segments(self):
+        assert compute_spine_hash(SEGMENTS, SIGNALS) == self._tree(SEGMENTS + SIGNALS)
+
+    def test_single_leaf_root_is_the_leaf_hash(self):
+        assert compute_spine_root_v2(SEGMENTS[:1]) == sha3_256(b"LEAF:" + SEGMENTS[0].encode())
+
+    def test_empty_leaf_list_has_no_root(self):
+        with pytest.raises(ValueError):
+            compute_spine_root_v2([])
+
+
+# ── RP-005 … RP-008: resolved_signal_order (SPEC §5.8.1) ──────────────────────
+
+ARRIVAL = SIGNALS                                                   # stored order; 101–103 share a timestamp
+SEALED_ORDER = [SIGNALS[0], SIGNALS[3], SIGNALS[1], SIGNALS[2], SIGNALS[4]]
+TIE_ROOT_ALG1 = "1dda20e990cf757302e67f96173703a2a0f846feb2c6c0f34870a2e173aeed33"
+TIE_ROOT_ALG0 = "863ded60b9adce9cf3703b8892c5bf5263fa09153a81aa21778517789f9aa2c2"
+ARRIVAL_ROOT_ALG1 = "2ff4e255c1e7470aa8a30a8b1fbde6cecb690e1d4ffaefb31a0ae26b6fce44ba"
+
+
+def _check(order, **override):
+    from astp.core.schema import check_resolved_signal_order
+
+    kw = dict(segment_content_hashes=SEGMENTS, stored_signal_content_hashes=ARRIVAL, sealed_root=TIE_ROOT_ALG1,
+              spine_algorithm_version=1, ordering_version=ORDERING_VERSION_LEGACY, episode_id=EPISODE)
+    kw.update(override)
+    return check_resolved_signal_order(order, **kw)
+
+
+class TestRP005AdmissibleAnnotation:
+    def test_pinned_roots(self):
+        from astp.core.schema import reproduce_spine_root
+
+        assert reproduce_spine_root(SEGMENTS, SEALED_ORDER, spine_algorithm_version=1,
+                                    ordering_version=1, episode_id=EPISODE) == TIE_ROOT_ALG1
+        assert reproduce_spine_root(SEGMENTS, SEALED_ORDER, spine_algorithm_version=0,
+                                    ordering_version=1) == TIE_ROOT_ALG0
+        assert reproduce_spine_root(SEGMENTS, ARRIVAL, spine_algorithm_version=1,
+                                    ordering_version=1, episode_id=EPISODE) == ARRIVAL_ROOT_ALG1 != TIE_ROOT_ALG1
+
+    def test_admissible_under_both_algorithm_versions(self):
+        assert _check(SEALED_ORDER) is True
+        assert _check(SEALED_ORDER, sealed_root=TIE_ROOT_ALG0, spine_algorithm_version=0, episode_id=None) is True
+
+
+class TestRP006CheckedNeverTrusted:
+    def test_wrong_order_is_inadmissible(self):
+        assert _check([SIGNALS[0], SIGNALS[1], SIGNALS[3], SIGNALS[2], SIGNALS[4]]) is False
+
+    def test_foreign_hash_is_inadmissible(self):
+        assert _check(SEALED_ORDER[:-1] + [sha3_256(b"x")]) is False
+
+    def test_correct_annotation_does_not_rescue_a_tampered_record(self):
+        assert _check(SEALED_ORDER, segment_content_hashes=[sha3_256(b"t")] + SEGMENTS[1:]) is False
+
+    def test_duplicated_or_dropped_members_are_inadmissible(self):
+        assert _check(SEALED_ORDER + [SIGNALS[0]]) is False
+        assert _check(SEALED_ORDER[:-1]) is False
+
+
+class TestRP007OrderingVersion2IgnoresTheAnnotation:
+    def test_annotation_is_never_admissible_on_a_v2_seal(self):
+        v2_root = compute_spine_root_v2(SEGMENTS, episode_id=EPISODE)
+        assert _check(SEALED_ORDER, sealed_root=v2_root, ordering_version=ORDERING_VERSION_CURRENT) is False
+
+    def test_v2_root_does_not_depend_on_signals_at_all(self):
+        from astp.core.schema import reproduce_spine_root
+
+        with_sigs = reproduce_spine_root(SEGMENTS, SEALED_ORDER, spine_algorithm_version=1,
+                                         ordering_version=2, episode_id=EPISODE)
+        assert with_sigs == TestPinnedDigests.RP001_SPINE_ROOT_ALG1
+
+
+class TestRP008AbsenceCarriesNoInference:
+    @staticmethod
+    def _search(sealed_root):
+        import itertools
+        from astp.core.schema import reproduce_spine_root
+
+        head, tied, tail = ARRIVAL[:1], ARRIVAL[1:4], ARRIVAL[4:]
+        for perm in itertools.permutations(tied):
+            order = head + list(perm) + tail
+            if reproduce_spine_root(SEGMENTS, order, spine_algorithm_version=1,
+                                    ordering_version=1, episode_id=EPISODE) == sealed_root:
+                return order
+        return None
+
+    def test_search_finds_the_same_root_an_annotation_would(self):
+        assert self._search(TIE_ROOT_ALG1) == SEALED_ORDER
+
+    def test_a_root_no_order_reproduces_is_a_different_outcome(self):
+        assert self._search(sha3_256(b"no ordering yields this")) is None
+
+
+class TestReproduceSpineRootRefusesToGuess:
+    def test_unknown_versions_are_refused(self):
+        from astp.core.schema import reproduce_spine_root
+
+        with pytest.raises(ValueError, match="spine_algorithm_version"):
+            reproduce_spine_root(SEGMENTS, [], spine_algorithm_version=7, ordering_version=2, episode_id=EPISODE)
+        with pytest.raises(ValueError, match="ordering_version"):
+            reproduce_spine_root(SEGMENTS, [], spine_algorithm_version=1, ordering_version=9, episode_id=EPISODE)
+
+    def test_algorithm_1_requires_the_episode_identifier(self):
+        from astp.core.schema import reproduce_spine_root
+
+        with pytest.raises(ValueError, match="episode_id is required"):
+            reproduce_spine_root(SEGMENTS, [], spine_algorithm_version=1, ordering_version=2)

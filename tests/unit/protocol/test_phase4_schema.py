@@ -29,15 +29,13 @@ Pure unit tests (no driver). Verifies:
 
 import pytest
 
-from ariadne.core.branching import (
+from astp.core.branching import (
     AriadneGovernanceError,
     CoherenceFingerprint,
     ConfirmationCache,
     ConfirmedAction,
     DEFAULT_DETECTION_THRESHOLDS,
-    DetectionResult,
     DetectionState,
-    DetectionThresholds,
     IntentClass,
     advance_detection_state,
     compute_fingerprint_hash,
@@ -173,14 +171,14 @@ class TestConfirmationCache:
 
     def test_recorded_action_confirmed_within_window(self):
         cache = ConfirmationCache()
-        cache.record("deploy", confirmed_by="devin", current_turn=10,
+        cache.record("deploy", confirmed_by="human-1", current_turn=10,
                      valid_for_turns=5)
         assert cache.is_confirmed("deploy", current_turn=11) is True
         assert cache.is_confirmed("deploy", current_turn=15) is True  # 10 + 5 = within window
 
     def test_confirmation_expires_after_valid_for_turns(self):
         cache = ConfirmationCache()
-        cache.record("deploy", confirmed_by="devin", current_turn=10,
+        cache.record("deploy", confirmed_by="human-1", current_turn=10,
                      valid_for_turns=5)
         # 10 + 5 = 15 still within; 16 is beyond
         assert cache.is_confirmed("deploy", current_turn=16) is False
@@ -189,7 +187,7 @@ class TestConfirmationCache:
 
     def test_case_and_whitespace_insensitive(self):
         cache = ConfirmationCache()
-        cache.record("Deploy Now", confirmed_by="devin", current_turn=1)
+        cache.record("Deploy Now", confirmed_by="human-1", current_turn=1)
         assert cache.is_confirmed("  deploy now  ", current_turn=2) is True
 
     def test_invalidate_removes_entry(self):

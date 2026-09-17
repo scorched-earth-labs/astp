@@ -19,27 +19,27 @@ must pass for Phase 3 Protocol Conformance (Level 1).
 """
 
 from datetime import datetime, timezone
-from uuid import uuid4
 
-from ariadne.core.schema import sha3_256
-from ariadne.protocol.keys import (
+import pytest
+
+from astp.core.schema import sha3_256
+from astp.protocol.keys import (
     derive_workspace_key, derive_node_key, derive_seal_key,
-    NodeKeyRecord, enforce_key_version_monotonicity,
+    enforce_key_version_monotonicity,
 )
-from ariadne.protocol.anchor import (
+from astp.protocol.anchor import (
     AnchorCommitment, build_anchor_commitment,
 )
-from ariadne.protocol.witness import (
-    WitnessRole, WitnessRecord, compute_witness_commitment,
+from astp.protocol.witness import (
+    WitnessRecord, compute_witness_commitment,
     verify_witness_commitment, enforce_witness_threshold,
 )
-from ariadne.protocol.chain_proof import (
-    ProofLink, ProofChain, ChainVerificationResult,
-    compute_chain_root, build_proof_chain, verify_proof_chain,
+from astp.protocol.chain_proof import (
+    ProofLink, build_proof_chain, verify_proof_chain,
 )
-from ariadne.protocol.merkle import MerkleTree
-from ariadne.protocol.leaf_hash import compute_leaf_hash
-from ariadne.protocol.errors import GovernanceViolation, MonotonicityViolation
+from astp.protocol.merkle import MerkleTree
+from astp.protocol.leaf_hash import compute_leaf_hash
+from astp.protocol.errors import GovernanceViolation, MonotonicityViolation
 
 
 # ── Reference Values ─────────────────────────────────────────────────────────
@@ -92,18 +92,12 @@ class TestKeyHierarchy:
         enforce_key_version_monotonicity(3, 4)  # Should not raise
 
         # Rollback
-        try:
+        with pytest.raises(MonotonicityViolation):
             enforce_key_version_monotonicity(3, 2)
-            assert False, "Should have rejected version rollback"
-        except MonotonicityViolation:
-            pass
 
         # Duplicate
-        try:
+        with pytest.raises(MonotonicityViolation):
             enforce_key_version_monotonicity(3, 3)
-            assert False, "Should have rejected duplicate version"
-        except MonotonicityViolation:
-            pass
 
     def test_kh005_node_type_always_in_derivation(self):
         """KH-005: No code path derives a node key without node_type."""
@@ -260,11 +254,8 @@ class TestWitnessSignatures:
             role="REVIEWER", commitment_hash="tampered_hash",
         )
 
-        try:
+        with pytest.raises(GovernanceViolation):
             enforce_witness_threshold([valid_record, invalid_record], min_counter_signatures=2)
-            assert False, "Should fail — only 1 valid distinct witness"
-        except GovernanceViolation:
-            pass
 
     def test_ws006_distinct_witness_id_required(self):
         """WS-006: Same witness_id counts as ONE (G-11)."""
@@ -286,19 +277,16 @@ class TestWitnessSignatures:
             role="AUDITOR", commitment_hash=hash_auditor,
         )
 
-        try:
+        with pytest.raises(GovernanceViolation):
             enforce_witness_threshold([record_1, record_2], min_counter_signatures=2)
-            assert False, "Should fail — same witness_id, only 1 distinct"
-        except GovernanceViolation:
-            pass
 
 
 # ── Chain Proof Vectors ──────────────────────────────────────────────────────
 
 def _make_test_tree_and_root(content: str = "test") -> tuple:
     """Helper: build a simple Merkle tree and return (root, inclusion_proof)."""
-    from ariadne.protocol.merkle import MerkleTree, InclusionProof
-    from ariadne.protocol.leaf_hash import compute_leaf_hash
+    from astp.protocol.merkle import MerkleTree
+    from astp.protocol.leaf_hash import compute_leaf_hash
     from uuid import UUID
 
     node_id = UUID(NODE_ID)
@@ -330,6 +318,24 @@ class TestChainProofs:
         chain = build_proof_chain([link])
         result = verify_proof_chain(chain)
         assert result.valid, f"Single-link chain should be valid: {result.reason}"
+
+    def test_inclusion_proof_for_another_root_is_rejected(self):
+        """§16.5.3 (1): a link's proof is verified against that link's spine_root.
+
+        The proof below is internally valid, but for a different tree. A chain
+        whose links carry such proofs must not verify.
+        """
+        root, _ = _make_test_tree_and_root("declared")
+        other_root, other_proof = _make_test_tree_and_root("unrelated")
+        assert root != other_root
+        link = ProofLink(
+            node_id=NODE_ID, node_type="episode",
+            spine_root=root, sequence_index=42,
+            inclusion_proof=other_proof,
+        )
+        result = verify_proof_chain(build_proof_chain([link]))
+        assert not result.valid
+        assert "different spine_root" in result.reason
 
     def test_cp002_two_link_parentage(self):
         """CP-002: Two-link chain with direct parentage."""

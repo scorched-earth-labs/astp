@@ -23,10 +23,9 @@ from uuid import uuid4
 
 import pytest
 
-from ariadne.core.branching import (
+from astp.core.branching import (
     AccessLevel,
     AriadneGovernanceError,
-    AsideClosedDelta,
     AsideOpenedDelta,
     AsideSegmentNode,
     AsideStatus,
@@ -35,7 +34,6 @@ from ariadne.core.branching import (
     SoliloquyConcludedDelta,
     SoliloquyConclusionNode,
     SoliloquyContentHashPolicy,
-    SoliloquyInitiatedDelta,
     SoliloquySegmentNode,
     SoliloquyStatus,
     SoliloquyTerminationStatus,
@@ -61,8 +59,8 @@ class TestAsideSchema:
             parent_episode_id=uuid4(),
             parent_segment_id="seg-1",
             aside_label="clarify scope",
-            initiated_by_human="devin",
-            target_agent_id="clotho",
+            initiated_by_human="human-1",
+            target_agent_id="agent-a",
         )
         assert a.return_obligation is True
         assert a.content_refs == []
@@ -83,7 +81,7 @@ class TestAsideSchema:
 
 class TestSoliloquySchema:
     def test_default_policy_enforces_decision_1(self):
-        """Decision 1: human_accessible=ALWAYS, others=ESCALATION_ONLY, audit_on_access=true."""
+        """G-27: human_accessible=ALWAYS, others=ESCALATION_ONLY, audit_on_access=true."""
         p = SoliloquyVisibilityPolicy()
         assert p.human_accessible is True
         assert p.owner_agent_access == "ALWAYS"
@@ -96,7 +94,7 @@ class TestSoliloquySchema:
             parent_episode_id=uuid4(),
             parent_segment_id="seg-1",
             soliloquy_purpose="decide between options",
-            initiated_by_agent="clotho",
+            initiated_by_agent="agent-a",
         )
         assert s.deliberation_chain == []
         assert s.visibility_policy.human_accessible is True
@@ -184,12 +182,12 @@ class TestGovernanceRules:
             enforce_aside_human_initiated(None)
         with pytest.raises(AriadneGovernanceError):
             enforce_aside_human_initiated("")
-        enforce_aside_human_initiated("devin")  # no raise
+        enforce_aside_human_initiated("human-1")  # no raise
 
     def test_aside_target_agent_required(self):
         with pytest.raises(AriadneGovernanceError):
             enforce_aside_target_agent(None)
-        enforce_aside_target_agent("clotho")
+        enforce_aside_target_agent("agent-a")
 
     def test_aside_close_reason_required(self):
         with pytest.raises(AriadneGovernanceError):

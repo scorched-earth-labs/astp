@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Amendment v2.0 — Episode Grouping schema + governance unit tests.
+SPEC §20 Part II — Episode Grouping schema + governance unit tests.
 
-Covers the protocol-core surface of `ariadne.core.grouping`:
+Covers the protocol-core surface of `astp.core.grouping`:
 - Enum vocabulary (MembershipRole, GroupingSystem)
 - Capability, MembershipRecord, ConformanceDeclaration instantiation
-- Content hash properties (determinism, role inclusion per Gap 6,
-  forward-pointer exclusion per §10)
+- Content hash properties (determinism, role inclusion per SPEC §20 →7,
+  forward-pointer exclusion)
 - SemVer governance (enforce_semver_format, classify_version_bump)
 - Audit delta payload shapes
 - CognitiveDeltaType additions (MEMBERSHIP_RECORD_CREATED,
@@ -32,13 +32,12 @@ protocol-core tests here are pure / mock-free.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest
 
-from ariadne.core.branching import CognitiveDeltaType
-from ariadne.core.grouping import (
+from astp.core.branching import CognitiveDeltaType
+from astp.core.grouping import (
     Capability,
     ConformanceDeclaration,
     DeclarationSupersededDelta,
@@ -120,8 +119,8 @@ def _make_membership(**overrides) -> MembershipRecord:
     base = {
         "episode_id": uuid4(),
         "group_id": "test-group",
-        "group_system": "sel-thermyt:Collection",
-        "asserted_by": "Devin",
+        "group_system": "example:Collection",
+        "asserted_by": "human-1",
         "membership_role": MembershipRole.PRIMARY,
     }
     base.update(overrides)
@@ -157,7 +156,7 @@ class TestMembershipRecordContentHash:
         assert len(h1) == 64
 
     def test_membership_role_IS_in_hash_per_gap_6(self):
-        """Critical: Gap 6 explicitly includes role in the hash. Changing
+        """Critical: SPEC §20 →7 explicitly includes role in the hash. Changing
         the role on a record must change the hash — that's why role
         changes require succession (a new record), not mutation."""
         rec = _make_membership(membership_role=MembershipRole.PRIMARY)
@@ -211,8 +210,8 @@ class TestMembershipRecordContentHash:
 def _make_declaration(**overrides) -> ConformanceDeclaration:
     base = {
         "group_id": "test-group",
-        "group_system": "sel-thermyt:Collection",
-        "declared_by": "clotho",
+        "group_system": "example:Collection",
+        "declared_by": "agent-a",
         "declaration_version": "1.0.0",
         "capabilities": [Capability(capability_id="supports_archival")],
     }
@@ -333,7 +332,7 @@ class TestAuditDeltaPayloads:
             record_id=rid,
             episode_id=str(uuid4()),
             group_id="group-1",
-            group_system="sel-thermyt:Collection",
+            group_system="example:Collection",
             membership_role="PRIMARY",
             reverse_delete_record_id=rid,
         )
@@ -348,7 +347,7 @@ class TestAuditDeltaPayloads:
             new_record_id=new,
             episode_id=str(uuid4()),
             group_id="group-1",
-            group_system="sel-thermyt:Collection",
+            group_system="example:Collection",
             old_role="PRIMARY",
             new_role="SUPPORTING",
             reverse_delete_new_record_id=new,
@@ -362,7 +361,7 @@ class TestAuditDeltaPayloads:
         delta = DeclarationVersionBumpedDelta(
             old_declaration_id=old,
             new_declaration_id=new,
-            group_system="sel-thermyt:Collection",
+            group_system="example:Collection",
             group_id="group-1",
             old_version="1.0.0",
             new_version="1.1.0",
@@ -376,7 +375,7 @@ class TestAuditDeltaPayloads:
         delta = DeclarationSupersededDelta(
             old_declaration_id=str(uuid4()),
             new_declaration_id=str(uuid4()),
-            group_system="sel-thermyt:Collection",
+            group_system="example:Collection",
             group_id="group-1",
             old_version="1.5.0",
             new_version="2.0.0",

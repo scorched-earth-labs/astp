@@ -1,0 +1,35 @@
+# Copyright 2026 Scorched Earth Labs, LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""
+ASTP (AI State Tree Protocol) — cognitive persistence for multi-agent systems.
+
+Bring your own cognitive architecture. ASTP handles the persistence,
+integrity verification, and coordination of agent state transitions.
+
+Packages:
+    astp.protocol            — layer-generic primitives: CognitiveNode, leaf hash,
+                               Merkle proofs, governance, keys, witness, anchor
+    astp.nodes               — node-type instantiations (episode, segment) and the
+                               governed node factory
+    astp.core                — episode schema and governance rules, adaptive Merkle
+                               tree, crystallization, Write Intent Log, branching,
+                               grouping, cross-episode linking, workflow execution
+    astp.adapters            — AriadneAdapter interface
+    astp.adapters.neo4j      — reference implementation (Neo4j graph database)
+"""
+
+__version__ = "0.2.0"
+
+# The SPEC.md version this package implements.
+PROTOCOL_VERSION = "4.5.0"

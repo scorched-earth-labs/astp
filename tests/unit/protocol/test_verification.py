@@ -25,16 +25,15 @@ Test 4: Audit chain tampering detection
 Test 5: Backdated wall_clock detection
 """
 
-from copy import deepcopy
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
-from ariadne.core.schema import sha3_256
-from ariadne.protocol.node import CognitiveNode
-from ariadne.protocol.leaf_hash import compute_leaf_hash_from_node
-from ariadne.protocol.merkle import MerkleTree
-from ariadne.protocol.audit import AuditRecord, AuditChain, compute_audit_hash
-from ariadne.protocol.verification import (
+from astp.core.schema import sha3_256
+from astp.protocol.node import CognitiveNode
+from astp.protocol.leaf_hash import compute_leaf_hash_from_node
+from astp.protocol.merkle import MerkleTree
+from astp.protocol.audit import AuditRecord, AuditChain
+from astp.protocol.verification import (
     DeltaVerifier,
     verify_content_integrity,
     verify_position_integrity,

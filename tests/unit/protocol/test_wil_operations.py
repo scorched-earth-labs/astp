@@ -13,15 +13,14 @@
 # limitations under the License.
 """WIL operation vocabulary and the BFM ledger write helper.
 
-`_write_branch_wil` previously took `operation: str` and every BFM call site
-passed a literal. Eight of the ten literals in use were absent from
-`WILOperation`, so the enum read as the authoritative list of ledger
-operations without actually being one — anything downstream that trusted it
-was silently incomplete.
+`WILOperation` is the authoritative list of ledger operations, so every
+operation a BFM call site ledgers must be a member, and the enum must match
+the SPEC §12.4.1 register.
 
-The helper also wraps its whole body in a blanket `except Exception`, so a bad
-value would have vanished rather than failed. These tests pin both halves: the
-vocabulary is complete, and a violation of it is loud.
+`_write_branch_wil` wraps its Neo4j write in a blanket `except Exception`; a
+bad operation value must still fail loudly rather than vanish into it. These
+tests pin both halves: the vocabulary is complete, and a violation of it is
+loud.
 """
 
 import re
@@ -29,8 +28,8 @@ from pathlib import Path
 
 import pytest
 
-from ariadne.core.wil import WILOperation
-from ariadne.core.branch_operations import _write_branch_wil
+from astp.core.wil import WILOperation
+from astp.core.branch_operations import _write_branch_wil
 
 
 # Every operation `_write_branch_wil` is called with across branch_operations.py.
@@ -86,22 +85,19 @@ class TestWILOperationVocabulary:
             assert member.name == member.value
 
     def test_segment_commit_is_a_member(self):
-        """Segment commits appear on AriadneWILEntry nodes in the field.
-
-        The value is written by downstream consumers rather than by this
-        library — see the note on the member. It still has to be part of the
-        vocabulary, or anything treating WILOperation as authoritative is
-        incomplete for the single most common operation in the graph.
+        """SEGMENT_COMMIT is part of the vocabulary — without it, anything
+        treating WILOperation as authoritative is incomplete for the single
+        most common operation in the graph.
         """
         assert WILOperation.SEGMENT_COMMIT.value == "SEGMENT_COMMIT"
 
     def test_segment_commit_is_emitted_by_the_library(self):
-        """SEGMENT_COMMIT now has a coordinated write path (SPEC S12.4 Tier 1).
+        """SEGMENT_COMMIT has a coordinated write path (SPEC §12.4 Tier 1).
 
-        It previously had none: callers wrote the segment directly and the
-        absence of a ledger entry was indistinguishable from a lost one.
+        Without one, the absence of a ledger entry is indistinguishable from a
+        lost one.
         """
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         assert hasattr(wil_adapter, "execute_segment_commit")
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
@@ -110,11 +106,10 @@ class TestWILOperationVocabulary:
     def test_episode_create_is_emitted_by_the_library(self):
         """EPISODE_CREATE has a coordinated write path (SPEC §12.4 Tier 1).
 
-        Episode creation had no ledger entry at all: the episode appeared and
-        nothing recorded that it was meant to. An interrupted create was
-        indistinguishable from one that never started.
+        Without a ledger entry an interrupted create is indistinguishable
+        from one that never started.
         """
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         assert hasattr(wil_adapter, "execute_episode_create")
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
@@ -122,7 +117,7 @@ class TestWILOperationVocabulary:
 
     def test_episode_create_delegates_to_the_writer(self):
         """Must call create_episode_node, not carry a second copy of the MERGE."""
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_episode_create"):
@@ -131,7 +126,7 @@ class TestWILOperationVocabulary:
         assert "MERGE (e:AriadneEpisode" not in body
 
     def test_consultation_commit_is_emitted_by_the_library(self):
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         assert hasattr(wil_adapter, "execute_consultation_commit")
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
@@ -143,7 +138,7 @@ class TestWILOperationVocabulary:
         Writing them out of order builds the chain backwards, which is the
         failure G-8 exists to catch.
         """
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_consultation_commit"):
@@ -159,14 +154,14 @@ class TestWILOperationVocabulary:
         assert "COLLABORATION_COMMIT" not in {m.value for m in WILOperation}
 
     def test_attachment_commit_is_emitted_by_the_library(self):
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         assert hasattr(wil_adapter, "execute_attachment_commit")
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         assert "WILOperation.ATTACHMENT_COMMIT" in source
 
     def test_attachment_commit_delegates_to_the_writer(self):
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_attachment_commit"):
@@ -176,7 +171,7 @@ class TestWILOperationVocabulary:
 
     def test_codicil_append_is_emitted_by_the_library(self):
         """CODICIL_APPEND had neither a ledger entry nor a writer to ledger."""
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         assert hasattr(wil_adapter, "execute_codicil_append")
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
@@ -190,7 +185,7 @@ class TestWILOperationVocabulary:
         the signature a recovery needs. Ledgering only the delta write would
         leave the stuck state unexplained.
         """
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_crystallization"):
@@ -205,7 +200,7 @@ class TestWILOperationVocabulary:
 
     def test_crystallization_releases_the_lock_before_failing(self):
         """Order matters: a lock left held blocks every later write."""
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_crystallization"):
@@ -217,7 +212,7 @@ class TestWILOperationVocabulary:
     def test_failed_lock_fails_the_intent(self):
         """A lock that was never acquired wrote nothing, so the entry must not
         be left dangling as a false recovery candidate."""
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_crystallization"):
@@ -229,7 +224,7 @@ class TestWILOperationVocabulary:
     def test_archive_ledgers_its_implicit_crystallization(self):
         """Archiving may auto-crystallize; when it does, that is a real
         crystallization and gets its own entry rather than being implied."""
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_episode_archive"):
@@ -238,7 +233,7 @@ class TestWILOperationVocabulary:
         assert "redis_client=redis_client" in body
 
     def test_episode_close_is_emitted_by_the_library(self):
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         assert hasattr(wil_adapter, "execute_episode_close")
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
@@ -246,7 +241,7 @@ class TestWILOperationVocabulary:
 
     def test_episode_close_writes_record_and_transition_together(self):
         """Both halves inside one intent — see the docstring on the function."""
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_episode_close"):
@@ -256,7 +251,7 @@ class TestWILOperationVocabulary:
         assert "MERGE (cl:AriadneClosureRecord" not in body
 
     def test_codicil_append_delegates_to_the_writer(self):
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_codicil_append"):
@@ -271,7 +266,7 @@ class TestWILOperationVocabulary:
         coordinated write that duplicated the MERGE would bypass both — a
         ledger entry is not a licence to skip governance.
         """
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         body = source[source.index("async def execute_segment_commit"):
@@ -280,20 +275,27 @@ class TestWILOperationVocabulary:
         assert "MERGE (s:AriadneSegment" not in body
 
 
-class TestSpecRegisterAgreement:
-    """SPEC S12.4.1 registers every operation value. The enum must match it.
+def _spec_slice(text: str, start_marker: str, end_marker: str) -> str:
+    """SPEC.md text from ``start_marker`` up to the next ``end_marker``."""
+    start = text.find(start_marker)
+    assert start != -1, f"SPEC.md no longer contains {start_marker!r}"
+    end = text.find(end_marker, start)
+    assert end != -1, f"SPEC.md no longer contains {end_marker!r} after {start_marker!r}"
+    return text[start:end]
 
-    This is the drift guard. WILOperation was previously missing eight of the
-    ten operations its own writer emitted, and nothing failed — the register
-    existed only as code, so there was nothing for the code to disagree with.
+
+class TestSpecRegisterAgreement:
+    """SPEC §12.4.1 registers every operation value. The enum must match it.
+
+    This is the drift guard: the register exists both as SPEC text and as
+    code, and the two must not disagree.
     """
 
     @staticmethod
     def _spec_register() -> dict:
         spec = Path(__file__).resolve().parents[3] / "SPEC.md"
         text = spec.read_text(encoding="utf-8")
-        section = text[text.index("#### 12.4.1 Operation Register"):]
-        section = section[: section.index("The register is closed")]
+        section = _spec_slice(text, "#### 12.4.1 Operation Register", "The register is closed")
         register = {}
         for row in re.finditer(
             r"^\|\s*`([A-Z_]+)`\s*\|\s*([12])\s*\|",
@@ -325,7 +327,7 @@ class TestSpecRegisterAgreement:
     def test_every_enum_member_is_registered_in_spec(self):
         register = self._spec_register()
         missing = [m.value for m in WILOperation if m.value not in register]
-        assert missing == [], f"in WILOperation but absent from SPEC S12.4.1: {missing}"
+        assert missing == [], f"in WILOperation but absent from SPEC §12.4.1: {missing}"
 
     def test_bfm_operations_are_tier_2(self):
         """Single store, completed entry at commit, never replayed (G-38)."""
@@ -352,7 +354,7 @@ class TestSpecRegisterAgreement:
         import re as _re
         from pathlib import Path as _Path
 
-        root = _Path(__file__).resolve().parents[3] / "ariadne"
+        root = _Path(__file__).resolve().parents[3] / "astp"
         source = "\n".join(
             p.read_text(encoding="utf-8") for p in root.rglob("*.py")
         )
@@ -383,7 +385,7 @@ class TestSpecRegisterAgreement:
         would be lying about its own shape.
         """
         import re as _re
-        from ariadne.adapters.neo4j import wil as wil_adapter
+        from astp.adapters.neo4j import wil as wil_adapter
 
         source = Path(wil_adapter.__file__).read_text(encoding="utf-8")
         coordinated = set(_re.findall(
@@ -400,7 +402,7 @@ class TestSpecRegisterAgreement:
             )
 
     def test_register_states_no_ledgering_obligation(self):
-        """S12.4.2 defers WHICH operations must be ledgered to 4.0.0.
+        """§12.4.2 defers WHICH operations must be ledgered to 4.0.0.
 
         Guards against a well-meaning edit reintroducing per-operation MUST /
         SHOULD levels into the register table. Those are conformance-breaking
@@ -409,13 +411,14 @@ class TestSpecRegisterAgreement:
         """
         spec = Path(__file__).resolve().parents[3] / "SPEC.md"
         text = spec.read_text(encoding="utf-8")
-        section = text[text.index("#### 12.4.1 Operation Register"):
-                       text.index("#### 12.4.2 Ledgering Obligations")]
+        section = _spec_slice(
+            text, "#### 12.4.1 Operation Register", "#### 12.4.2 Ledgering Obligations"
+        )
         rows = re.findall(r"^\|\s*`[A-Z_]+`\s*\|.*$", section, re.M)
         offenders = [r for r in rows if re.search(r"\b(MUST|SHOULD|MAY)\b", r)]
         assert offenders == [], (
-            "requirement levels reappeared in the S12.4.1 register; "
-            f"obligations are deferred to 4.0.0 per S12.4.2: {offenders}"
+            "requirement levels reappeared in the §12.4.1 register; "
+            f"obligations are deferred to 4.0.0 per §12.4.2: {offenders}"
         )
 
 

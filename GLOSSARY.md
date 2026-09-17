@@ -1,8 +1,16 @@
 # Glossary of Terms
 
-A single-source definition for every term used normatively in `SPEC.md`, the implementation guides, and the `ariadne` Python package. Definitions are grouped by category for learning; an alphabetical index sits at the bottom for lookup.
+**Version:** none of its own — versioned with [`SPEC.md`](./SPEC.md); last fully reconciled with SPEC `2.5.0-draft` (see below)
+**Status:** Partially current — reconciliation with SPEC 4.x in progress
+**Authors:** Scorched Earth Labs
+**Date:** 2026-09-17
+**Applies To:** `SPEC.md`, the implementation guides, and the `astp` Python package
 
-This glossary covers the **current published surface** (`SPEC.md` version `2.5.0-draft`). Terms introduced by pending amendments (cross-episode linking, Layer 3 Workflow & Execution DAG) are added to the glossary when those amendments integrate into the next published version. If you encounter a term in code or amendment documents that isn't defined here, it's either a near-future addition or a documentation gap worth raising.
+---
+
+A single-source definition for every term used normatively in `SPEC.md`, the implementation guides, and the `astp` Python package. Definitions are grouped by category for learning; an alphabetical index sits at the bottom for lookup.
+
+**Currency.** This glossary was last fully reconciled with `SPEC.md` at version `2.5.0-draft`. The reproducibility terms of SPEC 4.3.0 (§5 below) have been added since; most other terms introduced in the 3.x and 4.x lines — cross-episode linking and grouping (SPEC §20), the Layer 3 Workflow & Execution DAG (SPEC §21), departure forks, ledgered operations, `AttachmentNode` — are not yet defined here, and some existing entries predate later changes to the rules and lifecycle they describe. Reconciliation with SPEC 4.x is in progress. Where this glossary and `SPEC.md` disagree, `SPEC.md` governs. If you encounter a term in code or in the specification that isn't defined here, it's a documentation gap worth raising.
 
 ---
 
@@ -12,7 +20,7 @@ Several ASTP terms have a **structural relationship** that's easy to miss readin
 
 > **`EpisodeNode`, `SegmentNode`, `SignalNode`, `HITLEventNode`, `ConsultationNode`, `CrystallizationDeltaNode`** are *colloquial names* for `CognitiveNode` instances with type-specific `NodePayload` subclasses. They are not separate classes parallel to `CognitiveNode` — they are parameterizations of it. See `CognitiveNode` and `NodePayload` for the underlying model.
 
-The legacy `EpisodeNode` / `SegmentNode` / `SignalNode` standalone classes in `ariadne/core/schema.py` are Phase 1 artifacts being migrated to the `CognitiveNode + NodePayload` shape. New implementations should target the `ariadne/protocol/` surface (`CognitiveNode`, `NodePayload`), not the legacy `core/schema.py` classes. See SPEC §4 for the canonical model.
+The legacy `EpisodeNode` / `SegmentNode` / `SignalNode` standalone classes in `astp/core/schema.py` are Phase 1 artifacts being migrated to the `CognitiveNode + NodePayload` shape. New implementations should target the `astp/protocol/` surface (`CognitiveNode`, `NodePayload`), not the legacy `core/schema.py` classes. See SPEC §4 for the canonical model.
 
 ---
 
@@ -33,7 +41,7 @@ Key fields:
 - `leaf_hash` (string, computed once at creation, never recomputed)
 - `payload` (serialized dict) — the type-specific data; protocol never reads internal fields
 
-Defined in `ariadne/protocol/node.py`. See SPEC §4.1.
+Defined in `astp/protocol/node.py`. See SPEC §4.1.
 
 ### NodePayload
 
@@ -42,11 +50,11 @@ Defined in `ariadne/protocol/node.py`. See SPEC §4.1.
 - `to_content_hash_input()` — canonical byte representation used for `content_hash`; must be deterministic
 - `to_dict()` — serialization for storage
 
-This is the abstraction boundary that lets new node types slot into the protocol without protocol-layer changes. Defined in `ariadne/protocol/node.py`.
+This is the abstraction boundary that lets new node types slot into the protocol without protocol-layer changes. Defined in `astp/protocol/node.py`.
 
 ### CognitiveEdge
 
-A typed, directed edge between cognitive nodes. Edges carry semantic meaning (e.g. `CONTAINS`, `PRECEDES`, `REFERENCES`) and are typed by both the edge itself and the nodes it connects. Defined in `ariadne/protocol/node.py`.
+A typed, directed edge between cognitive nodes. Edges carry semantic meaning (e.g. `CONTAINS`, `PRECEDES`, `REFERENCES`) and are typed by both the edge itself and the nodes it connects. Defined in `astp/protocol/node.py`.
 
 ---
 
@@ -58,7 +66,7 @@ Each of the following is a **`CognitiveNode` with `node_type=<type>` and a type-
 
 A `CognitiveNode` with `node_type="episode"` and an `EpisodePayload`. An **Episode** is a bounded unit of agent work — the first node type the protocol supports, and the entry point for most cognitive activity. Episodes have a formal lifecycle (see *Episode Lifecycle*).
 
-Defined via `ariadne/nodes/episode/payload.py` (`EpisodePayload`). See SPEC §4.4.
+Defined via `astp/nodes/episode/payload.py` (`EpisodePayload`). See SPEC §4.4.
 
 ### SegmentNode
 
@@ -107,7 +115,7 @@ SHA3-256 hash of a node's payload, computed via the payload's `to_content_hash_i
 
 ### `content_ref`
 
-Pointer to the full content in durable storage (e.g. an S3 key, a filesystem path, a blob ID). The hash chain references this pointer plus the `content_hash`; the content bytes themselves do not need to be hash-chain-resident, which lets content scale independently of the integrity layer.
+Pointer to the full content in durable storage (e.g. an object-store key, a filesystem path). The hash chain references this pointer plus the `content_hash`; the content bytes themselves do not need to be hash-chain-resident, which lets content scale independently of the integrity layer.
 
 ### `leaf_hash`
 
@@ -147,7 +155,7 @@ The episode-content tree built **over** the Spine. Adapts its branching to the e
 
 The substrate for **autonomous-process audit trails**. Reserved for execution-side cognitive records (kernel-spawned work, tool calls, skill invocations) that need provenance without participating in Spine integrity. **Layer 3 nodes are cryptographically isolated from the Spine** — they reference Layer 1 / 2 nodes by ID only and must never be hash-linked into the Spine. This structural separation is by design: Layer 3 can grow without bound; the Spine stays untouched.
 
-Specific Layer 3 node types are codified in pending Amendment v3.0 (Workflow & Execution DAG); the Layer 3 *concept* exists in v2.5.0-draft.
+Specific Layer 3 node types are specified in SPEC §21 (Workflow & Execution DAG, added at 3.1.0) and are not yet defined in this glossary.
 
 ---
 
@@ -267,14 +275,16 @@ See SPEC §5.5 (Type Isolation Property) and SPEC §6 (Governance Rules).
 
 A coordination protocol for multi-store writes that guarantees ordering and recoverability. Writes proceed in **strict durability order**:
 
-1. **Durable content store** (e.g. S3, filesystem) — where the bytes live.
-2. **Authoritative structural store** (e.g. Neo4j) — where the hash chain and graph live.
-3. **Ephemeral coordinator** (e.g. Redis) — runtime coordination state.
-4. **Semantic search index** (e.g. QDrant) — derived retrieval surface.
+1. **Durable content store** — where the bytes live.
+2. **Authoritative structural store** — where the hash chain and graph live.
+3. **Ephemeral coordinator** — runtime coordination state.
+4. **Semantic search index** — derived retrieval surface.
+
+These are **roles, not products**: the protocol names no storage provider, the implementer chooses what fills each role, and one system may fill more than one.
 
 An interrupted write at any phase **must be recoverable** — all writes must be idempotent. The WIL state machine tracks each write through these phases and replays incomplete writes on recovery.
 
-Defined in `ariadne/core/wil.py`. See SPEC for the full WIL contract.
+Defined in `astp/core/wil.py`. See SPEC for the full WIL contract.
 
 ---
 
@@ -288,7 +298,7 @@ The Consultation chain is distinct from the episode's main Spine — it's a side
 
 ## 10. BFM Taxonomy — Branch, Fork, Merge
 
-The taxonomy of how episodes diverge and reconverge. Introduced in v2.5.0 (SPEC §19). The current taxonomy covers conceptual events; the operational machinery for branch/fork/merge detection is the subject of a pending design Episode (`e87b60f0-...`, see CLAUDE.md / future amendment work).
+The taxonomy of how episodes diverge and reconverge. Introduced in v2.5.0 (SPEC §19).
 
 ### Branch
 
@@ -350,7 +360,7 @@ The architectural invariant enforced by G-2: a node's position in the graph is i
 
 ### Namespace Firewall
 
-The architectural invariant that `ariadne.protocol.*` modules cannot import from `ariadne.nodes.*`. Enforced by a test (`tests/unit/protocol/test_namespace_firewall.py`); a failure is a protocol-layer leak, not a style issue. Keeps the protocol layer node-generic. See CLAUDE.md.
+The architectural invariant that `astp.protocol.*` modules cannot import from `astp.nodes.*`. Enforced by a test (`tests/unit/protocol/test_namespace_firewall.py`); a failure is a protocol-layer leak, not a style issue. Keeps the protocol layer node-generic. See SPEC §3.2 and G-6.
 
 ---
 
@@ -358,7 +368,7 @@ The architectural invariant that `ariadne.protocol.*` modules cannot import from
 
 ### AriadneAdapter
 
-The abstract interface any storage backend must implement to serve as an ASTP adapter. Provides methods for writing nodes, querying the graph, computing hashes, and recovering from WIL state. Defined in `ariadne/adapters/base.py`.
+The abstract interface any storage backend must implement to serve as an ASTP adapter. Provides methods for writing nodes, querying the graph, computing hashes, and recovering from WIL state. Defined in `astp/adapters/base.py`.
 
 ### ASI — Adapter Service Interface
 
@@ -366,21 +376,15 @@ The formal name for the abstract contract that any conforming adapter must imple
 
 ### Reference Implementation
 
-The Neo4j adapter in `ariadne/adapters/neo4j/`. Serves as the worked example of a conforming adapter — implementing its own ASI methods, the WIL state machine, crystallization, and the namespace firewall. Used as ground truth for the conformance test vectors.
+The Neo4j adapter in `astp/adapters/neo4j/`. Serves as the worked example of a conforming adapter — implementing its own ASI methods, the WIL state machine, crystallization, and the namespace firewall. Used as ground truth for the conformance test vectors.
 
 ### Conformance Layers
 
-The conformance framework distinguishes three layers of verification:
-
-- **Structural** — Hash chain integrity, governance rule enforcement, Merkle root consistency. **Mandatory** for any conformant adapter.
-- **Contextual** — Segment ordering, signal placement, consultation hash chains.
-- **Experiential** — End-to-end episode lifecycle: create → populate → seal → verify → archive.
-
-A conforming adapter must pass all structural layer checks. The other two layers expand coverage; failures indicate specific subsystem gaps.
+An earlier three-layer scheme (structural / contextual / experiential) for grading adapter checks. It is not part of the specification: nothing in `SPEC.md` or the `CONFORMANCE*.md` documents depends on it. Conformance is defined by `SPEC.md` and the `CONFORMANCE*.md` documents; the conformance *tiers* (wire / state / behavioral) are defined in SPEC §20 §12.
 
 ### Conformance Test Vectors
 
-Concrete byte-level test cases (in the `tests/` directory) that any third-party adapter must pass to claim conformance. Vectors are deterministic — same input bytes, same expected hashes, across implementations.
+Test cases stated in the `CONFORMANCE*.md` documents — inputs plus the property a conforming implementation must exhibit — that a third-party adapter must satisfy to claim conformance. Vectors are deterministic: same input bytes, same hashes, across implementations. Machine-readable vector files with pinned expected digests are planned and not yet published; the reference test suite in `tests/` exercises the reference implementation against the documents.
 
 ---
 
@@ -388,7 +392,11 @@ Concrete byte-level test cases (in the `tests/` directory) that any third-party 
 
 ### Episode of Record
 
-For protocol amendments: the ASTP Episode that **ratifies** the change cryptographically. The amendment document is the human-readable description; the Episode of Record is the authoritative cryptographic anchor. Amendments without an Episode of Record are drafts, not ratified surface. See `CLAUDE.md` and `VERSIONING.md`.
+For protocol amendments: the ASTP Episode that **ratifies** the change cryptographically. The amendment document is the human-readable description; the Episode of Record is the authoritative cryptographic anchor. Amendments without an Episode of Record are drafts, not ratified surface. See `VERSIONING.md`.
+
+### Resolved Signal Order
+
+An optional **annotation** on a `CrystallizationDelta` (`resolved_signal_order`, SPEC §5.8.1): the order of same-timestamp SPINE-placed Signals that reproduces a seal made under `ordering_version` 1, which did not determine that order. Outside every hash preimage; written by a verification run, never by a re-seal; and checked, never trusted — a verifier uses it only if it is a reordering of the stored Signal hashes that reproduces the sealed root. Its absence says nothing against a seal. Distinct from a §5.8 version identifier, which names a construction rather than supplying one of its inputs.
 
 ### Schema Version
 
@@ -396,7 +404,7 @@ The version of an individual node-type's payload schema, recorded as the `schema
 
 ### Amendment
 
-A normative change to the protocol, documented as a top-level `AMENDMENT-vN.M-*.md` file in this repo. **Amendment-numbering as a separate scheme retires going forward** (see `VERSIONING.md`); amendments are deltas that integrate into the next published `SPEC.md` version. Existing amendment files are retained as historical artifacts.
+A normative change to the protocol, documented as an `AMENDMENT-vN.M-*.md` file. **Amendment-numbering as a separate scheme retires going forward** (see `VERSIONING.md`); amendments are deltas that integrate into the next published `SPEC.md` version. Existing amendment files are retained as historical artifacts under `docs/history/`.
 
 ### Versioning Policy
 

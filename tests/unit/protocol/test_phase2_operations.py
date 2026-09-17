@@ -24,32 +24,19 @@ against an in-memory fake Neo4j driver. Verifies:
   - fork siblings share fork_id; resolve promotes one, discards others
 """
 
-import os
-import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 from uuid import uuid4
 
+import pytest
 
-os.environ["ARIADNE_ENABLED"] = "true"
-
-# Must be set BEFORE importing writer.py — it reads the env at import time.
-import importlib
-
-from ariadne.adapters.neo4j import writer as ariadne_writer  # noqa: E402
-importlib.reload(ariadne_writer)
-# Force guard to True for this test module even if import order differed
-ariadne_writer.ARIADNE_ENABLED = True
-
-from ariadne.core import branch_operations  # noqa: E402
-from ariadne.core.branching import (  # noqa: E402
-    BranchDeclarationType,
-    BranchType,
+from astp.adapters.neo4j import writer as ariadne_writer
+from astp.core import branch_operations
+from astp.core.branching import (
+    AriadneGovernanceError,
     ConflictManifest,
     MergeResult,
-    MergeStrategy,
     MergeType,
-    TriggerType,
 )
 
 
@@ -496,8 +483,6 @@ class TestCreateFork:
         store = _make_store_with_episodes([eid])
         driver = FakeDriver(store)
 
-        import pytest
-        from ariadne.core.branching import AriadneGovernanceError
         with pytest.raises(AriadneGovernanceError):
             branch_operations.create_fork(
                 driver,
@@ -513,8 +498,6 @@ class TestCreateFork:
         store = _make_store_with_episodes([eid])
         driver = FakeDriver(store)
 
-        import pytest
-        from ariadne.core.branching import AriadneGovernanceError
         with pytest.raises(AriadneGovernanceError):
             branch_operations.create_fork(
                 driver,
@@ -578,8 +561,6 @@ class TestResolveFork:
             alternatives=[{}, {}],
         )
 
-        import pytest
-        from ariadne.core.branching import AriadneGovernanceError
         with pytest.raises(AriadneGovernanceError):
             branch_operations.resolve_fork(
                 driver,
@@ -816,7 +797,7 @@ class TestCreateDepartureFork:
             origin_segment_id="seg-1",
             fork_objective="Explore the DAG tangent",
             fork_creation_trigger="TOPIC_SHIFT",
-            initiator="clotho",
+            initiator="agent-a",
             fork_title="DAG tangent",
         )
 
@@ -862,24 +843,20 @@ class TestCreateDepartureFork:
         assert store.episodes[oid]["status"] == "ACTIVE"  # origin unchanged
 
     def test_agent_escalation_requires_trigger_segment(self):
-        from ariadne.core.schema import AriadneGovernanceError
         oid = str(uuid4())
         store = _make_store_with_episodes([oid])
         driver = FakeDriver(store)
         # missing fork_trigger_segment_id → governance error
-        try:
+        with pytest.raises(AriadneGovernanceError):
             branch_operations.create_departure_fork(
                 driver, origin_episode_id=oid, origin_segment_id="seg-1",
-                fork_objective="obj", fork_creation_trigger="AGENT_ESCALATION", initiator="aci",
+                fork_objective="obj", fork_creation_trigger="AGENT_ESCALATION", initiator="agent-a",
             )
-            assert False, "expected AriadneGovernanceError"
-        except AriadneGovernanceError:
-            pass
         # with the trigger segment → succeeds
         result = branch_operations.create_departure_fork(
             driver, origin_episode_id=oid, origin_segment_id="seg-1",
             fork_objective="obj", fork_creation_trigger="AGENT_ESCALATION",
-            initiator="aci", fork_trigger_segment_id="seg-trigger",
+            initiator="agent-a", fork_trigger_segment_id="seg-trigger",
         )
         assert result is not None
 
@@ -1011,18 +988,14 @@ class TestDepartureForkFSM:
         assert store.episodes[res.fork_episode_id]["fork_status"] == "COMPLETED"
 
     def test_declare_return_requires_completed(self):
-        from ariadne.core.schema import AriadneGovernanceError
         store = FakeStore()
         oid, res, driver = self._make_active_fork(store)
         # fork is ACTIVE — return must be blocked
-        try:
+        with pytest.raises(AriadneGovernanceError):
             branch_operations.declare_fork_return(
                 driver, fork_id=res.fork_id, origin_episode_id=oid,
                 return_type="INCORPORATED", returned_by="origin-agent",
             )
-            assert False, "expected AriadneGovernanceError"
-        except AriadneGovernanceError:
-            pass
 
     def test_declare_return_writes_return_node_and_audit(self):
         store = FakeStore()
@@ -1041,7 +1014,6 @@ class TestDepartureForkFSM:
         assert store.episodes[res.fork_episode_id].get("fork_return_type") == "INCORPORATED"
 
     def test_no_double_return(self):
-        from ariadne.core.schema import AriadneGovernanceError
         store = FakeStore()
         oid, res, driver = self._make_active_fork(store)
         branch_operations.complete_departure_fork(driver, res.fork_episode_id)
@@ -1049,22 +1021,19 @@ class TestDepartureForkFSM:
             driver, fork_id=res.fork_id, origin_episode_id=oid,
             return_type="ACKNOWLEDGED", returned_by="origin-agent",
         )
-        try:
+        with pytest.raises(AriadneGovernanceError):
             branch_operations.declare_fork_return(
                 driver, fork_id=res.fork_id, origin_episode_id=oid,
                 return_type="INCORPORATED", returned_by="origin-agent",
             )
-            assert False, "expected AriadneGovernanceError (double return)"
-        except AriadneGovernanceError:
-            pass
 
 
 class TestForkOrphanRecovery:
     """Phase D §19.3.7 — orphan-detection write primitives (protocol exposes writes;
-    ignis-os orchestrates detection). All append-only or set-once; no deletes."""
+    the host application orchestrates detection). All append-only or set-once; no deletes."""
 
     def _dfp(self, tip="backdated-tip", initiator="recovery"):
-        from ariadne.core.branching import (
+        from astp.core.branching import (
             DepartureForkPointNode, compute_departure_fork_point_hash, ForkCreationTrigger,
         )
         now = datetime(2026, 7, 5, tzinfo=timezone.utc)
@@ -1083,7 +1052,7 @@ class TestForkOrphanRecovery:
         return dfp, now
 
     def test_orphan_marker_hash_deterministic_and_self_hashed(self):
-        from ariadne.core.branching import (
+        from astp.core.branching import (
             compute_fork_orphan_marker_hash, ForkOrphanMarker, OrphanClass,
         )
         args = ("mid", "fid", "oid", "CLASS_A", 5, "drid", "did stuff", True, "2026-07-05T00:00:00+00:00")
@@ -1100,7 +1069,7 @@ class TestForkOrphanRecovery:
         assert hasattr(m, "content_hash") and not hasattr(m, "parent_hash")
 
     def test_write_orphan_marker_dedup_on_fork_id(self):
-        from ariadne.core.branching import ForkOrphanMarker, OrphanClass
+        from astp.core.branching import ForkOrphanMarker, OrphanClass
         store = FakeStore()
         driver = FakeDriver(store)
         fid = uuid4()
@@ -1124,7 +1093,7 @@ class TestForkOrphanRecovery:
         assert pid in store.departure_points                 # never deleted (append-only)
 
     def test_class_b_retroactive_write_appends_backdated_and_byte_identical(self):
-        from ariadne.core.branching import compute_departure_fork_point_hash
+        from astp.core.branching import compute_departure_fork_point_hash
         store = FakeStore()
         driver = FakeDriver(store)
         dfp, now = self._dfp(tip="backdated-tip")

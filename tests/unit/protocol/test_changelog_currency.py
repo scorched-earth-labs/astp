@@ -14,12 +14,9 @@
 """CHANGELOG.md must carry an entry for the current SPEC version.
 
 VERSIONING.md's bump procedure ends with "Update CHANGELOG.md with the version
-entry". Nothing enforced it, and three consecutive releases — 3.4.0, 3.5.0 and
-3.5.1 — shipped without one. The changelog's latest entry was 3.3.0 while
-SPEC.md was at 3.5.1.
-
-Same failure as every other one this week: a documented step with no mechanism,
-and a fact that lives in two places with nothing comparing them.
+entry". SPEC.md's ``**Version:**`` and the CHANGELOG headings are the same fact
+in two places; these tests compare them so a release cannot ship without its
+entry.
 """
 from __future__ import annotations
 
@@ -51,7 +48,12 @@ def test_current_spec_version_has_a_changelog_entry():
 
 
 def test_changelog_has_no_gaps_in_the_current_minor_line():
-    """The three releases that slipped are present, so a gap is visible."""
+    """Every PATCH release of the current MAJOR.MINOR line, up to SPEC's, has an entry."""
+    version = _spec_version()
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-.+)?", version)
+    assert match, f"unparseable SPEC version: {version!r}"
+    major, minor, patch = (int(part) for part in match.groups())
     versions = _changelog_versions()
-    for required in ("3.4.0", "3.5.0", "3.5.1"):
+    for earlier_patch in range(patch):
+        required = f"{major}.{minor}.{earlier_patch}"
         assert required in versions, f"CHANGELOG.md is missing [{required}]"

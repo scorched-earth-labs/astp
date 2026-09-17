@@ -18,7 +18,7 @@ Exercises create_aside, close_aside, create_soliloquy, conclude_soliloquy
 against an in-memory fake Neo4j driver. Verifies:
   - asides rejected when not human-initiated
   - reference scan surfaces external leaks without blocking the close
-  - soliloquy default policy enforces Decision 1 (human-accessible,
+  - soliloquy default policy enforces G-27 (human-accessible,
     ESCALATION_ONLY for other agents, HASH_PLACEHOLDER content hash)
   - concluding a soliloquy writes conclusion + tamper-evident chain hash
   - only the conclusion merges back — deliberation chain stays in the soliloquy node
@@ -26,28 +26,17 @@ against an in-memory fake Neo4j driver. Verifies:
 """
 
 import json
-import os
-from datetime import datetime, timezone
 from typing import Any, Dict, List
 from uuid import uuid4
 
 import pytest
 
-
-os.environ["ARIADNE_ENABLED"] = "true"
-
-import importlib  # noqa: E402
-from ariadne.adapters.neo4j import writer as ariadne_writer  # noqa: E402
-importlib.reload(ariadne_writer)
-ariadne_writer.ARIADNE_ENABLED = True
-
-from ariadne.core import branch_operations  # noqa: E402
-from ariadne.core.branching import (  # noqa: E402
+from astp.core import branch_operations
+from astp.core.branching import (
     AriadneGovernanceError,
     AsideCloseResult,
     AsideResult,
     SoliloquyConclusionResult,
-    SoliloquyContentHashPolicy,
     SoliloquyResult,
 )
 
@@ -236,16 +225,16 @@ class TestCreateAside:
             parent_episode_id=eid,
             parent_segment_id="seg-parent",
             aside_label="clarify scope with human",
-            initiated_by_human="devin",
-            target_agent_id="clotho",
+            initiated_by_human="human-1",
+            target_agent_id="agent-a",
         )
 
         assert isinstance(result, AsideResult)
         # Aside node written
         assert len(store.asides) == 1
         a = store.asides[result.aside_id]
-        assert a["initiated_by_human"] == "devin"
-        assert a["target_agent_id"] == "clotho"
+        assert a["initiated_by_human"] == "human-1"
+        assert a["target_agent_id"] == "agent-a"
         assert a["aside_status"] == "OPEN"
         # ASIDE_OPENED audit
         assert any(
@@ -264,7 +253,7 @@ class TestCreateAside:
                 parent_segment_id="seg",
                 aside_label="lbl",
                 initiated_by_human="",   # Empty → agent-initiated attempt
-                target_agent_id="clotho",
+                target_agent_id="agent-a",
             )
 
     def test_requires_target_agent(self):
@@ -277,7 +266,7 @@ class TestCreateAside:
                 parent_episode_id=eid,
                 parent_segment_id="seg",
                 aside_label="lbl",
-                initiated_by_human="devin",
+                initiated_by_human="human-1",
                 target_agent_id="",  # Missing
             )
 
@@ -290,14 +279,14 @@ class TestCloseAside:
 
         open_result = branch_operations.create_aside(
             driver, parent_episode_id=eid, parent_segment_id="seg",
-            aside_label="lbl", initiated_by_human="devin",
-            target_agent_id="clotho", content_refs=["seg-internal-1"],
+            aside_label="lbl", initiated_by_human="human-1",
+            target_agent_id="agent-a", content_refs=["seg-internal-1"],
         )
         close_result = branch_operations.close_aside(
             driver,
             aside_id=open_result.aside_id,
             close_reason="resolved",
-            notification_targets=["ignis", "odysseus"],
+            notification_targets=["agent-b", "agent-c"],
         )
         assert isinstance(close_result, AsideCloseResult)
         assert close_result.reference_scan_passed is True
@@ -317,8 +306,8 @@ class TestCloseAside:
 
         open_result = branch_operations.create_aside(
             driver, parent_episode_id=eid, parent_segment_id="seg",
-            aside_label="lbl", initiated_by_human="devin",
-            target_agent_id="clotho", content_refs=["internal-x"],
+            aside_label="lbl", initiated_by_human="human-1",
+            target_agent_id="agent-a", content_refs=["internal-x"],
         )
         # Inject external refs pointing into the aside
         store.external_refs["internal-x"] = ["external-y", "external-z"]
@@ -341,8 +330,8 @@ class TestCloseAside:
         driver = FakeDriver(store)
         open_result = branch_operations.create_aside(
             driver, parent_episode_id=eid, parent_segment_id="seg",
-            aside_label="lbl", initiated_by_human="devin",
-            target_agent_id="clotho",
+            aside_label="lbl", initiated_by_human="human-1",
+            target_agent_id="agent-a",
         )
         with pytest.raises(AriadneGovernanceError):
             branch_operations.close_aside(
@@ -355,8 +344,8 @@ class TestCloseAside:
         driver = FakeDriver(store)
         open_result = branch_operations.create_aside(
             driver, parent_episode_id=eid, parent_segment_id="seg",
-            aside_label="lbl", initiated_by_human="devin",
-            target_agent_id="clotho",
+            aside_label="lbl", initiated_by_human="human-1",
+            target_agent_id="agent-a",
         )
         branch_operations.close_aside(
             driver, aside_id=open_result.aside_id, close_reason="done",
@@ -382,7 +371,7 @@ class TestCreateSoliloquy:
             parent_episode_id=eid,
             parent_segment_id="seg",
             soliloquy_purpose="decide between alternatives",
-            initiated_by_agent="clotho",
+            initiated_by_agent="agent-a",
         )
         assert isinstance(result, SoliloquyResult)
 
@@ -404,7 +393,7 @@ class TestCreateSoliloquy:
                 parent_episode_id=eid,
                 parent_segment_id="seg",
                 soliloquy_purpose="decide",
-                initiated_by_agent="clotho",
+                initiated_by_agent="agent-a",
                 visibility_policy={"human_accessible": False},
             )
 
@@ -419,7 +408,7 @@ class TestCreateSoliloquy:
         # verify the computed hash uses the placeholder prefix domain.
         result = branch_operations.create_soliloquy(
             driver, parent_episode_id=eid, parent_segment_id="seg",
-            soliloquy_purpose="think", initiated_by_agent="clotho",
+            soliloquy_purpose="think", initiated_by_agent="agent-a",
             deliberation_chain=["private-thought-1", "private-thought-2"],
         )
         sol = store.soliloquies[result.soliloquy_id]
@@ -439,7 +428,7 @@ class TestCreateSoliloquy:
             branch_operations.create_soliloquy(
                 driver, parent_episode_id=eid, parent_segment_id="seg",
                 soliloquy_purpose="",
-                initiated_by_agent="clotho",
+                initiated_by_agent="agent-a",
             )
 
 
@@ -453,7 +442,7 @@ class TestConcludeSoliloquy:
         open_result = branch_operations.create_soliloquy(
             driver, parent_episode_id=eid, parent_segment_id="seg",
             soliloquy_purpose="decide",
-            initiated_by_agent="clotho",
+            initiated_by_agent="agent-a",
             deliberation_chain=["private-a", "private-b", "private-c"],
         )
 
@@ -489,7 +478,7 @@ class TestConcludeSoliloquy:
         open_result = branch_operations.create_soliloquy(
             driver, parent_episode_id=eid, parent_segment_id="seg",
             soliloquy_purpose="decide",
-            initiated_by_agent="clotho",
+            initiated_by_agent="agent-a",
         )
         branch_operations.conclude_soliloquy(
             driver,
@@ -506,7 +495,7 @@ class TestConcludeSoliloquy:
         driver = FakeDriver(store)
         open_result = branch_operations.create_soliloquy(
             driver, parent_episode_id=eid, parent_segment_id="seg",
-            soliloquy_purpose="decide", initiated_by_agent="clotho",
+            soliloquy_purpose="decide", initiated_by_agent="agent-a",
         )
         with pytest.raises(AriadneGovernanceError):
             branch_operations.conclude_soliloquy(
@@ -522,7 +511,7 @@ class TestConcludeSoliloquy:
         driver = FakeDriver(store)
         open_result = branch_operations.create_soliloquy(
             driver, parent_episode_id=eid, parent_segment_id="seg",
-            soliloquy_purpose="decide", initiated_by_agent="clotho",
+            soliloquy_purpose="decide", initiated_by_agent="agent-a",
         )
         with pytest.raises(AriadneGovernanceError):
             branch_operations.conclude_soliloquy(
@@ -538,7 +527,7 @@ class TestConcludeSoliloquy:
         driver = FakeDriver(store)
         open_result = branch_operations.create_soliloquy(
             driver, parent_episode_id=eid, parent_segment_id="seg",
-            soliloquy_purpose="decide", initiated_by_agent="clotho",
+            soliloquy_purpose="decide", initiated_by_agent="agent-a",
         )
         branch_operations.conclude_soliloquy(
             driver, soliloquy_id=open_result.soliloquy_id,
@@ -559,12 +548,12 @@ class TestAuditChainContinuityPhase3:
 
         a = branch_operations.create_aside(
             driver, parent_episode_id=eid, parent_segment_id="seg",
-            aside_label="lbl", initiated_by_human="devin",
-            target_agent_id="clotho",
+            aside_label="lbl", initiated_by_human="human-1",
+            target_agent_id="agent-a",
         )
         s = branch_operations.create_soliloquy(
             driver, parent_episode_id=eid, parent_segment_id="seg",
-            soliloquy_purpose="decide", initiated_by_agent="clotho",
+            soliloquy_purpose="decide", initiated_by_agent="agent-a",
         )
         branch_operations.conclude_soliloquy(
             driver, soliloquy_id=s.soliloquy_id,

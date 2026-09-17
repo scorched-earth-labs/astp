@@ -13,38 +13,40 @@
 # limitations under the License.
 """SPEC §4.4.1 must list exactly the states EpisodeStatus defines.
 
-This section was wrong from the day it was written. On 2026-04-07 the enum
-already carried CREATED, CLOSING, CLOSING_PENDING_SEAL, CLOSED,
-CRYSTALLIZATION_PENDING and CRYSTALLIZED. Two days later the v2 SPEC rewrite
-described the lifecycle as "ACTIVE, REBALANCING, SEALING, SEALED,
-SEALING_FAILED, REBALANCE_FAILED, ARCHIVED, EXPIRED" — four states the
-implementation has never had, and six of its real ones missing.
-
-It survived sixteen months because nothing could compare the two. That is the
-same failure as the WIL operation register: a fact stated in two places with no
-mechanism to notice when they disagree. This is the mechanism.
+The Episode lifecycle is stated twice — in the SPEC §4.4.1 table and in the
+`EpisodeStatus` enum. These tests compare the two so neither can gain or lose
+a state without the other.
 """
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
-from ariadne.core.schema import EpisodeStatus
+from astp.core.schema import EpisodeStatus
 
 SPEC = Path(__file__).resolve().parents[3] / "SPEC.md"
 
 
+SECTION_HEADING = "#### 4.4.1 Episode Lifecycle States"
+# The state table ends at the first paragraph after it.
+TABLE_END = "**Crystallization is a fact"
+
+
 def _spec_states() -> set[str]:
     text = SPEC.read_text(encoding="utf-8")
-    start = text.index("#### 4.4.1 Episode Lifecycle States")
-    section = text[start:]
-    # The table ends at the first paragraph after it.
-    section = section[: section.index("**Crystallization is a fact")]
+    start = text.find(SECTION_HEADING)
+    assert start != -1, f"SPEC.md has no {SECTION_HEADING!r} heading"
+    end = text.find(TABLE_END, start)
+    assert end != -1, (
+        f"SPEC.md §4.4.1 no longer contains the paragraph starting {TABLE_END!r}, "
+        "which this test uses to find the end of the state table"
+    )
+    section = text[start:end]
     return set(re.findall(r"^\|\s*`([A-Z_]+)`\s*\|", section, re.M))
 
 
 def test_spec_section_exists():
-    assert "#### 4.4.1 Episode Lifecycle States" in SPEC.read_text(encoding="utf-8")
+    assert SECTION_HEADING in SPEC.read_text(encoding="utf-8")
 
 
 def test_table_parses():
@@ -62,7 +64,7 @@ def test_every_enum_state_is_documented():
 
 
 def test_no_documented_state_is_fictional():
-    """The original failure mode: the spec named states that never existed."""
+    """SPEC must not name a state the enum does not define."""
     extra = sorted(_spec_states() - {m.value for m in EpisodeStatus})
     assert extra == [], (
         f"SPEC §4.4.1 documents states EpisodeStatus does not define: {extra}."
