@@ -26,11 +26,9 @@ Foundation schema types for the branch/fork/merge taxonomy:
 Build rule: no function ships without all three writes present
 (structural node + cognitive delta + audit record).
 
-Spec reference: Ariadne Branch/Fork/Merge Build Specification v1.0
-Issued by: Clotho, Suite Lead — Ariadne State Tree Protocol
+Spec reference: SPEC §19 (Branch/Fork/Merge Taxonomy).
 """
 
-import hashlib
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -60,7 +58,7 @@ class BranchDeclarationType(str, Enum):
     """How the branch was declared."""
     EXPLICIT = "explicit"           # Declared at creation time
     INFERRED = "inferred"           # System-detected via coherence fingerprint
-    RETROACTIVE = "retroactive"     # Declared after the fact (the Clotho case)
+    RETROACTIVE = "retroactive"     # Declared after the fact
 
 
 class BranchTerminusType(str, Enum):
@@ -88,19 +86,19 @@ class CognitiveDeltaType(str, Enum):
     ASIDE_CLOSED = "ASIDE_CLOSED"
     SOLILOQUY_INITIATED = "SOLILOQUY_INITIATED"
     SOLILOQUY_CONCLUDED = "SOLILOQUY_CONCLUDED"
-    # Amendment v2.0 — Cross-Episode Linking. LINK_ACCEPTED fires on every
+    # Cross-Episode Linking (SPEC §20). LINK_ACCEPTED fires on every
     # link assertion (whether human-asserted or auto-accepted from
     # discovery above AUTO_ACCEPT_THRESHOLD). LINK_PROPOSED fires when
     # discovery surfaces a candidate ≥ DISCOVERY_THRESHOLD for human
     # review. LINK_REJECTED fires when a human rejects a proposed
     # candidate. CANDIDATE_REJECTED fires when discovery scores a
     # candidate BELOW DISCOVERY_THRESHOLD — recorded for calibration
-    # tuning (§1 calibration narrative).
+    # tuning (SPEC §20 →1 calibration narrative).
     LINK_PROPOSED = "LINK_PROPOSED"
     LINK_ACCEPTED = "LINK_ACCEPTED"
     LINK_REJECTED = "LINK_REJECTED"
     CANDIDATE_REJECTED = "CANDIDATE_REJECTED"
-    # Amendment v2.0 — Episode Grouping. Per §11.4 consolidated audit
+    # Episode Grouping (SPEC §20). Per →11.4 consolidated audit
     # registry: MEMBERSHIP_RECORD_CREATED fires on every new MembershipRecord
     # (whether initial or succession). MEMBERSHIP_RECORD_SUPERSEDED fires
     # additionally when the new record supersedes a prior — both events
@@ -111,8 +109,8 @@ class CognitiveDeltaType(str, Enum):
     MEMBERSHIP_RECORD_SUPERSEDED = "MEMBERSHIP_RECORD_SUPERSEDED"
     DECLARATION_VERSION_BUMPED = "DECLARATION_VERSION_BUMPED"
     DECLARATION_SUPERSEDED = "DECLARATION_SUPERSEDED"
-    # Amendment v3.0 — Layer 3 Codification (Workflow & Execution DAG).
-    # Per §11 audit event registry: WORKFLOW_DECLARED fires on every
+    # Layer 3 Workflow & Execution DAG (SPEC §21).
+    # Per §21 §11 audit event registry: WORKFLOW_DECLARED fires on every
     # WorkflowDeclaration creation. EXECUTION_RECORDED fires on every
     # ExecutionNode creation (and is the wire-tier signal that the
     # workflow's auto-transition DECLARED → IN_PROGRESS occurred on the
@@ -810,7 +808,7 @@ def compute_fork_point_hash(
 # directional departure: one topic diverges into one new episode while the
 # originating episode CONTINUES uninterrupted. There are no siblings and no
 # resolve/promote/discard — "fork is a verb, not a noun; if not abandoned it IS
-# an episode." (Ariadne BFM Phase D, Episode 49372907, Clotho + Devin.)
+# an episode." (SPEC §19.3.5.)
 # ============================================================================
 
 
@@ -1200,7 +1198,7 @@ class SoliloquyConcludedDelta(BaseModel):
 
 
 class SoliloquyVisibilityPolicy(BaseModel):
-    """Per-soliloquy visibility policy. Defaults enforce Decision 1."""
+    """Per-soliloquy visibility policy. Defaults enforce G-27."""
     human_accessible: bool = True                              # ALWAYS — non-negotiable
     owner_agent_access: str = "ALWAYS"
     other_agents_access: AccessLevel = AccessLevel.ESCALATION_ONLY
@@ -1606,8 +1604,8 @@ class DetectionResult(BaseModel):
     # create_branch(declaration_type=RETROACTIVE) at the last nominal point.
 
     # Derivative+hysteresis FSM (populated only when detect_branch_candidate is
-    # given an fsm_state). The caller (ignis-os) persists `new_fsm_state` to
-    # Redis between turns. All None/False on the legacy streak path.
+    # given an fsm_state). The caller persists `new_fsm_state` between
+    # turns. All None/False on the legacy streak path.
     new_fsm_state: Optional[DriftDetectionState] = None
     delta_drift: Optional[float] = None
     triggered_on_derivative: bool = False

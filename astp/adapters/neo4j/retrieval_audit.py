@@ -25,7 +25,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Optional
+from typing import Any
 
 from astp.protocol.retrieval_audit import RetrievalAuditRecord
 

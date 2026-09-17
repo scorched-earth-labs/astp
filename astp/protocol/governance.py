@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Generic Governance Rules
+ASTP — Generic Governance Rules
 
 Node-type-agnostic governance enforcement. These rules apply to all
 CognitiveNodes regardless of type. Episode-specific governance belongs

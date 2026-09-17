@@ -15,18 +15,17 @@
 Audit chain helpers — shared by every Ariadne operation that advances the
 tamper-evident audit log.
 
-Three modules currently emit AuditRecords (`branch_operations.py`,
-`cross_episode.py`, `grouping.py`); before this lift, each held private
-duplicates of these two helpers. They're now centralized here.
+Three modules emit AuditRecords (`branch_operations.py`,
+`cross_episode.py`, `grouping.py`); they share the two helpers defined here.
 
 **Chain key semantics**
 
 An audit chain is keyed by a string. The most common chain key is an
-episode_id (e.g., `"a18748aa-12c2-495a-..."`) — every audit event for
+episode_id (a UUID string) — every audit event for
 that episode advances its own monotonic sequence and forms a hash-linked
 chain. Some operations (notably ConformanceDeclaration version bumps in
 the grouping module) anchor to a synthetic chain key — e.g.,
-`"declaration:sel-thermyt:Collection:<group_id>"` — when the event has
+`"declaration:<group_system>:<group_id>"` — when the event has
 no natural episode home.
 
 The protocol places no constraint on the chain_key format. Implementations
@@ -102,7 +101,7 @@ def prior_audit_hash(driver: Any, chain_key: str) -> str:
     Same fallback semantics as `next_delta_sequence` — a transient
     query error returns GENESIS rather than blocking the operation.
     The integrity check that catches this is the chain-completeness
-    proof (Amendment v2.0 §11.2.3); a spurious GENESIS in the middle
+    proof (SPEC §20 →11.2.3); a spurious GENESIS in the middle
     of a chain shows up as a hash mismatch at the next record.
     """
     try:

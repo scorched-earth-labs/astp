@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Cognitive Node Primitives
+ASTP — Cognitive Node Primitives
 
 CognitiveNode is the universal protocol primitive. All node types
 (episodes, signals, agents, artifacts) are parameterizations of
@@ -65,12 +65,12 @@ class NodePayload(ABC):
         whether a subclass uses this default or overrides it the same way.
         Lets the generic node factory hash any registered type uniformly.
         """
-        from astp.core.schema import sha3_256
+        from astp.protocol.hashing import sha3_256
         return sha3_256(self.to_content_hash_input())
 
 
 class CognitiveNode(BaseModel):
-    """The universal cognitive node — foundation of the Ariadne protocol.
+    """The universal cognitive node — foundation of the protocol.
 
     Every piece of agent cognition (episodes, segments, signals, artifacts)
     is represented as a CognitiveNode. The node_type field and payload

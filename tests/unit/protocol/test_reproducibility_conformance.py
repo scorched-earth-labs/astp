@@ -18,11 +18,6 @@ SPEC 4.3.0 §5.6–§5.8 and §9.3. A sealed root MUST be reconstructible from
 stored nodes alone, with no out-of-band state; the signal manifest MUST be
 order-independent; version tags MUST select the reproduction function; and
 an Episode whose record is fixed MUST refuse new content.
-
-Background: the 2026-09-13 corpus-scale re-verification of 62 sealed
-Episodes found 4 seals reproducible only by searching same-timestamp signal
-orderings, 8 reproducible only under a replaced hash function, and one
-post-closure append. Every vector here targets one of those.
 """
 import random
 from datetime import datetime, timezone
@@ -159,18 +154,46 @@ class TestRP003VersionTagsSelectTheFunction:
         assert compute_leaf_hash_from_node(n1) == compute_leaf_hash_from_node(n2)
 
 
-class TestRP004FixedRecordRefusesContent:
-    """RP-004 — G-1 refuses appends from CLOSING_PENDING_SEAL onward, including
-    CLOSED, the state the reference deployment seals into."""
+# RP-004's fixed and open states, as CONFORMANCE-REPRODUCIBILITY.md lists them.
+# Deliberately spelled out here rather than derived from G1_FROZEN_STATES, so
+# the vector checks the guard against the document and not against itself.
+RP004_FIXED_STATES = [
+    EpisodeStatus.CLOSING_PENDING_SEAL,
+    EpisodeStatus.CLOSED,
+    EpisodeStatus.CRYSTALLIZATION_PENDING,
+    EpisodeStatus.SEALING,
+    EpisodeStatus.SEALED,
+    EpisodeStatus.ARCHIVED,
+]
+RP004_OPEN_STATES = [
+    EpisodeStatus.CREATED,
+    EpisodeStatus.ACTIVE,
+    EpisodeStatus.PENDING_HITL,
+    EpisodeStatus.CLOSING,
+    EpisodeStatus.CRYSTALLIZED,
+]
 
-    @pytest.mark.parametrize("state", sorted(G1_FROZEN_STATES, key=lambda s: s.value))
+
+class TestRP004FixedRecordRefusesContent:
+    """RP-004 — G-1 refuses appends to an Episode whose record is fixed:
+    CLOSING_PENDING_SEAL onward, CLOSED included."""
+
+    @pytest.mark.parametrize("state", RP004_FIXED_STATES)
     def test_frozen_states_refuse(self, state):
         with pytest.raises(AriadneGovernanceError):
             enforce_G1_write_guard(state)
 
-    @pytest.mark.parametrize("state", [EpisodeStatus.CREATED, EpisodeStatus.ACTIVE, EpisodeStatus.CLOSING, EpisodeStatus.PENDING_HITL, EpisodeStatus.CRYSTALLIZED])
+    @pytest.mark.parametrize("state", RP004_OPEN_STATES)
     def test_open_states_admit(self, state):
         enforce_G1_write_guard(state)
+
+    def test_fixed_and_open_partition_the_lifecycle(self):
+        fixed, open_ = set(RP004_FIXED_STATES), set(RP004_OPEN_STATES)
+        assert fixed | open_ == set(EpisodeStatus)
+        assert fixed & open_ == set()
+
+    def test_guard_constant_matches_the_vector(self):
+        assert set(G1_FROZEN_STATES) == set(RP004_FIXED_STATES)
 
     def test_closed_is_frozen(self):
         assert EpisodeStatus.CLOSED in G1_FROZEN_STATES

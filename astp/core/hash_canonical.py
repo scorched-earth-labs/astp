@@ -25,8 +25,8 @@ protocol package. Centralized here so that:
    the canonicalizer.
 3. Cross-implementation interop: any conforming Ariadne implementation
    that uses the same canonicalization rules produces the same hash
-   for the same input. This is wire-tier conformance per Amendment
-   v2.0 §12.1.
+   for the same input. This is wire-tier conformance per SPEC §20
+   →12.1.
 
 **Field-order discipline**
 

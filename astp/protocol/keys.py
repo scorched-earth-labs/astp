@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Key Hierarchy
+ASTP — Key Hierarchy
 
 HKDF-SHA3-256 key derivation for the three-level key hierarchy:
   Root Key Material → Workspace Key → Node Key → Seal Key
@@ -36,8 +36,8 @@ from cryptography.hazmat.primitives.hashes import SHA3_256
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from pydantic import BaseModel, Field
 
-from astp.core.schema import sha3_256
-from astp.protocol.errors import GovernanceViolation, MonotonicityViolation
+from astp.protocol.hashing import sha3_256
+from astp.protocol.errors import MonotonicityViolation
 
 
 # ── HKDF Derivation ─────────────────────────────────────────────────────────

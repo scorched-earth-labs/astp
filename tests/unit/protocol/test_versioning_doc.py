@@ -13,15 +13,10 @@
 # limitations under the License.
 """VERSIONING.md must not restate the protocol version.
 
-VERSIONING.md declares `SPEC.md` the canonical version source and then, for
-several releases, restated a version of its own — `2.5.0-draft`, long after
-SPEC.md had moved to the 3.x line. Nothing could notice: the number existed in
-two places with no relationship between them.
-
-Same failure shape as the WIL operation register (see test_wil_operations.py):
-a fact duplicated into a second location drifts, and drift is invisible until
-something downstream trusts the wrong copy. The fix is to remove the duplicate,
-and this test keeps it removed.
+VERSIONING.md declares `SPEC.md` the canonical version source. A version
+number restated in VERSIONING.md is a second copy of that fact with nothing
+keeping it in step, so the "Current version" section must point at SPEC.md
+and name no version of its own.
 """
 
 import re
@@ -35,10 +30,13 @@ SEMVER = re.compile(r"\b\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?\b")
 
 
 def _current_version_section() -> str:
+    """Text of the level-2 "Current version" section, up to the next level-2 heading."""
     text = VERSIONING.read_text(encoding="utf-8")
-    start = text.index("## Current version")
-    end = text.index("## ", start + 1)
-    return text[start:end]
+    heading = re.search(r"^## Current version[^\n]*$", text, re.M)
+    assert heading, "VERSIONING.md has no '## Current version' section"
+    following = re.search(r"^## ", text[heading.end():], re.M)
+    end = heading.end() + following.start() if following else len(text)
+    return text[heading.start():end]
 
 
 def test_spec_declares_a_version():

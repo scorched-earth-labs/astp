@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Phase 4 — Prescriptive Enforcement
+ASTP Phase 4 — Prescriptive Enforcement (SPEC §19.5)
 
-This module transforms Ariadne from a system that describes drift to a
-system that prevents it. Phase 4 makes detection active:
+This module turns drift detection from descriptive into prescriptive.
+Phase 4 makes detection active:
 
   - detect_branch_candidate(): read recent fingerprints, advance state,
     fire MATERIALIZED recommendations
@@ -23,8 +23,6 @@ system that prevents it. Phase 4 makes detection active:
     fingerprint at write time, persist it, advance the detection state
   - CoherenceFingerprintRegistry: convenience wrapper around the Neo4j
     fingerprint queries
-
-Spec reference: Branch/Fork/Merge Build Specification v1.0, Section 7.
 """
 
 import logging
@@ -67,7 +65,7 @@ def _detect_via_fsm(
     fsm_state: DriftDetectionState,
     drift_vs_anchor: Optional[float] = None,
 ) -> DetectionResult:
-    """Derivative+hysteresis FSM path for detect_branch_candidate (Clotho v4).
+    """Derivative+hysteresis FSM path for detect_branch_candidate.
 
     Pure transition (no fingerprint read) except the materialized-recommendation
     lookup, which mirrors the legacy path. The new FSM state is returned on
@@ -177,9 +175,8 @@ def detect_branch_candidate(
     Detection model:
       - `fsm_state is None` (default): the legacy streak-based
         `advance_detection_state` — unchanged, fully backward-compatible.
-      - `fsm_state` provided: the derivative+hysteresis FSM (Clotho v4). The
-        caller (ignis-os) owns the Redis-persisted DriftDetectionState and
-        passes it in; the new state comes back on `result.new_fsm_state`.
+      - `fsm_state` provided: the derivative+hysteresis FSM. The caller owns
+        the persisted DriftDetectionState and passes it in; the new state comes back on `result.new_fsm_state`.
     """
     if fsm_state is not None:
         return _detect_via_fsm(

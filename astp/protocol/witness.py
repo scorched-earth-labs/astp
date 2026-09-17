@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Witness Signatures
+ASTP — Witness Signatures
 
 Multi-party attestation that a node's state was observed and verified.
 The witness record includes a cryptographic commitment binding the
@@ -28,11 +28,10 @@ Per IMPLEMENTATION-PHASE3.md Section 5.
 from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional
-from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from astp.core.schema import sha3_256
+from astp.protocol.hashing import sha3_256
 from astp.protocol.errors import GovernanceViolation
 
 

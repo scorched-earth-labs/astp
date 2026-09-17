@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Branch Operations — Phase 1: Branch Lifecycle
+ASTP Branch Operations — Branch/Fork/Merge lifecycle (SPEC §19)
 
 The two Phase 1 functions:
   create_branch() — 11-step sequence creating a branch from the spine
@@ -20,8 +20,6 @@ The two Phase 1 functions:
 
 Build rule: every function writes structural node + cognitive delta + audit record.
 No function ships without all three writes present.
-
-Spec reference: Ariadne Branch/Fork/Merge Build Specification v1.0, Sections 4.3–4.4
 """
 
 import json
@@ -40,22 +38,18 @@ from astp.core.branching import (
     CognitiveDeltaType,
     TriggerType,
     IntentType,
-    IntentStatus,
     AuditRecord,
     AccessPolicy,
     AccessResourceType,
     BranchResult,
     AbandonResult,
     compute_branch_point_hash,
-    compute_branch_terminus_hash,
     compute_audit_record_hash,
     compute_intent_idempotency_key,
     enforce_branch_depth_limit,
-    enforce_access_policy,
     enforce_abandonment_reason_required,
     AriadneGovernanceError,
     DEFAULT_ACCESS_POLICIES,
-    AccessLevel,
 )
 from astp.core.audit_chain import (
     next_delta_sequence,
@@ -153,7 +147,7 @@ def create_branch(
             )
 
         # STEP 3: Access policy check (placeholder — fail-open for Phase 1)
-        # Full Harmonia enforcement comes in Phase 4
+        # Access policy enforcement is not wired into this step.
 
         # STEP 4: Capture spine Merkle snapshot
         spine_merkle_snapshot = ""
@@ -458,9 +452,7 @@ def abandon_branch(
 
 
 # Audit chain helpers (next_delta_sequence + prior_audit_hash) live in
-# astp.core.audit_chain — imported above. The previously-private
-# duplicates in this module have been removed; call sites use the
-# shared helpers via the import.
+# astp.core.audit_chain — imported above.
 
 
 # ============================================================================
@@ -2431,11 +2423,8 @@ def _write_branch_wil(
 ) -> None:
     """Write a WIL entry for a branch operation.
 
-    `operation` is a WILOperation, not a str. It used to be a bare str, which
-    let every BFM call site pass a literal — and eight of the ten literals in
-    use were not members of the enum. That drift is invisible at the write site
-    and only surfaces downstream in anything that treats WILOperation as the
-    authoritative operation list.
+    `operation` is a WILOperation, not a str, so a call site cannot ledger a
+    value that is absent from the authoritative operation list.
 
     The coercion below sits OUTSIDE the try on purpose. The blanket handler
     exists so a Neo4j hiccup cannot fail a branch operation — the ledger write

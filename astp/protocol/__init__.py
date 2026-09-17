@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Node-Generic Cognitive Persistence
+ASTP — Node-Generic Cognitive Persistence
 
 The protocol layer operates on CognitiveNode exclusively. It never
 imports from astp.nodes.* — that boundary is the namespace firewall.
@@ -26,6 +26,12 @@ Core primitives:
     ContentDelta, StructuralDelta — atomic state transition records
     VersionVector — multi-agent coordination
     NodeTypeRegistry — open enum for node types
+
+Trust infrastructure (SPEC §16):
+    derive_workspace_key, derive_node_key, derive_seal_key — key hierarchy
+    AnchorCommitment, TransparencyLogAdapter — transparency log anchoring
+    WitnessRecord, enforce_witness_threshold — witness signatures
+    ProofChain, verify_proof_chain — cross-node chain proofs
 """
 
 from astp.protocol.node import CognitiveNode, CognitiveEdge, NodePayload
@@ -94,6 +100,36 @@ __all__ = [
     "AuditRecord",
     "AuditChain",
     "compute_audit_hash",
+    "RetrievalAuditRecord",
+    "compute_retrieval_audit_hash",
+    # Rebalance
+    "RebalanceEventNode",
+    "create_rebalance_event",
+    # Keys
+    "derive_workspace_key",
+    "derive_node_key",
+    "derive_seal_key",
+    "NodeKeyRecord",
+    "enforce_key_version_monotonicity",
+    "compute_public_key_fingerprint",
+    # Anchoring
+    "AnchorCommitment",
+    "AnchorReceipt",
+    "TransparencyLogAdapter",
+    "build_anchor_commitment",
+    # Witness
+    "WitnessRole",
+    "WitnessRecord",
+    "compute_witness_commitment",
+    "verify_witness_commitment",
+    "enforce_witness_threshold",
+    # Chain proofs
+    "ProofLink",
+    "ProofChain",
+    "ChainVerificationResult",
+    "compute_chain_root",
+    "build_proof_chain",
+    "verify_proof_chain",
     # Verification
     "DeltaVerifier",
     "VerificationResult",

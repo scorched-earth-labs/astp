@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Version Vector
+ASTP — Version Vector
 
 Tracks both content and structural evolution independently.
 spine_version increments on content changes; tree_version increments

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Delta Verification
+ASTP — Delta Verification
 
 The DeltaVerifier is the Phase 1 completion criterion. It encapsulates
 five tampering test cases that any conforming implementation must detect:
@@ -27,7 +27,7 @@ A verifier catching only case 1 is a content integrity verifier.
 Cases 2-5 are required for temporal integrity. All five must pass.
 """
 
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel
 

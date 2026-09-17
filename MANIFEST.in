@@ -1,0 +1,11 @@
+include LICENSE.txt
+include README.md
+include CHANGELOG.md
+include SPEC.md
+include GLOSSARY.md
+include VERSIONING.md
+include CONFORMANCE*.md
+include IMPLEMENTATION*.md
+graft docs
+graft tests
+global-exclude *.py[cod]

@@ -12,31 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Workflow & Execution DAG — Amendment v3.0 Layer 3 schema primitives.
+Workflow & Execution DAG — SPEC §21 Layer 3 schema primitives.
 
 Defines the three Layer 3 node types (WorkflowDeclaration, ExecutionNode,
 SkillInvocation), their enums, content-hash computation, and audit delta
 payloads. This is the protocol-level type module — adapter modules import
 from here, never the reverse.
 
-Layer 3 nodes do NOT participate in Spine hash computation (Amendment v3.0
+Layer 3 nodes do NOT participate in Spine hash computation (SPEC §21
 §2, invariant L3-I1). Cross-layer references to Layer 1/2 entities are by
 node_id only.
 
-Immutability invariants per Amendment v3.0 §9:
+Immutability invariants per SPEC §21 §9:
 - ExecutionNode and SkillInvocation are fully immutable after creation
   (L3-I3); retries produce new nodes (L3-I5)
 - WorkflowDeclaration's mutation surface is restricted to status,
   status_updated_at, error_detail (L3-I4)
 
-Hash preimage rules per Amendment v3.0 §8:
+Hash preimage rules per SPEC §21 §8:
 - WorkflowDeclaration excludes status, status_updated_at, error_detail
 - ExecutionNode includes all fields except content_hash itself
 - SkillInvocation excludes registry_id (reserved for future Skill Registry
   amendment per §13.2; populating registry_id later MUST NOT invalidate
   content_hash)
 
-Sole-writer principle per Amendment v3.0 §3: every write recorded here
+Sole-writer principle per SPEC §21 §3: every write recorded here
 must be performed by the workspace's declared Cognitive Implementation
 Authority for the relevant node type. The CIA identifier is mandatory on
 every audit delta (§11).
@@ -62,7 +62,7 @@ from astp.core.hash_canonical import hash_preimage
 
 
 class WorkflowStatus(str, Enum):
-    """Lifecycle state of a WorkflowDeclaration — Amendment v3.0 §10.
+    """Lifecycle state of a WorkflowDeclaration — SPEC §21 §10.
 
     State machine:
         DECLARED → IN_PROGRESS (auto-transition on first ExecutionNode write)
@@ -81,7 +81,7 @@ class WorkflowStatus(str, Enum):
 
 
 class ExecutionStatus(str, Enum):
-    """Terminal status of an ExecutionNode — Amendment v3.0 §5.
+    """Terminal status of an ExecutionNode — SPEC §21 §5.
 
     Written once at creation; no update path. A retried step produces a
     new ExecutionNode rather than mutating the prior one (invariant
@@ -94,7 +94,7 @@ class ExecutionStatus(str, Enum):
 
 
 class SkillStatus(str, Enum):
-    """Terminal status of a SkillInvocation — Amendment v3.0 §6.
+    """Terminal status of a SkillInvocation — SPEC §21 §6.
 
     Written once at creation; no update path.
     """
@@ -105,7 +105,7 @@ class SkillStatus(str, Enum):
 
 
 class ErrorType(str, Enum):
-    """Categorization of execution failure — Amendment v3.0 §5.
+    """Categorization of execution failure — SPEC §21 §5.
 
     Required on ExecutionNode when status is not COMPLETED. The
     classification is coarse-grained by design; finer detail belongs in
@@ -120,7 +120,7 @@ class ErrorType(str, Enum):
 
 
 class PrecedesEdgeType(str, Enum):
-    """Edge property on the ExecutionNode PRECEDES relation — Amendment v3.0 §7.
+    """Edge property on the ExecutionNode PRECEDES relation — SPEC §21 §7.
 
     Implementations storing the PRECEDES edge MUST record this property
     even when the default SEQUENTIAL applies; the alternative values
@@ -132,11 +132,10 @@ class PrecedesEdgeType(str, Enum):
     PARALLEL = "PARALLEL"
 
 
-# Layer 3 protocol schema version. Bumps follow SemVer per Amendment v2.0
-# conformance rules: additive fields → minor; hash preimage changes →
-# major; field renaming → major. Amendment v3.0 ships at 3.0.0 because it
-# introduces Layer 3 as a new protocol surface (no prior version to bump
-# from). Subsequent Layer 3 amendments will bump from here.
+# Layer 3 protocol schema version. Bumps follow SemVer: additive fields →
+# minor; hash preimage changes → major; field renaming → major. Layer 3
+# was introduced at 3.0.0 as a new protocol surface; later Layer 3 changes
+# bump from here.
 LAYER_3_SCHEMA_VERSION: str = "3.0.0"
 
 
@@ -144,7 +143,7 @@ LAYER_3_SCHEMA_VERSION: str = "3.0.0"
 
 
 class WorkflowDeclaration(BaseModel):
-    """A Layer 3 workflow intent record — Amendment v3.0 §4.
+    """A Layer 3 workflow intent record — SPEC §21 §4.
 
     Created at workflow initiation, before any execution step writes. The
     mutation surface is restricted to (status, status_updated_at,
@@ -193,7 +192,7 @@ class WorkflowDeclaration(BaseModel):
 
 
 class ExecutionNode(BaseModel):
-    """A Layer 3 atomic execution step record — Amendment v3.0 §5.
+    """A Layer 3 atomic execution step record — SPEC §21 §5.
 
     Terminal-on-write: status is final at creation, no update path
     (invariant L3-I3). A retried step produces a new ExecutionNode with
@@ -238,7 +237,7 @@ class ExecutionNode(BaseModel):
 
 
 class SkillInvocation(BaseModel):
-    """A Layer 3 skill invocation record — Amendment v3.0 §6.
+    """A Layer 3 skill invocation record — SPEC §21 §6.
 
     Terminal-on-write (invariant L3-I3). Child of ExecutionNode;
     optional — an ExecutionNode may have zero SkillInvocation children.

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Tamper-Evident Audit Chain
+ASTP — Tamper-Evident Audit Chain
 
 The audit trail is a first-class data structure, not a log.
 Each AuditRecord includes prev_audit_hash — a chain link that
@@ -30,8 +30,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from astp.core.schema import sha3_256
-from astp.protocol.errors import VerificationError
+from astp.protocol.hashing import sha3_256
 
 
 GENESIS_HASH = "GENESIS"

@@ -26,13 +26,12 @@ import logging
 import os
 from uuid import UUID
 
-from astp.core.schema import AriadneGovernanceError, compute_spine_hash
+from astp.core.schema import AriadneGovernanceError
 from astp.core.crystallization import (
     CrystallizationDeltaNode,
     CrystallizationVerificationResult,
     EpisodeVersionVector,
     build_crystallization_delta,
-    compute_crystallization_node_hash,
     compute_spine_hash_for_episode,
     verify_crystallization_hashes,
 )
@@ -52,12 +51,8 @@ async def acquire_crystallization_lock(driver, episode_id: str) -> bool:
     Sets episode_status to CRYSTALLIZATION_PENDING, remembering the status it
     displaced so `release_crystallization_lock` can restore it (SPEC §4.4.1).
 
-    Acquirable from ACTIVE, CLOSING and CLOSING_PENDING_SEAL. It used to accept
-    ACTIVE only, which made the protocol's own lock unusable for the case that
-    needs it most: an episode crystallizing during closure. Consumers that
-    needed it wrote their own lock with the wider WHERE clause — the same shape
-    of gap as the missing writers, where the protocol's version could not do
-    the job and a second implementation appeared beside it.
+    Acquirable from ACTIVE, CLOSING and CLOSING_PENDING_SEAL, so an episode
+    can crystallize during closure.
 
     Returns True if the lock was acquired, False if the episode is in none of
     those states or has unresolved blocking HITL events.
@@ -111,19 +106,16 @@ async def release_crystallization_lock(driver, episode_id: str, success: bool) -
     Releases the CRYSTALLIZATION_PENDING lock, restoring the status the lock
     displaced (SPEC §4.4.1).
 
-    This used to set CRYSTALLIZED on success. That conflated a lifecycle status
-    with a fact stored elsewhere: `is_episode_crystallized` counts
-    CrystallizationDelta nodes and never reads episode_status, so CRYSTALLIZED
-    was never how anything determined whether an episode was crystallized.
+    Success does not set CRYSTALLIZED. Whether an episode is crystallized is
+    a fact stored elsewhere: `is_episode_crystallized` counts
+    CrystallizationDelta nodes and never reads episode_status. An episode
+    crystallizing during a seal is in CLOSING; landing it in CRYSTALLIZED
+    would strand it outside the closure workflow with no documented
+    transition back. §4.4.1 permits restoring the prior status, and it is the
+    only correct behaviour there.
 
-    Worse, it was wrong mid-closure. An episode crystallizing during a seal is
-    in CLOSING; landing it in CRYSTALLIZED strands it outside the closure
-    workflow with no documented transition back. §4.4.1 makes restoring the
-    prior status explicitly permitted, and it is the only correct behaviour
-    there.
-
-    Falls back to ACTIVE when no prior status was recorded — locks taken before
-    this change, or by a caller that acquired the lock with its own Cypher.
+    Falls back to ACTIVE when no prior status was recorded — for example a
+    lock acquired by a caller with its own Cypher.
     """
     if not ARIADNE_ENABLED:
         return
