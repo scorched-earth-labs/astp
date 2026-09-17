@@ -57,7 +57,9 @@ EXCLUSION_V2 = b"EXCLUSION:v2:"
 STRUCTURAL_MANIFEST_V1 = b"STRUCTURAL_MANIFEST:v1:"
 EPISODE_ROOT_V2 = b"EPISODE_ROOT:v2:"
 BRANCH_POINT_V2 = b"BRANCH_POINT:v2:"
+BRANCH_TERMINUS_V2 = b"BRANCH_TERMINUS:v2:"
 FORK_POINT_V2 = b"FORK_POINT:v2:"
+FORK_RETURN_V2 = b"FORK_RETURN:v2:"
 DEPARTURE_FORK_POINT_V2 = b"DEPARTURE_FORK_POINT:v2:"
 MERGE_POINT_V2 = b"MERGE_POINT:v2:"
 HITL_CONTEXT_V2 = b"HITL_CONTEXT:v2:"
@@ -84,13 +86,30 @@ def compute_exclusion_hash_v2(excluded_content_hashes: Iterable[str]) -> str:
     return hash_set(EXCLUSION_V2, excluded_content_hashes)
 
 
+# A human-in-the-loop event is a manifest member once it is in one of these states.
+HITL_TERMINAL_STATES = frozenset({"resolved", "timed_out", "escalated"})
+
+
 def compute_structural_manifest_hash(member_hashes: Iterable[str]) -> str:
-    """Commitment to the Episode's structural nodes. Members: the ``:v2:`` content
-    hash of every BranchPoint, ForkPoint, DepartureForkPoint and MergePoint that
-    sits on this Episode's spine, and the ``HITL_NODE:v2:`` hash of every
-    human-in-the-loop event of this Episode that has reached a terminal state.
-    Each member hash is domain-separated by its own prefix, so the set needs no
-    per-member type tag."""
+    """Commitment to the Episode's structural nodes.
+
+    Membership rule: a structural node is a member if and only if removing it would
+    let a verifier be deceived about the Episode's branch, fork, merge or
+    termination structure. Members are the ``:v2:`` content hash of every
+    BranchPoint, BranchTerminus, ForkPoint, DepartureForkPoint, ForkReturn and
+    MergePoint that sits on this Episode, and the ``HITL_NODE:v2:`` hash of every
+    human-in-the-loop event of this Episode in a terminal state
+    (``HITL_TERMINAL_STATES``). A ForkOrphanMarker is a diagnostic satellite and is
+    not a member. Each member hash is domain-separated by its own prefix, so the
+    set needs no per-member type tag.
+
+    The same rule decides fields: a field that makes a structural claim is in a
+    member's preimage (``spine_merkle_snapshot``, ``merge_type``); commentary is
+    not (a label, a free-text summary).
+
+    A seal is immutable, so a structural node created after a seal is not a
+    member of that seal's manifest. It is committed by the Episode's *next*
+    crystallization, and references the earlier seal without belonging to it."""
     return hash_set(STRUCTURAL_MANIFEST_V1, member_hashes)
 
 
@@ -113,17 +132,40 @@ def compute_episode_root_hash_v2(
 
 
 # ── structural manifest members ─────────────────────────────────────────────────
-# Field lists are those the 4.x constructions hash, in the same order; what
-# changes is the encoding. ``parent_hash`` is NULL at the start of a chain (4.x
-# used the text "GENESIS").
+# Field lists are those the 4.x constructions hash, in the same order, plus the two
+# structural fields 4.x omitted (``spine_merkle_snapshot``, ``merge_type``); what
+# changes otherwise is the encoding. ``parent_hash`` is NULL at the start of a
+# chain (4.x used the text "GENESIS").
 
 def compute_branch_point_hash_v2(branch_point_id: UUID, episode_id: UUID, branch_id: UUID, source_segment_id: UUID,
-                                 branch_type: str, declaration_type: str, initiated_by: str,
-                                 created_at: datetime, parent_hash: Optional[str]) -> str:
+                                 spine_merkle_snapshot: str, branch_type: str, declaration_type: str,
+                                 initiated_by: str, created_at: datetime, parent_hash: Optional[str]) -> str:
+    """``spine_merkle_snapshot`` binds the divergence to the spine state it left
+    from; without it a BranchPoint could be re-pointed at a different history."""
     return hash_fields(BRANCH_POINT_V2, [
         (UUID_, branch_point_id), (UUID_, episode_id), (UUID_, branch_id), (UUID_, source_segment_id),
-        (STRING, branch_type), (STRING, declaration_type), (STRING, initiated_by),
+        (HASH, spine_merkle_snapshot), (STRING, branch_type), (STRING, declaration_type), (STRING, initiated_by),
         (TIMESTAMP, created_at), (HASH, parent_hash),
+    ])
+
+
+def compute_branch_terminus_hash_v2(terminus_id: UUID, branch_id: UUID, terminus_type: str, branch_point_hash: str,
+                                    final_merkle_root: Optional[str], created_at: datetime) -> str:
+    """A member because removing it would make a closed branch look open."""
+    return hash_fields(BRANCH_TERMINUS_V2, [
+        (UUID_, terminus_id), (UUID_, branch_id), (STRING, terminus_type), (HASH, branch_point_hash),
+        (HASH, final_merkle_root), (TIMESTAMP, created_at),
+    ])
+
+
+def compute_fork_return_hash_v2(fork_return_id: UUID, fork_id: UUID, fork_episode_id: UUID, origin_episode_id: UUID,
+                                return_type: str, synthesis_summary: str, fork_final_spine_tip_hash: str,
+                                returned_by: str, created_at: datetime, parent_hash: Optional[str]) -> str:
+    """A member because removing it would falsify whether a fork rejoined."""
+    return hash_fields(FORK_RETURN_V2, [
+        (UUID_, fork_return_id), (UUID_, fork_id), (UUID_, fork_episode_id), (UUID_, origin_episode_id),
+        (STRING, return_type), (STRING, synthesis_summary), (HASH, fork_final_spine_tip_hash),
+        (STRING, returned_by), (TIMESTAMP, created_at), (HASH, parent_hash),
     ])
 
 
@@ -151,11 +193,12 @@ def compute_departure_fork_point_hash_v2(fork_point_id: UUID, fork_id: UUID, for
 def compute_merge_point_hash_v2(merge_point_id: UUID, merge_id: UUID, source_episode_id: UUID,
                                 target_episode_id: UUID, source_merkle_root: str, target_merkle_root_pre: str,
                                 target_merkle_root_post: str, common_ancestor_id: Optional[UUID],
-                                created_at: datetime, parent_hash: Optional[str]) -> str:
+                                merge_type: str, created_at: datetime, parent_hash: Optional[str]) -> str:
+    """``merge_type`` is a structural claim: how the two histories combined."""
     return hash_fields(MERGE_POINT_V2, [
         (UUID_, merge_point_id), (UUID_, merge_id), (UUID_, source_episode_id), (UUID_, target_episode_id),
         (HASH, source_merkle_root), (HASH, target_merkle_root_pre), (HASH, target_merkle_root_post),
-        (UUID_, common_ancestor_id), (TIMESTAMP, created_at), (HASH, parent_hash),
+        (UUID_, common_ancestor_id), (STRING, merge_type), (TIMESTAMP, created_at), (HASH, parent_hash),
     ])
 
 

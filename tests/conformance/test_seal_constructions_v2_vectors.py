@@ -171,40 +171,94 @@ def test_signal_manifest_and_exclusion():
     assert seal_v2.compute_exclusion_hash_v2([]) == VECTORS["exclusion_v2"]["empty"] != want["empty"]
 
 
-def test_structural_members():
+def _members():
     t = datetime.fromisoformat(VECTORS["structural_members"]["timestamp"])
-    m = VECTORS["structural_members"]
     u = lambda i: UUID(f"00000000-0000-4000-8000-{i:012x}")
-    bp = seal_v2.compute_branch_point_hash_v2(u(0x100), EPISODE, u(0x101), u(3), "EXPLORATORY", "EXPLICIT", "agent-a", t, None)
+    root3 = VECTORS["spine_root_sav2"]["3"]
+    bp = seal_v2.compute_branch_point_hash_v2(u(0x100), EPISODE, u(0x101), u(3), root3, "EXPLORATORY", "EXPLICIT", "agent-a", t, None)
+    bt = seal_v2.compute_branch_terminus_hash_v2(u(0x102), u(0x101), "ABANDONED", bp, None, t)
     fp = seal_v2.compute_fork_point_hash_v2(u(0x110), u(0x111), u(0x112), EPISODE, u(5), "evaluate the alternative", "agent-a", 0, t, bp)
     dfp = seal_v2.compute_departure_fork_point_hash_v2(u(0x120), u(0x121), u(0x122), EPISODE, u(5), "follow the tangent",
                                                        "DRIFT_CONFIRMED", LEAVES[5], "agent-a", t, None)
-    mp = seal_v2.compute_merge_point_hash_v2(u(0x130), u(0x131), u(0x112), EPISODE, LEAVES[0], LEAVES[1], LEAVES[2], None, t, fp)
+    fr = seal_v2.compute_fork_return_hash_v2(u(0x123), u(0x121), u(0x122), EPISODE, "COMPLETED", "the tangent was a dead end",
+                                             LEAVES[6], "agent-a", t, dfp)
+    mp = seal_v2.compute_merge_point_hash_v2(u(0x130), u(0x131), u(0x112), EPISODE, LEAVES[0], LEAVES[1], LEAVES[2], None, "CLEAN", t, fp)
     ctx = seal_v2.compute_hitl_context_hash_v2("req-1", EPISODE, "APPROVAL_REQUIRED", "agent-a", t, '{"action":"deploy"}')
     res = seal_v2.compute_hitl_resolution_hash_v2(u(0x140), "approved", "human-1", t, None)
     hn = seal_v2.compute_hitl_node_hash_v2(ctx, res)
-    assert [bp, fp, dfp, mp, ctx, res, hn] == [m[k]["hash"] for k in (
-        "branch_point_v2", "fork_point_v2", "departure_fork_point_v2", "merge_point_v2",
-        "hitl_context_v2", "hitl_resolution_v2", "hitl_node_v2")]
-    assert len({bp, fp, dfp, mp, ctx, res, hn}) == 7
+    return dict(branch_point_v2=bp, branch_terminus_v2=bt, fork_point_v2=fp, departure_fork_point_v2=dfp,
+                fork_return_v2=fr, merge_point_v2=mp, hitl_context_v2=ctx, hitl_resolution_v2=res, hitl_node_v2=hn)
+
+
+MANIFEST_MEMBERS = ("branch_point_v2", "branch_terminus_v2", "fork_point_v2", "departure_fork_point_v2",
+                    "fork_return_v2", "merge_point_v2", "hitl_node_v2")
+
+
+def test_structural_members():
+    got = _members()
+    assert got == {k: VECTORS["structural_members"][k] for k in got}
+    assert len(set(got.values())) == len(got)
+
+
+def test_structural_fields_are_bound_and_commentary_is_not_a_field():
+    # spine_merkle_snapshot and merge_type make structural claims, so they are in the preimage
+    t = datetime.fromisoformat(VECTORS["structural_members"]["timestamp"])
+    u = lambda i: UUID(f"00000000-0000-4000-8000-{i:012x}")
+    base = _members()
+    other_snapshot = seal_v2.compute_branch_point_hash_v2(u(0x100), EPISODE, u(0x101), u(3), VECTORS["spine_root_sav2"]["2"],
+                                                          "EXPLORATORY", "EXPLICIT", "agent-a", t, None)
+    assert other_snapshot != base["branch_point_v2"]
+    other_merge = seal_v2.compute_merge_point_hash_v2(u(0x130), u(0x131), u(0x112), EPISODE, LEAVES[0], LEAVES[1], LEAVES[2],
+                                                      None, "PARTIAL", t, base["fork_point_v2"])
+    assert other_merge != base["merge_point_v2"]
+    import inspect
+    assert "branch_label" not in inspect.signature(seal_v2.compute_branch_point_hash_v2).parameters
+    assert "merge_summary" not in inspect.signature(seal_v2.compute_merge_point_hash_v2).parameters
+
+
+def test_hitl_terminal_states():
+    assert seal_v2.HITL_TERMINAL_STATES == {"resolved", "timed_out", "escalated"}
 
 
 def test_structural_manifest_detects_removal():
-    m = VECTORS["structural_members"]
-    members = [m[k]["hash"] for k in ("branch_point_v2", "fork_point_v2", "departure_fork_point_v2", "merge_point_v2", "hitl_node_v2")]
+    m = _members()
+    members = [m[k] for k in MANIFEST_MEMBERS]
     want = VECTORS["structural_manifest_v1"]
-    assert seal_v2.compute_structural_manifest_hash(members) == want["five_members_any_order"] == ref_set(b"STRUCTURAL_MANIFEST:v1:", members)
-    assert seal_v2.compute_structural_manifest_hash(list(reversed(members))) == want["five_members_any_order"]
-    without_merge = [h for h in members if h != m["merge_point_v2"]["hash"]]
-    assert seal_v2.compute_structural_manifest_hash(without_merge) == want["with_merge_point_removed"] != want["five_members_any_order"]
+    assert seal_v2.compute_structural_manifest_hash(members) == want["seven_members_any_order"] == ref_set(b"STRUCTURAL_MANIFEST:v1:", members)
+    assert seal_v2.compute_structural_manifest_hash(list(reversed(members))) == want["seven_members_any_order"]
+    # a closed branch made to look open: drop its terminus, and the manifest changes
+    without_terminus = [h for h in members if h != m["branch_terminus_v2"]]
+    assert seal_v2.compute_structural_manifest_hash(without_terminus) == want["with_branch_terminus_removed"] != want["seven_members_any_order"]
     assert seal_v2.compute_structural_manifest_hash([]) == want["empty"]
+
+
+def test_old_segment_is_sealed_from_its_fields_never_from_its_old_leaf_hash():
+    from astp.protocol.leaf_hash import compute_leaf_hash
+
+    mv = VECTORS["mixed_vintage_segment"]
+    f = mv["fields"]
+    v1 = compute_leaf_hash(UUID(f["node_id"]), f["node_type"], f["schema_version"], f["sequence_index"],
+                           f["content_hash"], None, UUID(f["parent_node_id"]))
+    v2 = compute_leaf_hash_v2(UUID(f["node_id"]), f["node_type"], f["schema_version"], f["sequence_index"],
+                              f["content_hash"], UUID(f["parent_node_id"]))
+    assert v1 == mv["stored_leaf_hash_v1"] and v2 == mv["leaf_hash_v2_from_fields"] == ref_leaf_hash(f)
+    # the tempting mistake: "upgrade" the stored v1 leaf by hashing it again
+    rewrapped = hashlib.sha3_256(b"LEAF_HASH:v2:" + bytes.fromhex(v1)).hexdigest()
+    assert rewrapped != v2
+
+
+def test_vector_file_is_current():
+    import subprocess, sys
+
+    gen = Path(__file__).resolve().parents[2] / "vectors" / "5.0.0-draft" / "generate.py"
+    assert subprocess.run([sys.executable, str(gen), "--check"]).returncode == 0, "run vectors/5.0.0-draft/generate.py"
 
 
 def test_episode_root_v2():
     want = VECTORS["episode_root_v2"]
     spine = VECTORS["spine_root_sav2"]["7"]
     sig = VECTORS["signal_manifest_v2"]["five_members_any_order"]
-    st = VECTORS["structural_manifest_v1"]["five_members_any_order"]
+    st = VECTORS["structural_manifest_v1"]["seven_members_any_order"]
     ex = VECTORS["exclusion_v2"]["empty"]
     ref = _sha3(b"EPISODE_ROOT:v2:" + _uuid(VECTORS["episode_id"]) + _hash(spine) + _hash(sig) + _hash(st) + _hash(ex)).hex()
     assert seal_v2.compute_episode_root_hash_v2(EPISODE, spine, sig, st, ex) == want["hash"] == ref
@@ -217,6 +271,6 @@ def test_episode_root_v2():
 def test_every_prefix_in_the_registry_is_distinct_and_none_is_a_4x_prefix():
     prefixes = [v for k, v in vars(seal_v2).items() if k.isupper() and isinstance(v, bytes)]
     prefixes += [b"LEAF_HASH:v2:", b"TREE_LEAF:v2:", b"TREE_NODE:v2:"]
-    assert len(prefixes) == len(set(prefixes)) == 14
+    assert len(prefixes) == len(set(prefixes)) == 16
     assert not any(p in (b"LEAF:", b"NODE:") or p.startswith((b"LEAF:", b"NODE:")) for p in prefixes)
     assert not any(a != b and a.startswith(b) for a in prefixes for b in prefixes)      # no prefix is a prefix of another

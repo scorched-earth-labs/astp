@@ -1,13 +1,13 @@
 # ASTP 5.0.0 — Seal Constructions (Draft)
 
-**Version:** 5.0.0-draft.1
+**Version:** 5.0.0-draft.2
 **Status:** Draft for review — **not ratified, not normative.** Nothing here applies to any existing seal.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-17
 **Applies To:** proposed replacement text for `SPEC.md` §5.2–§5.8 in 5.0.0
-**Vectors:** [`vectors/5.0.0-draft/seal-constructions.json`](../../vectors/5.0.0-draft/seal-constructions.json) · **Reference code:** `astp/protocol/encoding.py`, `compute_leaf_hash_v2`, `compute_merkle_root_v2`, `astp/core/seal_v2.py` · **Tests:** `tests/conformance/test_seal_constructions_v2_vectors.py`
+**Vectors:** [`vectors/5.0.0-draft/seal-constructions.json`](../../vectors/5.0.0-draft/seal-constructions.json) (regenerate with `generate.py`, never by hand) · **Reference code:** `astp/protocol/encoding.py`, `compute_leaf_hash_v2`, `compute_merkle_root_v2`, `astp/core/seal_v2.py` · **Tests:** `tests/conformance/test_seal_constructions_v2_vectors.py`
 
-This is one unit of the 5.0.0 amendment: how an Episode's roots are built. It is a MAJOR change under [`VERSIONING.md`](../../VERSIONING.md) and requires an Episode of Record. Every construction below is **new and versioned**. Seals made under `spine_algorithm_version` 0 and 1 remain defined by SPEC 4.5.0 §5.3–§5.8 and remain reproducible; 5.0.0 retains that text as the definition of those versions.
+This is one unit of the 5.0.0 amendment: how an Episode's roots are built. Draft 2 incorporates the rulings of design Episode `4b9a779e-be46-4d61-872e-fd76545aa901`, segment 29 (§9). It is a MAJOR change under [`VERSIONING.md`](../../VERSIONING.md) and requires an Episode of Record. Every construction below is **new and versioned**. Seals made under `spine_algorithm_version` 0 and 1 remain defined by SPEC 4.5.0 §5.3–§5.8 and remain reproducible; 5.0.0 retains that text as the definition of those versions.
 
 ---
 
@@ -50,6 +50,8 @@ leaf_hash = SHA3-256( "LEAF_HASH:v2:"
 
 The version 1 fields without `sealed_at`, under the encoding of §2. An absent parent is NULL, which cannot be confused with the nil UUID. `tree_leaf_index` remains excluded (dual-index invariant, §3.3). The leaf hash is computed once, at node creation, and never recomputed.
 
+**Segments created before 5.0.0.** A leaf hash is a function of a node's immutable fields, so an Episode containing Segments that predate 5.0.0 is sealed under 5.0.0 by computing their `hash_version` 2 leaf hashes **from their stored fields** at seal time. It MUST NOT be computed from a stored version 1 leaf hash: re-hashing a hash reproduces nothing. The vector file pins one such computation.
+
 `node_id` MUST be generated with at least 122 bits of randomness (UUIDv4 or equivalent) and MUST NOT be derived from the node's content or any other guessable input. `content_hash` is an unsalted hash of content; it is the unguessable `node_id` in this preimage that makes a published leaf hash useless for testing a guess at a Segment's content.
 
 ## 4. Merkle tree and spine — `spine_algorithm_version` 2
@@ -62,6 +64,8 @@ interior:  SHA3-256( "TREE_NODE:v2:" ‖ left ‖ right )      left, right: 32 r
 ```
 
 The spine of an Episode is this tree over the `hash_version` 2 leaf hashes of its non-ephemeral Segments in `sequence_index` order (`ordering_version` 2, unchanged). There is no other leaf.
+
+**`spine_algorithm_version` 2 selects the entire seal construction** — leaf hash, tree, sets and Episode root (§3–§7) — not the tree alone. There is deliberately no separate identifier for the Episode root: a second identifier would make an invalid combination representable, and one identifier makes it unrepresentable. Read the name as *seal construction version*.
 
 A verifier MUST derive the encoding from the identifier: hex text under `spine_algorithm_version` 0 and 1, raw bytes under 2 — never assume it. The three versions are one tree; they differ in leaf input, in encoding, and in whether the Episode-identifier leaf is present.
 
@@ -77,17 +81,23 @@ structural_manifest_hash = set( "STRUCTURAL_MANIFEST:v1:", member hashes — §6
 
 ## 6. Structural manifest
 
-Members are the hashes of the structural nodes that sit on the Episode, each under its own prefix (so the set needs no per-member type tag):
+**Membership rule.** A structural node is a member if and only if removing it would let a verifier be deceived about the Episode's branch, fork, merge or termination structure. The same rule decides fields: a field that makes a structural claim is in a member's preimage; commentary is not. `spine_merkle_snapshot` binds a divergence to the history it left from, and `merge_type` says how two histories combined — both are in. A `branch_label` or a `merge_summary` is a label: binding it would make an honest relabel break a seal while proving nothing — both are out. A `ForkOrphanMarker` is a diagnostic satellite and is not a member.
+
+Members, each under its own prefix (so the set needs no per-member type tag):
 
 | Node | Member hash | Fields, in order |
 |---|---|---|
-| BranchPoint | `BRANCH_POINT:v2:` | UUID `branch_point_id`, UUID `episode_id`, UUID `branch_id`, UUID `source_segment_id`, STRING `branch_type`, STRING `declaration_type`, STRING `initiated_by`, TIMESTAMP `created_at`, HASH\|NULL `parent_hash` |
+| BranchPoint | `BRANCH_POINT:v2:` | UUID `branch_point_id`, UUID `episode_id`, UUID `branch_id`, UUID `source_segment_id`, HASH `spine_merkle_snapshot`, STRING `branch_type`, STRING `declaration_type`, STRING `initiated_by`, TIMESTAMP `created_at`, HASH\|NULL `parent_hash` |
+| BranchTerminus | `BRANCH_TERMINUS:v2:` | UUID `terminus_id`, UUID `branch_id`, STRING `terminus_type`, HASH `branch_point_hash`, HASH\|NULL `final_merkle_root`, TIMESTAMP `created_at` |
 | ForkPoint | `FORK_POINT:v2:` | UUID `fork_point_id`, UUID `fork_id`, UUID `episode_id`, UUID `origin_episode_id`, UUID `origin_segment_id`, STRING `fork_objective`, STRING `initiator`, UINT `sibling_index`, TIMESTAMP `created_at`, HASH\|NULL `parent_hash` |
 | DepartureForkPoint | `DEPARTURE_FORK_POINT:v2:` | UUID `fork_point_id`, UUID `fork_id`, UUID `fork_episode_id`, UUID `origin_episode_id`, UUID `origin_segment_id`, STRING `fork_objective`, STRING `fork_creation_trigger`, HASH `spine_tip_hash_at_departure`, STRING `initiator`, TIMESTAMP `created_at`, HASH\|NULL `parent_hash` |
-| MergePoint | `MERGE_POINT:v2:` | UUID `merge_point_id`, UUID `merge_id`, UUID `source_episode_id`, UUID `target_episode_id`, HASH `source_merkle_root`, HASH `target_merkle_root_pre`, HASH `target_merkle_root_post`, UUID\|NULL `common_ancestor_id`, TIMESTAMP `created_at`, HASH\|NULL `parent_hash` |
-| HITL event (terminal) | `HITL_NODE:v2:` | HASH `context_hash`, HASH `resolution_hash` — where `context_hash` = `HITL_CONTEXT:v2:` over STRING `hitl_request_id`, UUID `episode_id`, STRING `gate_type`, STRING `requesting_agent`, TIMESTAMP `invoked_at`, STRING `context_json`; and `resolution_hash` = `HITL_RESOLUTION:v2:` over UUID `hitl_event_id`, STRING `decision`, STRING `resolved_by`, TIMESTAMP `resolved_at`, STRING\|NULL `rationale` |
+| ForkReturn | `FORK_RETURN:v2:` | UUID `fork_return_id`, UUID `fork_id`, UUID `fork_episode_id`, UUID `origin_episode_id`, STRING `return_type`, STRING `synthesis_summary`, HASH `fork_final_spine_tip_hash`, STRING `returned_by`, TIMESTAMP `created_at`, HASH\|NULL `parent_hash` |
+| MergePoint | `MERGE_POINT:v2:` | UUID `merge_point_id`, UUID `merge_id`, UUID `source_episode_id`, UUID `target_episode_id`, HASH `source_merkle_root`, HASH `target_merkle_root_pre`, HASH `target_merkle_root_post`, UUID\|NULL `common_ancestor_id`, STRING `merge_type`, TIMESTAMP `created_at`, HASH\|NULL `parent_hash` |
+| HITL event in a terminal state — `RESOLVED`, `TIMED_OUT` or `ESCALATED` | `HITL_NODE:v2:` | HASH `context_hash`, HASH `resolution_hash` — where `context_hash` = `HITL_CONTEXT:v2:` over STRING `hitl_request_id`, UUID `episode_id`, STRING `gate_type`, STRING `requesting_agent`, TIMESTAMP `invoked_at`, STRING `context_json`; and `resolution_hash` = `HITL_RESOLUTION:v2:` over UUID `hitl_event_id`, STRING `decision`, STRING `resolved_by`, TIMESTAMP `resolved_at`, STRING\|NULL `rationale` |
 
-Field lists are those the 4.x constructions hash, in the same order; what changes is the encoding. `parent_hash` is NULL at the head of a chain (4.x used the text `GENESIS`). Removing any member changes `structural_manifest_hash` and therefore the Episode root. This is the anchoring path for human decisions: a resolved HITL event is not a spine leaf, and it is committed.
+Apart from the two added fields, the lists are those the 4.x constructions hash, in the same order; `parent_hash` is NULL at the head of a chain (4.x used the text `GENESIS`). A HITL event still `INVOKED` is not a member. Removing any member changes `structural_manifest_hash` and therefore the Episode root. This is the anchoring path for human decisions: a concluded HITL event is not a spine leaf, and it is committed.
+
+**A structural node created after a seal.** A sealed Episode root is immutable, so a node created after a seal is never a member of that seal's manifest. It is committed by the Episode's **next** crystallization — deltas chain — and it MUST carry a reference to the earlier seal it structurally relates to. It is a member of the later root that *references* the earlier one; it is not a member of the earlier one, and the two MUST NOT be conflated. A structural node that is never committed into any root is not permitted: it would assert structure while bound to nothing. This governs the one retroactive write of §19.3.7 (Class B orphan recovery), which must cross-reference this rule.
 
 ## 7. Episode root — and the prefix registry
 
@@ -97,7 +107,9 @@ episode_root_hash = SHA3-256( "EPISODE_ROOT:v2:" ‖ UUID(episode_id)
                               ‖ HASH(structural_manifest_hash) ‖ HASH(exclusion_hash) )
 ```
 
-Prefixes introduced here, each used by exactly one construction, none a prefix of another, none shared with 4.x (`LEAF:`, `NODE:`, `SIGNAL_MANIFEST:v1:`, `EXCLUSION:v1:`): `LEAF_HASH:v2:` · `TREE_LEAF:v2:` · `TREE_NODE:v2:` · `SIGNAL_MANIFEST:v2:` · `EXCLUSION:v2:` · `STRUCTURAL_MANIFEST:v1:` · `EPISODE_ROOT:v2:` · `BRANCH_POINT:v2:` · `FORK_POINT:v2:` · `DEPARTURE_FORK_POINT:v2:` · `MERGE_POINT:v2:` · `HITL_CONTEXT:v2:` · `HITL_RESOLUTION:v2:` · `HITL_NODE:v2:`.
+`episode_id` is a UUID, as §4.1 requires; the root does not admit a string identifier, because identity bound by string equality is only as strong as the strings' encoding. An Episode whose identifier is not a UUID cannot be sealed under this construction and must say so; it is brought into conformance by being given one, with the old identifier kept as provenance and bound to nothing.
+
+Prefixes introduced here, each used by exactly one construction, none a prefix of another, none shared with 4.x (`LEAF:`, `NODE:`, `SIGNAL_MANIFEST:v1:`, `EXCLUSION:v1:`): `LEAF_HASH:v2:` · `TREE_LEAF:v2:` · `TREE_NODE:v2:` · `SIGNAL_MANIFEST:v2:` · `EXCLUSION:v2:` · `STRUCTURAL_MANIFEST:v1:` · `EPISODE_ROOT:v2:` · `BRANCH_POINT:v2:` · `BRANCH_TERMINUS:v2:` · `FORK_POINT:v2:` · `DEPARTURE_FORK_POINT:v2:` · `FORK_RETURN:v2:` · `MERGE_POINT:v2:` · `HITL_CONTEXT:v2:` · `HITL_RESOLUTION:v2:` · `HITL_NODE:v2:`.
 
 ## 8. Vectors
 
@@ -106,22 +118,23 @@ Every value in the vector file is checked twice by the reference tests: against 
 ```
 leaf_hash (hash_version 2), segment 0        25b617f0d7ac09871f88ce7e2851cc8f50b48305dee51d081b62a5f21ed84935
 spine_root (spine_algorithm_version 2), n=7  4420e38a22409317822ac14e3d5bc8069e6556c0fc08928290f76d23396daa01
-episode_root_hash (v2), five structural members, five signals, empty exclusion
-                                             e0be867164b3565846e05e2de90099de1d629acecf293ced04b11f88ec533a98
+structural_manifest_hash, seven members      cece6cd76dee5ae951003da9d7e2e214a657007f83b66ab34b258b82f8ce619c
+episode_root_hash (v2), seven structural members, five signals, empty exclusion
+                                             116e7ffa7071f199f39f9f88808e9a0285d41515cfa428dd421bd43f95a32939
 ```
 
-The file also fixes each field type's bytes, NFC equivalence, UTC normalization of a timestamp given at −08:00, spine roots for n = 1, 2, 3, 7, both manifests empty and populated, each structural member, the structural manifest with a member removed, and the Episode root with an empty structural manifest.
+The file also fixes each field type's bytes, NFC equivalence, UTC normalization of a timestamp given at −08:00, spine roots for n = 1, 2, 3, 7, both manifests empty and populated, each structural member, the structural manifest with a BranchTerminus removed, the Episode root with an empty structural manifest, and a pre-5.0.0 Segment's leaf hash computed from its fields.
 
-## 9. Open questions for ratification
+## 9. Rulings incorporated, and what remains open
 
-1. **Leaf layout.** The ruling was "§5.2 minus `sealed_at`". This draft keeps those fields in that order but re-encodes them under §2 (type tags, a domain prefix, NULL for an absent parent) so that one encoding serves every construction. The alternative is the version 1 byte layout with eight bytes deleted. Which?
-2. **One identifier or two.** As drafted, `spine_algorithm_version` 2 implies the whole 5.0.0 seal form — leaf, tree, sets and Episode root. That keeps "implied, not tagged" minimal, at the cost of a name that under-describes what it selects. The alternative is a separate `episode_root_version`.
-3. **The retroactive spine write (§19.3.7).** Class B orphan recovery permits one retroactive write that recreates a missing divergence point on an origin Episode, which may already be sealed. With structural nodes committed into the sealed Episode root, a node created after the seal cannot be a member of that seal's manifest. Either such a node is committed by the origin's *next* crystallization delta (deltas chain, so this is expressible), or it is never committed and must say so. This needs a rule.
-4. **Membership.** Should BranchTerminus and ForkReturn be members? Without the terminus, a closed branch can be made to look open by removing it. ForkOrphanMarker is a diagnostic satellite by design and is excluded.
-5. **Omitted fields.** The 4.x member preimages leave out fields that look significant and immutable: `spine_merkle_snapshot` and `branch_label` on a BranchPoint; `merge_type`, `merge_summary` and `initiator` on a MergePoint. This draft does not add them. Should it?
-6. **HITL membership.** "Terminal" is RESOLVED and TIMED_OUT in §2, and also ESCALATED in §4.6 and G-17. The manifest needs one list.
-7. **Identifiers are UUIDs.** Every identifier field here is a UUID, as §4.1 requires. At least one Episode in the reference deployment has a non-UUID identifier and could not be sealed under this construction.
-8. **What the seal path must now read.** A 4.x seal needs each Segment's `content_hash`. A 5.0.0 seal needs `node_id`, `node_type`, `schema_version`, `sequence_index`, `content_hash` and `parent_node_id` — or the stored `leaf_hash`, if it was computed under `hash_version` 2 at creation. Segments created before 5.0.0 carry version 1 leaf hashes; an Episode containing them is sealed under 5.0.0 by computing version 2 leaf hashes from their stored fields at seal time, which is permitted because the leaf hash is a function of immutable fields only. This should be stated.
+Ruled in design Episode `4b9a779e…`, segment 29, and reflected above: the leaf is re-encoded under §2 rather than being the version 1 layout with bytes deleted (sixteen zero bytes is a valid UUID, so version 1 cannot tell "no parent" from "parent is the nil UUID"); one identifier selects the whole construction; the membership rule, with BranchTerminus and ForkReturn in and ForkOrphanMarker out; `spine_merkle_snapshot` and `merge_type` added, `branch_label`, `merge_summary` and a MergePoint `initiator` left out; HITL terminal states are RESOLVED, TIMED_OUT and ESCALATED; pre-5.0.0 Segments are sealed from their fields; a structural node created after a seal is committed by the next crystallization and references the earlier seal; the Episode root binds a UUID.
+
+Still open:
+
+1. **`ESCALATED`.** The specification treats it as terminal (§4.6, G-17). The reference implementation's enum describes it as "forwarded, awaiting higher-authority resolution", which is not. One of them has to change before an escalated event can be a manifest member with a resolution hash.
+2. **Provenance fields that 4.x already binds.** `initiated_by` on a BranchPoint, `initiator` on a ForkPoint and DepartureForkPoint, and `returned_by` and the free-text `synthesis_summary` on a ForkReturn are provenance or commentary under the membership rule, yet 4.x binds them. This draft keeps them, on the ground that 5.0.0 should not bind less than 4.x did without a ruling that says so.
+3. **The reference deployment's non-UUID Episode.** Whether anything external depends on its identifier decides whether it is given a UUID or recorded as unsealable.
+4. **What the seal path must now read** — six fields per Segment rather than one — is an implementation note for the consuming runtime, to be written with the adapter work.
 
 ## 10. Not in this unit
 

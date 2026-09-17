@@ -1,7 +1,7 @@
 {
-  "status": "DRAFT for SPEC 5.0.0 — not ratified. Values will change if any construction changes before ratification.",
-  "hash": "SHA3-256 (FIPS 202). All hash values are lowercase hex here; they enter every construction as 32 raw bytes.",
-  "note_on_identifiers": "node_id values in these vectors are fixed so the vectors are reproducible. Real node_id values MUST be random (SPEC 5.0.0 §5.2).",
+  "status": "DRAFT for SPEC 5.0.0 — not ratified. Values change if any construction changes before ratification.",
+  "hash": "SHA3-256 (FIPS 202). Hash values are lowercase hex here; they enter every construction as 32 raw bytes.",
+  "note_on_identifiers": "node_id values here are fixed so the vectors are reproducible. Real node_id values MUST be random.",
   "field_encoding": {
     "NULL": "00",
     "BYTES_0x0102": "01000000020102",
@@ -88,6 +88,19 @@
     "3": "e6d6f975c2d7df7b036131427f602e22159164abc5e1c10201b256f54475d67a",
     "7": "4420e38a22409317822ac14e3d5bc8069e6556c0fc08928290f76d23396daa01"
   },
+  "mixed_vintage_segment": {
+    "rule": "A Segment created before 5.0.0 is sealed under 5.0.0 by computing the hash_version 2 leaf hash from its stored fields. Never by re-hashing its stored version 1 leaf hash.",
+    "fields": {
+      "node_id": "00000000-0000-4000-8000-000000000002",
+      "node_type": "segment",
+      "schema_version": "1.0.0",
+      "sequence_index": 2,
+      "content_hash": "281e3ca5ac7adeb528142efc63603de6c8bec21fd257e5b7266efb35c3abfe73",
+      "parent_node_id": "550e8400-e29b-41d4-a716-446655440000"
+    },
+    "stored_leaf_hash_v1": "4409ff6552f902805d198bdcaddb7b21a2539ab359f8d99d53a8474bbbb6ebeb",
+    "leaf_hash_v2_from_fields": "5d6d7378c5a4ee7fdcb66718ff917915206f7dfbabe72f7ae2dbf767a698019e"
+  },
   "signals": [
     "854926724cdda7832666b640fe92f340fc955dcc7374ccf35313bf40bc4e2336",
     "29f91bc68ba3dfc98e6d6e257a659428af383748d7856e8ab949a7ede3623b70",
@@ -103,110 +116,32 @@
     "empty": "ddea405cc1729ebf63d93b16d723873ad02f9f64af3cc159bf86e5f999b02ce1"
   },
   "structural_members": {
-    "timestamp": "2026-01-01T00:00:00.123+00:00",
-    "branch_point_v2": {
-      "fields": [
-        "00000000-0000-4000-8000-000000000100",
-        "550e8400-e29b-41d4-a716-446655440000",
-        "00000000-0000-4000-8000-000000000101",
-        "00000000-0000-4000-8000-000000000003",
-        "EXPLORATORY",
-        "EXPLICIT",
-        "agent-a",
-        "<timestamp>",
-        null
-      ],
-      "hash": "ce1111b2a57fad8601bb4e7721a5f923a8fb92670cf6b4d68f1f879d2b2ccd95"
-    },
-    "fork_point_v2": {
-      "fields": [
-        "00000000-0000-4000-8000-000000000110",
-        "00000000-0000-4000-8000-000000000111",
-        "00000000-0000-4000-8000-000000000112",
-        "550e8400-e29b-41d4-a716-446655440000",
-        "00000000-0000-4000-8000-000000000005",
-        "evaluate the alternative",
-        "agent-a",
-        0,
-        "<timestamp>",
-        "<branch_point_v2 hash>"
-      ],
-      "hash": "a4b80c7b05b0f16784a305ddaa0cbcf7b1d2cc7fbafee2721aecda00b3e1544e"
-    },
-    "departure_fork_point_v2": {
-      "fields": [
-        "00000000-0000-4000-8000-000000000120",
-        "00000000-0000-4000-8000-000000000121",
-        "00000000-0000-4000-8000-000000000122",
-        "550e8400-e29b-41d4-a716-446655440000",
-        "00000000-0000-4000-8000-000000000005",
-        "follow the tangent",
-        "DRIFT_CONFIRMED",
-        "<leaf_hash_v2 of segment 5>",
-        "agent-a",
-        "<timestamp>",
-        null
-      ],
-      "hash": "9b3c1a6c02e4b8ebed4cedf28c7a248867c97d6b232d8c34515717ea38a29d18"
-    },
-    "merge_point_v2": {
-      "fields": [
-        "00000000-0000-4000-8000-000000000130",
-        "00000000-0000-4000-8000-000000000131",
-        "00000000-0000-4000-8000-000000000112",
-        "550e8400-e29b-41d4-a716-446655440000",
-        "<leaf 0>",
-        "<leaf 1>",
-        "<leaf 2>",
-        null,
-        "<timestamp>",
-        "<fork_point_v2 hash>"
-      ],
-      "hash": "c514642db30b813cf7f5c3131e7f850cd6daed806817c958de505f30466b781b"
-    },
-    "hitl_context_v2": {
-      "fields": [
-        "req-1",
-        "550e8400-e29b-41d4-a716-446655440000",
-        "APPROVAL_REQUIRED",
-        "agent-a",
-        "<timestamp>",
-        "{\"action\":\"deploy\"}"
-      ],
-      "hash": "0f667804dfbb9441f599c855d363d4cf1b3918b8c12d7450154626c7ab14dbf0"
-    },
-    "hitl_resolution_v2": {
-      "fields": [
-        "00000000-0000-4000-8000-000000000140",
-        "approved",
-        "human-1",
-        "<timestamp>",
-        null
-      ],
-      "hash": "7643c1c83b61214ad8abc35dc51d0024c079445a2371449f42bb89b67d311ca2"
-    },
-    "hitl_node_v2": {
-      "fields": [
-        "<hitl_context_v2 hash>",
-        "<hitl_resolution_v2 hash>"
-      ],
-      "hash": "d077b174d554cf1d30bd3d032f8448bd647636eb0b6a95d74503d8e100c8687c"
-    }
+    "timestamp": "2026-01-01T00:00:00.123000+00:00",
+    "branch_point_v2": "14d9696863ef8d1454bd571e60c6523c35838d56abd1282f8855ecc177cd5172",
+    "branch_terminus_v2": "8a44888170f1668a6a29eda5e7a50651a0b7560c509ae311484d84b0a3f81f81",
+    "fork_point_v2": "492c728e0c3e0b2e8a1d3c5641ae17ddb92e3d312c48ffbf9af072cb1c6f62d7",
+    "departure_fork_point_v2": "9b3c1a6c02e4b8ebed4cedf28c7a248867c97d6b232d8c34515717ea38a29d18",
+    "fork_return_v2": "8c690e4bfdb49cd6fa159b19f9ff2393cb297c186850057849100a3640898cfe",
+    "merge_point_v2": "d4ac9c5a6594f22eaea6764f79f792f368b893ca8eae98b9e824530199884516",
+    "hitl_context_v2": "0f667804dfbb9441f599c855d363d4cf1b3918b8c12d7450154626c7ab14dbf0",
+    "hitl_resolution_v2": "7643c1c83b61214ad8abc35dc51d0024c079445a2371449f42bb89b67d311ca2",
+    "hitl_node_v2": "d077b174d554cf1d30bd3d032f8448bd647636eb0b6a95d74503d8e100c8687c",
+    "inputs": "see tests/conformance/test_seal_constructions_v2_vectors.py::test_structural_members for the exact field values"
   },
   "structural_manifest_v1": {
-    "five_members_any_order": "41801dd6c00b4c8458e29da0ac05f379a9e36b88006e988342a66a19f08b71e6",
+    "seven_members_any_order": "cece6cd76dee5ae951003da9d7e2e214a657007f83b66ab34b258b82f8ce619c",
     "empty": "259f1b6181d0341fa2dfa33ce55e0ad686f8a7bbf66d88a8b47cc081aa3d7519",
-    "with_merge_point_removed": "6aef929ebb07957b4907e6b319aad736210f319a405286f9770da606b483846a"
+    "with_branch_terminus_removed": "57f9cc4c5f632befd8d8581b47aba267d40a1801d80dfd0887c75d047800a4b7"
   },
   "episode_root_v2": {
     "inputs": [
       "episode_id",
       "spine_root_sav2[7]",
       "signal_manifest_v2.five_members_any_order",
-      "structural_manifest_v1.five_members_any_order",
+      "structural_manifest_v1.seven_members_any_order",
       "exclusion_v2.empty"
     ],
-    "hash": "e0be867164b3565846e05e2de90099de1d629acecf293ced04b11f88ec533a98",
+    "hash": "116e7ffa7071f199f39f9f88808e9a0285d41515cfa428dd421bd43f95a32939",
     "with_empty_structural_manifest": "a62b25ad6b2ec2ccd1ad91554ee92ec79d10a402befb63a9794e0677c71a6537"
   }
 }
