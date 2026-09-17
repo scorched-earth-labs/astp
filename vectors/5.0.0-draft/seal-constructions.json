@@ -1,0 +1,212 @@
+{
+  "status": "DRAFT for SPEC 5.0.0 — not ratified. Values will change if any construction changes before ratification.",
+  "hash": "SHA3-256 (FIPS 202). All hash values are lowercase hex here; they enter every construction as 32 raw bytes.",
+  "note_on_identifiers": "node_id values in these vectors are fixed so the vectors are reproducible. Real node_id values MUST be random (SPEC 5.0.0 §5.2).",
+  "field_encoding": {
+    "NULL": "00",
+    "BYTES_0x0102": "01000000020102",
+    "STRING_segment": "02000000077365676d656e74",
+    "STRING_nfc_e_acute_composed_equals_decomposed": [
+      "0200000002c3a9",
+      "0200000002c3a9"
+    ],
+    "UINT_6": "030000000000000006",
+    "UUID_episode": "04550e8400e29b41d4a716446655440000",
+    "TIMESTAMP_2026-01-01T00:00:00.123Z": "050000019b76daa87b",
+    "TIMESTAMP_same_instant_at_-08:00": "050000019b76daa87b",
+    "HASH_of_leaf-0": "06aa6c290f56f0f7eb3a8da563ae72efc5d10cc89b88a3112c612d8e3825e20aad"
+  },
+  "episode_id": "550e8400-e29b-41d4-a716-446655440000",
+  "segments": [
+    {
+      "node_id": "00000000-0000-4000-8000-000000000000",
+      "node_type": "segment",
+      "schema_version": "1.0.0",
+      "sequence_index": 0,
+      "content_hash": "aa6c290f56f0f7eb3a8da563ae72efc5d10cc89b88a3112c612d8e3825e20aad",
+      "parent_node_id": "550e8400-e29b-41d4-a716-446655440000",
+      "leaf_hash_v2": "25b617f0d7ac09871f88ce7e2851cc8f50b48305dee51d081b62a5f21ed84935"
+    },
+    {
+      "node_id": "00000000-0000-4000-8000-000000000001",
+      "node_type": "segment",
+      "schema_version": "1.0.0",
+      "sequence_index": 1,
+      "content_hash": "ca70778c5a77caeb3f3a7646655525ad808e0a0501a50b80a05a5826cf070c22",
+      "parent_node_id": "550e8400-e29b-41d4-a716-446655440000",
+      "leaf_hash_v2": "b973ecb4d01f5d42209614d41e5741ae5d96831fe3672e43c8953683059f455a"
+    },
+    {
+      "node_id": "00000000-0000-4000-8000-000000000002",
+      "node_type": "segment",
+      "schema_version": "1.0.0",
+      "sequence_index": 2,
+      "content_hash": "281e3ca5ac7adeb528142efc63603de6c8bec21fd257e5b7266efb35c3abfe73",
+      "parent_node_id": "550e8400-e29b-41d4-a716-446655440000",
+      "leaf_hash_v2": "5d6d7378c5a4ee7fdcb66718ff917915206f7dfbabe72f7ae2dbf767a698019e"
+    },
+    {
+      "node_id": "00000000-0000-4000-8000-000000000003",
+      "node_type": "segment",
+      "schema_version": "1.0.0",
+      "sequence_index": 3,
+      "content_hash": "eeda263100b29e61a1a0e06503b82ecf3e04847644dd45848750a8b86cfc1464",
+      "parent_node_id": "550e8400-e29b-41d4-a716-446655440000",
+      "leaf_hash_v2": "c4d8a309d6a8f03bba276fbd1127e8b2c22b07a1c7346c317486b43634466225"
+    },
+    {
+      "node_id": "00000000-0000-4000-8000-000000000004",
+      "node_type": "segment",
+      "schema_version": "1.0.0",
+      "sequence_index": 4,
+      "content_hash": "cbce4ff5e8c45c948a21c24ee91c92cb1f60eb6aa7a04c24a9170fc84cb05702",
+      "parent_node_id": "550e8400-e29b-41d4-a716-446655440000",
+      "leaf_hash_v2": "df9aac6cea5b5e64faecba2ed8eb75ae0798ad4fc421faf8d39954af1b698a09"
+    },
+    {
+      "node_id": "00000000-0000-4000-8000-000000000005",
+      "node_type": "segment",
+      "schema_version": "1.0.0",
+      "sequence_index": 5,
+      "content_hash": "59c541fb54167330df88b2197aed9b76ea15c7e9e900ddab913154bda57bdcea",
+      "parent_node_id": "550e8400-e29b-41d4-a716-446655440000",
+      "leaf_hash_v2": "aa77103b8e6c4dbd6607526935266ed4ec817076d9d710eb0246aa6306044c15"
+    },
+    {
+      "node_id": "00000000-0000-4000-8000-000000000006",
+      "node_type": "segment",
+      "schema_version": "1.0.0",
+      "sequence_index": 6,
+      "content_hash": "39745fce6a8339e908697078c16cfd9668cdfd436f464c6a75831dc510e06b23",
+      "parent_node_id": "550e8400-e29b-41d4-a716-446655440000",
+      "leaf_hash_v2": "1f2556934a29b56ea2e633081379ad2c92d9116d98da4f74c6c236dbdaca11b1"
+    }
+  ],
+  "spine_root_sav2": {
+    "1": "5e06ac5629faf452aa18836dcf3f33565db0cd2d8749b482c65365b9273b576e",
+    "2": "4961d0711f8ad12e0795faaa578e410477b88d08c21c0f318a7ccacfc80102fb",
+    "3": "e6d6f975c2d7df7b036131427f602e22159164abc5e1c10201b256f54475d67a",
+    "7": "4420e38a22409317822ac14e3d5bc8069e6556c0fc08928290f76d23396daa01"
+  },
+  "signals": [
+    "854926724cdda7832666b640fe92f340fc955dcc7374ccf35313bf40bc4e2336",
+    "29f91bc68ba3dfc98e6d6e257a659428af383748d7856e8ab949a7ede3623b70",
+    "3e14c60e262482c9961c603b04df46aca3d01cffd5e66f6b8999d63317728efa",
+    "6ac721abae8b1334464a88e731bf66ab4f9d80cf7159931568680168bd0d2695",
+    "3500a5b454b60626b1b097acbde35e842069829887eb725a334b4e385c2ce5a7"
+  ],
+  "signal_manifest_v2": {
+    "five_members_any_order": "70dbc8e8f2e87b63e49187979b14ad56ba11219b42be132015c23dcad36acb43",
+    "empty": "c86637569949949cf118e1efc9b97ea64b998de012e4afa5b1ca2a1575a4d1af"
+  },
+  "exclusion_v2": {
+    "empty": "ddea405cc1729ebf63d93b16d723873ad02f9f64af3cc159bf86e5f999b02ce1"
+  },
+  "structural_members": {
+    "timestamp": "2026-01-01T00:00:00.123+00:00",
+    "branch_point_v2": {
+      "fields": [
+        "00000000-0000-4000-8000-000000000100",
+        "550e8400-e29b-41d4-a716-446655440000",
+        "00000000-0000-4000-8000-000000000101",
+        "00000000-0000-4000-8000-000000000003",
+        "EXPLORATORY",
+        "EXPLICIT",
+        "agent-a",
+        "<timestamp>",
+        null
+      ],
+      "hash": "ce1111b2a57fad8601bb4e7721a5f923a8fb92670cf6b4d68f1f879d2b2ccd95"
+    },
+    "fork_point_v2": {
+      "fields": [
+        "00000000-0000-4000-8000-000000000110",
+        "00000000-0000-4000-8000-000000000111",
+        "00000000-0000-4000-8000-000000000112",
+        "550e8400-e29b-41d4-a716-446655440000",
+        "00000000-0000-4000-8000-000000000005",
+        "evaluate the alternative",
+        "agent-a",
+        0,
+        "<timestamp>",
+        "<branch_point_v2 hash>"
+      ],
+      "hash": "a4b80c7b05b0f16784a305ddaa0cbcf7b1d2cc7fbafee2721aecda00b3e1544e"
+    },
+    "departure_fork_point_v2": {
+      "fields": [
+        "00000000-0000-4000-8000-000000000120",
+        "00000000-0000-4000-8000-000000000121",
+        "00000000-0000-4000-8000-000000000122",
+        "550e8400-e29b-41d4-a716-446655440000",
+        "00000000-0000-4000-8000-000000000005",
+        "follow the tangent",
+        "DRIFT_CONFIRMED",
+        "<leaf_hash_v2 of segment 5>",
+        "agent-a",
+        "<timestamp>",
+        null
+      ],
+      "hash": "9b3c1a6c02e4b8ebed4cedf28c7a248867c97d6b232d8c34515717ea38a29d18"
+    },
+    "merge_point_v2": {
+      "fields": [
+        "00000000-0000-4000-8000-000000000130",
+        "00000000-0000-4000-8000-000000000131",
+        "00000000-0000-4000-8000-000000000112",
+        "550e8400-e29b-41d4-a716-446655440000",
+        "<leaf 0>",
+        "<leaf 1>",
+        "<leaf 2>",
+        null,
+        "<timestamp>",
+        "<fork_point_v2 hash>"
+      ],
+      "hash": "c514642db30b813cf7f5c3131e7f850cd6daed806817c958de505f30466b781b"
+    },
+    "hitl_context_v2": {
+      "fields": [
+        "req-1",
+        "550e8400-e29b-41d4-a716-446655440000",
+        "APPROVAL_REQUIRED",
+        "agent-a",
+        "<timestamp>",
+        "{\"action\":\"deploy\"}"
+      ],
+      "hash": "0f667804dfbb9441f599c855d363d4cf1b3918b8c12d7450154626c7ab14dbf0"
+    },
+    "hitl_resolution_v2": {
+      "fields": [
+        "00000000-0000-4000-8000-000000000140",
+        "approved",
+        "human-1",
+        "<timestamp>",
+        null
+      ],
+      "hash": "7643c1c83b61214ad8abc35dc51d0024c079445a2371449f42bb89b67d311ca2"
+    },
+    "hitl_node_v2": {
+      "fields": [
+        "<hitl_context_v2 hash>",
+        "<hitl_resolution_v2 hash>"
+      ],
+      "hash": "d077b174d554cf1d30bd3d032f8448bd647636eb0b6a95d74503d8e100c8687c"
+    }
+  },
+  "structural_manifest_v1": {
+    "five_members_any_order": "41801dd6c00b4c8458e29da0ac05f379a9e36b88006e988342a66a19f08b71e6",
+    "empty": "259f1b6181d0341fa2dfa33ce55e0ad686f8a7bbf66d88a8b47cc081aa3d7519",
+    "with_merge_point_removed": "6aef929ebb07957b4907e6b319aad736210f319a405286f9770da606b483846a"
+  },
+  "episode_root_v2": {
+    "inputs": [
+      "episode_id",
+      "spine_root_sav2[7]",
+      "signal_manifest_v2.five_members_any_order",
+      "structural_manifest_v1.five_members_any_order",
+      "exclusion_v2.empty"
+    ],
+    "hash": "e0be867164b3565846e05e2de90099de1d629acecf293ced04b11f88ec533a98",
+    "with_empty_structural_manifest": "a62b25ad6b2ec2ccd1ad91554ee92ec79d10a402befb63a9794e0677c71a6537"
+  }
+}
