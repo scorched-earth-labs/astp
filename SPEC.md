@@ -13,7 +13,7 @@ The full normative protocol is defined in this document's body. The `Version` fi
 
 **Former amendment documents.** Cross-episode linking and grouping, and the Layer 3 Workflow & Execution DAG, were first written as standalone amendments and were folded into this document at 3.2.1 as §20 and §21. §20 and §21 are normative. The amendment documents ([`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./docs/history/AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md), [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./docs/history/AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md)) are retained under `docs/history/` for provenance only; do not implement from them. Their filenames keep their authoring numerals; under `VERSIONING.md` they correspond to SPEC 3.0.0 and 3.1.0 respectively.
 
-**Episode of Record.** `VERSIONING.md` requires a ratifying Episode of Record for each MAJOR release. The record identifier for the 4.0.0 release is not yet published.
+**Episode of Record.** `VERSIONING.md` requires a ratifying Episode of Record for each MAJOR release. The Episode of Record for 4.0.0 is `458fb62b-faee-4e42-9f92-c63187c1b59a` ("Episode of Record — ASTP 4.0.0 ledgering obligations (G-39)", sealed 2026-08-22 under `spine_algorithm_version` 1, `ordering_version` 1). Its sealed root reproduces from its stored nodes. The Episode is held in the reference deployment; an exported proof of record that a third party can verify with this package alone has not yet been published.
 
 **Conventions.** The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 [RFC 2119] [RFC 8174] when, and only when, they appear in all capitals, as shown here.
 
