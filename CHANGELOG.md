@@ -22,6 +22,9 @@ The next change-set queues here.
 - **`GLOSSARY.md`:** *Resolved Signal Order*.
 - Reference package: `reproduce_spine_root` — the §9.3 selection of a reproduction function from a seal's §5.8 identifiers, refusing identifiers it does not know — and `check_resolved_signal_order`. The tests pin the RP-005 … RP-008 digests.
 
+### Changed (editorial)
+- The `SPEC.md` header and the README name the 4.0.0 Episode of Record, `458fb62b-faee-4e42-9f92-c63187c1b59a`. Since 4.3.1 they had said, accurately, that its identifier was not published; the Episode existed and had simply never been cited. They still say what is true of the proof: the Episode's root reproduces, and an exported proof of record has not yet been published.
+
 ### Provenance
 - Admitted on a demonstration rather than on argument: on 2026-09-17 the reference deployment recorded the annotation for its four tie-order seals — among them the 4.0.0 Episode of Record — and a clean verification run then reproduced all four from the recorded order, with no search.
 
@@ -195,7 +198,7 @@ Writes the node and **both** edges — `AMENDS` to the source, `PRODUCES` to the
 
 ## [4.0.0] — 2026-08-20
 
-**MAJOR.** Ledgering obligations (SPEC §12.4.2), deferred since 3.4.0. Requires a ratifying **Episode of Record**.
+**MAJOR.** Ledgering obligations (SPEC §12.4.2), deferred since 3.4.0. Requires a ratifying **Episode of Record**. *(Episode of Record: `458fb62b-faee-4e42-9f92-c63187c1b59a`, sealed 2026-08-22 — cited here from 4.5.0 onward; the release did not name it at the time.)*
 
 - **G-39** — an implementation MUST record a ledger entry for every §12.4.1 operation it performs. Performing one without an entry is a conformance violation, not a degraded mode.
 - Scoped to operations *performed*: an implementation owes nothing for capabilities it does not implement.
