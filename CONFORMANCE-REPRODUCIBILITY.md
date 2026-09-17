@@ -1,9 +1,9 @@
 # ASTP — Reproducibility Conformance Test Vectors
 
-**Version:** 1.0.0
+**Version:** 1.1.0
 **Status:** Working Draft
 **Authors:** Scorched Earth Labs
-**Date:** 2026-09-13
+**Date:** 2026-09-17
 **Applies To:** SPEC.md v4.3.0 — §5.6 Episode Spine Leaf Set, §5.7 Episode Root, §5.8 Algorithm and Ordering Versions, §9.3 Reproducibility Obligation, G-1
 **Companions:** [CONFORMANCE.md](CONFORMANCE.md) (§16 trust infrastructure), [CONFORMANCE-BFM.md](CONFORMANCE-BFM.md), [CONFORMANCE-LAYER3.md](CONFORMANCE-LAYER3.md), [CONFORMANCE-CROSS-EPISODE-LINKING.md](CONFORMANCE-CROSS-EPISODE-LINKING.md)
 
@@ -14,11 +14,21 @@
 The Five-Test Gate (§9.1) is only as strong as the verifier's ability to rebuild the
 sealed root. These vectors test that ability directly. They exist because the first
 corpus-scale re-verification of a production deployment (2026-09-13, 62 sealed
-Episodes) found seals that could not be reconstructed from stored nodes alone: some
-because the hash implementation had been replaced in place, some because the seal's
-leaf ordering depended on arrival timestamps that collide, and one because a closed
-Episode had accepted new content. None involved tampering; all were invisible until
-a verifier tried to reproduce the roots.
+Episodes) found that 17 of them could not be rebuilt from stored nodes under the
+construction their seal claimed:
+
+| Outcome | Episodes |
+|---|---|
+| Root rebuilt from stored nodes | 45 |
+| Rebuilt only under an earlier tree function, which had been replaced in place | 8 |
+| Rebuilt only by searching the orderings of same-timestamp signals | 4 |
+| Not rebuilt under any construction — one has too many tied signals to search and had also accepted content after closure; the other is within reach of a longer search | 2 |
+| In a sealed status with no seal record at all, so no root to rebuild | 3 |
+
+Of the 57 seals that were rebuilt, none showed evidence of content tampering. The
+remaining 5 could not be evaluated: 2 did not rebuild under any construction, and 3
+have no root to rebuild. None of this was visible until a verifier tried to
+reproduce the roots.
 
 A conforming implementation MUST pass all vectors marked **REQUIRED**. Format follows
 [CONFORMANCE.md §1](CONFORMANCE.md).
@@ -35,7 +45,7 @@ Reference implementation: `astp/core/schema.py` (`compute_spine_root_v2`,
 **RP-001** — Spine Root From Stored Nodes Only
 - **Class:** REQUIRED
 - **Spec Reference:** §5.6, §9.3
-- **Description:** The spine root is a function of the Episode's non-ephemeral Segment content hashes in `sequence_index` order and nothing else. Two verifiers holding the same stored Segments produce the same root; any state not on the nodes (insertion order, a store's default sort, a cache, the signals) plays no part.
+- **Description:** The spine root is a function of the Episode's non-ephemeral Segment content hashes in `sequence_index` order and, under `spine_algorithm_version` 1, the Episode's identifier (the Episode-identifier leaf, §5.6) — and nothing else. Two verifiers holding the same stored Segments and the same `episode_id` produce the same root; any state not on the nodes (insertion order, a store's default sort, a cache, the signals) plays no part.
 - **Inputs:**
   ```
   segment_content_hashes (sequence_index order): 7 hashes, SHA3-256("leaf-0") … SHA3-256("leaf-6")
@@ -43,8 +53,17 @@ Reference implementation: `astp/core/schema.py` (`compute_spine_root_v2`,
   spine_algorithm_version: 1
   ordering_version: 2
   ```
-- **Expected Output:** `spine_root` identical across two independent computations; equal to the Adaptive Merkle Tree root over the segment leaves alone; **not** equal to the ordering-version-1 root computed with any signals included; different when the segment order is permuted; an empty leaf set is refused.
-- **Failure Condition:** Two computations differ; the root changes when signals are added; the root is order-insensitive; an empty leaf set yields a root.
+- **Expected Output:**
+  ```
+  SHA3-256("leaf-0")                         aa6c290f56f0f7eb3a8da563ae72efc5d10cc89b88a3112c612d8e3825e20aad
+  Episode-identifier leaf input
+    SHA3-256(episode_id)                     0bdfe537564300a840a9b2279b3c4d0c8ca0e0c3b0c3d9c95c105852f991f222
+  spine_root  (spine_algorithm_version 1)    3cdbc3f20a909338a55a5b9687d72ce4b6f74ad1d3784a377c91b1bba06f2491
+  spine_root  (spine_algorithm_version 0,
+               same seven inputs)            0654211304f104a768b81432567776c7f13f65b97e4937f114f5c65e8dbc5fed
+  ```
+  Hash values enter the tree as 64-character lowercase hex strings, ASCII-encoded (§5.3); an unpaired node is carried up unchanged (§5.4). The root is **not** equal to the `ordering_version` 1 root computed with any signals included; it differs when the segment order is permuted; an empty leaf set is refused.
+- **Failure Condition:** Either root differs from the value above; the root changes when signals are added; the root is order-insensitive; an empty leaf set yields a root.
 
 ---
 
@@ -61,8 +80,20 @@ Reference implementation: `astp/core/schema.py` (`compute_spine_root_v2`,
   exclusion: SHA3-256("EXCLUSION:v1:" || …); empty → SHA3-256("EXCLUSION:v1:EMPTY")
   episode_root_hash = SHA3-256("NODE:" || spine_root || signal_manifest_hash || exclusion_hash)
   ```
-- **Expected Output:** One manifest hash for all five orderings; the same hash with a duplicated member; a different hash with a member removed; `signal_manifest_hash([]) ≠ exclusion_hash([])`; the Episode root differs when the manifest or the exclusion set differs.
-- **Failure Condition:** Any ordering-dependence; duplicates altering the hash; empty manifest and empty exclusion colliding; a root insensitive to a component.
+- **Expected Output:**
+  ```
+  signal_manifest_hash (the five hashes, any order, with or without duplicates)
+                                             0a4a4582ad36da24dcd21853b07ed97d13a8c223cf14845588861d9d5786b670
+  signal_manifest_hash (SHA3-256("leaf-104") removed)
+                                             5b73a9aa0cf76aaa0399dce72733b48d5e441b7f236dc063d570eecdde5ff22d
+  signal_manifest_hash (empty)               5188531fe69daafc79126dfa880419494179ca220d60d5dda2fee8279d4ae847
+  exclusion_hash (empty)                     45849be4da47e279538916284a2ac74cd6acd60a67b9a8982992f97afa149be6
+  episode_root_hash  (RP-001 spine_root under spine_algorithm_version 1,
+                      the five-member manifest, empty exclusion set)
+                                             49c1b61c22d00c185dceca5eb39f65bd88c2666281444687c59c48b0b199d7fe
+  ```
+  The Episode root differs when the manifest or the exclusion set differs.
+- **Failure Condition:** Any value differs from the one above; any ordering-dependence; duplicates altering the hash; a root insensitive to a component.
 
 ---
 

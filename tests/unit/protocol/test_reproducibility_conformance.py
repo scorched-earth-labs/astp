@@ -197,3 +197,93 @@ class TestRP004FixedRecordRefusesContent:
 
     def test_closed_is_frozen(self):
         assert EpisodeStatus.CLOSED in G1_FROZEN_STATES
+
+
+class TestPinnedDigests:
+    """Known-answer vectors: the expected values published in
+    CONFORMANCE-REPRODUCIBILITY.md (RP-001, RP-002).
+
+    Every other test in this file checks that the constructions agree with
+    themselves. These check that they have not changed. A change to a prefix,
+    an encoding, the odd-node rule or the hash function fails here and nowhere
+    else — which is the point.
+    """
+
+    RP001_SPINE_ROOT_ALG1 = "3cdbc3f20a909338a55a5b9687d72ce4b6f74ad1d3784a377c91b1bba06f2491"
+    RP001_SPINE_ROOT_ALG0 = "0654211304f104a768b81432567776c7f13f65b97e4937f114f5c65e8dbc5fed"
+    RP002_MANIFEST_5 = "0a4a4582ad36da24dcd21853b07ed97d13a8c223cf14845588861d9d5786b670"
+    RP002_MANIFEST_4 = "5b73a9aa0cf76aaa0399dce72733b48d5e441b7f236dc063d570eecdde5ff22d"
+    RP002_MANIFEST_EMPTY = "5188531fe69daafc79126dfa880419494179ca220d60d5dda2fee8279d4ae847"
+    RP002_EXCLUSION_EMPTY = "45849be4da47e279538916284a2ac74cd6acd60a67b9a8982992f97afa149be6"
+    RP002_EPISODE_ROOT = "49c1b61c22d00c185dceca5eb39f65bd88c2666281444687c59c48b0b199d7fe"
+
+    def test_inputs_are_what_the_document_says(self):
+        assert SEGMENTS[0] == "aa6c290f56f0f7eb3a8da563ae72efc5d10cc89b88a3112c612d8e3825e20aad"
+        assert sha3_256(EPISODE.encode()) == (
+            "0bdfe537564300a840a9b2279b3c4d0c8ca0e0c3b0c3d9c95c105852f991f222"
+        )
+
+    def test_rp001_spine_root_with_episode_identifier_leaf(self):
+        assert compute_spine_root_v2(SEGMENTS, episode_id=EPISODE) == self.RP001_SPINE_ROOT_ALG1
+
+    def test_rp001_spine_root_without_episode_identifier_leaf(self):
+        assert compute_spine_root_v2(SEGMENTS) == self.RP001_SPINE_ROOT_ALG0
+
+    def test_rp002_manifest(self):
+        assert compute_signal_manifest_hash(SIGNALS) == self.RP002_MANIFEST_5
+        assert compute_signal_manifest_hash(list(reversed(SIGNALS)) + SIGNALS[:2]) == self.RP002_MANIFEST_5
+        assert compute_signal_manifest_hash(SIGNALS[:4]) == self.RP002_MANIFEST_4
+
+    def test_rp002_empty_sets(self):
+        assert compute_signal_manifest_hash([]) == self.RP002_MANIFEST_EMPTY
+        assert compute_exclusion_hash([]) == self.RP002_EXCLUSION_EMPTY
+
+    def test_rp002_episode_root(self):
+        assert compute_episode_root_hash(
+            self.RP001_SPINE_ROOT_ALG1, self.RP002_MANIFEST_5, self.RP002_EXCLUSION_EMPTY
+        ) == self.RP002_EPISODE_ROOT
+
+
+class TestSpineTreeAsSpecified:
+    """SPEC §5.3–§5.6 and §5.8, re-implemented here from the prose with hashlib
+    only, and compared with the library across tree sizes. If the specification
+    text and the code ever describe different trees, this fails."""
+
+    @staticmethod
+    def _tree(inputs):
+        import hashlib
+
+        def h(b):
+            return hashlib.sha3_256(b).hexdigest()
+
+        level = [h(b"LEAF:" + x.encode("ascii")) for x in inputs]
+        while len(level) > 1:
+            level = [
+                h(b"NODE:" + level[i].encode("ascii") + level[i + 1].encode("ascii"))
+                if i + 1 < len(level)
+                else level[i]  # unpaired node is carried up unchanged
+                for i in range(0, len(level), 2)
+            ]
+        return level[0]
+
+    @pytest.mark.parametrize("n", [1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 33, 64, 65])
+    def test_algorithm_0_is_the_bare_tree(self, n):
+        leaves = [_h(i) for i in range(n)]
+        assert compute_spine_root_v2(leaves) == self._tree(leaves)
+        assert compute_spine_hash(leaves, []) == self._tree(leaves)
+
+    @pytest.mark.parametrize("n", [1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 33, 64, 65])
+    def test_algorithm_1_prepends_the_episode_identifier_leaf(self, n):
+        leaves = [_h(i) for i in range(n)]
+        expected = self._tree([sha3_256(EPISODE.encode("utf-8"))] + leaves)
+        assert compute_spine_root_v2(leaves, episode_id=EPISODE) == expected
+
+    def test_ordering_version_1_appends_signals_after_segments(self):
+        assert compute_spine_hash(SEGMENTS, SIGNALS) == self._tree(SEGMENTS + SIGNALS)
+
+    def test_single_leaf_root_is_the_leaf_hash(self):
+        assert compute_spine_root_v2(SEGMENTS[:1]) == sha3_256(b"LEAF:" + SEGMENTS[0].encode())
+
+    def test_empty_leaf_list_has_no_root(self):
+        with pytest.raises(ValueError):
+            compute_spine_root_v2([])

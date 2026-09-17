@@ -3,7 +3,7 @@
 **Version:** 1.2.0
 **Status:** Stable
 **Authors:** Scorched Earth Labs
-**Date:** 2026-09-17
+**Date:** 2026-07-04
 **Applies To:** SPEC.md §19 (Branch / Fork / Merge / **Departure Fork** / Aside / Soliloquy / CoherenceFingerprint + Orphan Recovery), v3.3.0
 
 ---
