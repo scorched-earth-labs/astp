@@ -319,6 +319,24 @@ class TestChainProofs:
         result = verify_proof_chain(chain)
         assert result.valid, f"Single-link chain should be valid: {result.reason}"
 
+    def test_inclusion_proof_for_another_root_is_rejected(self):
+        """§16.5.3 (1): a link's proof is verified against that link's spine_root.
+
+        The proof below is internally valid, but for a different tree. A chain
+        whose links carry such proofs must not verify.
+        """
+        root, _ = _make_test_tree_and_root("declared")
+        other_root, other_proof = _make_test_tree_and_root("unrelated")
+        assert root != other_root
+        link = ProofLink(
+            node_id=NODE_ID, node_type="episode",
+            spine_root=root, sequence_index=42,
+            inclusion_proof=other_proof,
+        )
+        result = verify_proof_chain(build_proof_chain([link]))
+        assert not result.valid
+        assert "different spine_root" in result.reason
+
     def test_cp002_two_link_parentage(self):
         """CP-002: Two-link chain with direct parentage."""
         root_a, proof_a = _make_test_tree_and_root("cp002-a")
