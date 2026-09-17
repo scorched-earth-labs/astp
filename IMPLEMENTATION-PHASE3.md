@@ -1,9 +1,9 @@
 # ASTP — Phase 3 Implementation Guide
 
-**Version:** 1.1.0
+**Version:** 1.1.1
 **Status:** Working Draft
 **Authors:** Scorched Earth Labs
-**Date:** 2026-04-16
+**Date:** 2026-09-17
 **Applies To:** SPEC.md §16 (Phase 3 Trust Infrastructure) and §4.6 (HITL, Appendix C). Written against SPEC v2.4.0-draft; not yet re-verified against 4.x.
 **Conformance Reference:** Phase 3 Conformance Test Vectors v1.0.0
 
@@ -29,10 +29,10 @@ Phase 3 is additive. It does not replace or modify Phase 1-2 machinery — it ex
 
 - `DeltaVerifier` five-test gate (§9.1)
 - Dual Index semantics: `sequence_index` immutable and in hash, `tree_leaf_index` mutable and NOT in hash
-- Leaf hash construction: `SHA3-256(sequence_index ‖ content_hash ‖ prev_leaf_hash)`
+- Leaf hash construction exactly as SPEC §5.2: the length-prefixed preimage over `node_id`, `node_type`, `schema_version`, `sequence_index`, `content_hash`, `sealed_at` and `parent_node_id`. There is no `prev_leaf_hash` — a leaf does not chain to its predecessor (SPEC §3.4.1); position is bound by `sequence_index` inside the preimage
 - Spine Merkle: SHA3-256 binary Merkle tree with deterministic leaf ordering by `sequence_index`
 - `ContentDelta` records written on every append
-- `CrystallizationRecord` written at crystallization boundary
+- `CrystallizationDelta` written at the crystallization boundary
 - `CognitiveNode` schema with all core fields present
 
 If your Phase 1-2 implementation is not conforming, Phase 3 will not be either — the trust infrastructure signs and chains the outputs of Phase 1-2 machinery.
@@ -267,7 +267,7 @@ The transparency log anchor submission MUST be part of the crystallization state
 
 ```
 1. Compute spine_root (final state)
-2. Write CrystallizationRecord to storage
+2. Write the `CrystallizationDelta` to storage
 3. Build AnchorCommitment from crystallization_root = spine_root
 4. Submit AnchorCommitment to TransparencyLogAdapter → receive AnchorReceipt
 5. Store AnchorReceipt on the CognitiveNode
@@ -744,4 +744,4 @@ A Phase 4 conforming implementation MUST:
 ---
 
 *ASTP Implementation Guide is maintained by Scorched Earth Labs.*
-*Guide version: 1.1.0 | Written against SPEC.md v2.4.0-draft; not yet re-verified against 4.x | Conformance Vectors: v1.0.0*
+*Guide version: 1.1.1 | Written against SPEC.md v2.4.0-draft; not yet re-verified against 4.x | Conformance Vectors: v1.0.0*
