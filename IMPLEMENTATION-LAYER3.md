@@ -23,7 +23,7 @@ What is normative from this file:
 What is implementation-space:
 
 - The concrete byte serialization. The reference canonicalizer (`astp/core/hash_canonical.py`) uses `sort_keys=False` field-ordered JSON (`separators=(",", ":")`, `ensure_ascii=False`, UTC-ISO8601 datetimes, UUID→str, Enum→`.value`) hashed with **SHA3-256**. This is a variant of SPEC §21 §8 Form B (canonical JSON) but with SHA3-256 rather than SHA-256 and caller-ordered rather than key-sorted fields. Another implementation may choose Form A (length-prefixed concatenation) and produce different bytes — legally, per SPEC §21 §8: cross-implementation hash *equivalence* is a non-goal at Layer 3; cross-implementation *verifiability* (documented, reproducible serialization) is the requirement.
-- Neo4j labels, edge storage, indexes, and constraint names (SPEC §21 Appendix A, reproduced in §6 below).
+- Neo4j labels, edge storage, indexes, and constraint names (§6 below; SPEC §21 Appendix A points here).
 - The identity of the CIA and its enforcement mechanism (the Ignis reference names the `ignis_mcp_server` MCP server; SPEC §21 §3 permits any unique entity).
 - Which chain key anchors the Layer 3 audit chain (the Ignis reference uses `episode_id`).
 
@@ -167,7 +167,7 @@ Each delta payload carries a **reverse delta** for audit-chain rollback consiste
 
 ## 6. Neo4j Reference Storage Layout (Non-Normative)
 
-Reproduced from SPEC §21 Appendix A. The reference storage adapter lives in the Ignis OS implementation; these notes describe one complete adapter path.
+SPEC.md is provider-neutral; this section is where the reference deployment's provider-specific layout is recorded. The reference storage adapter lives in the Ignis OS implementation; these notes describe one complete adapter path, and nothing here is a conformance requirement.
 
 ### 6.1 Edge vocabulary — the seven edges (§7)
 

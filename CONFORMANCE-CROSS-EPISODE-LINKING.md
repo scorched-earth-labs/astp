@@ -95,9 +95,9 @@ All hex values lowercase. All string fields UTF-8. Datetimes UTC-normalized ISO 
 
 **LH-003** — Per-Episode quarantine queue
 - **Class:** REQUIRED
-- **Spec Reference:** §20 →11.1.4 (Redis schema, quarantine queue scope)
-- **Description:** The quarantine queue MUST be keyed per-Episode: `ariadne:quarantine:queue:{episode_id}` (a ZSET scored by deadline). A single global queue across all Episodes is non-conforming.
-- **Failure Condition:** A global quarantine key is used, causing a quarantine event in one Episode to be processed in another's context.
+- **Spec Reference:** §20 →11.1.4 (ephemeral coordinator, quarantine queue scope)
+- **Description:** The quarantine queue MUST be scoped per Episode and ordered by quarantine deadline. How the coordinator represents it — key names, data structure — is an implementation choice. A single global queue across all Episodes is non-conforming.
+- **Failure Condition:** A single global quarantine queue is used, causing a quarantine event in one Episode to be processed in another's context.
 
 **LH-004** — Quarantine escalation event
 - **Class:** REQUIRED
@@ -217,7 +217,7 @@ Cross-Episode Linking & Grouping has **no numbered SPEC G-rules**. Governance is
 | Endpoint existence | `ValueError` in `write_episode_link_sync` | CEL-006 |
 | Quarantine-field hash exclusion | `_HASH_PREIMAGE_FIELDS` (§20 →2) | CEL-002 |
 | Link health FSM | Health-state transition rules (§20 →6) | LH-001, LH-002 |
-| Per-Episode quarantine queue | Redis key discipline (§20 →11.1.4) | LH-003 |
+| Per-Episode quarantine queue | Coordinator queue scope (§20 →11.1.4) | LH-003 |
 | Quarantine escalation | `QUARANTINE_ESCALATED` (§20 →11.3.3) | LH-004 |
 | Signal recording | Audit-the-decision (§20 →4, →12.2) | SG-001, SG-002, SG-003, SG-004 |
 | Membership hash inclusion/exclusion | `_MEMBERSHIP_HASH_PREIMAGE_FIELDS` (§20 →7, →10) | MR-001, MR-002 |

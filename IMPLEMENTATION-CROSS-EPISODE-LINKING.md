@@ -17,10 +17,11 @@ What is normative from this file:
 - The **content-hash preimage field orders** (§4, §5, §6). These are wire-tier (§20 →12.1) — two conforming implementations MUST produce identical `content_hash` / `declaration_hash` bytes for the same input, so the ordered field list and the canonicalization rules are part of the protocol, not this adapter.
 - The **forward-pointer-exclusion discipline**: `quarantine_resolved_at` / `quarantine_resolution` are excluded from the `EpisodeLink` hash; `superseded_by_record_id` / `superseded_by` are excluded from the `MembershipRecord` / `ConformanceDeclaration` hashes (§20 →2, →7, →8, →10).
 - The **audit-anchored write rule**: every link/membership/declaration mutation advances a hash-linked `AriadneAuditRecord` chain, or it writes nothing through the operation layer.
-- The **write-order invariant**: Blob → Neo4j → QDrant (→ Redis) per §20 →11.5.1.
+- The **write-order invariant** (§20 →11.5.1): authoritative structural store, then append-only audit store — both synchronous — then the semantic search index and the ephemeral coordinator, asynchronously. The roles are normative; which provider fills each is not.
 
 What is implementation-space:
 
+- **The storage providers.** SPEC §20 →11.1 defines four storage roles and deliberately names no product. This adapter's choices are recorded in §9.
 - Neo4j labels (`AriadneEpisodeLink`, `AriadneMembershipRecord`, `AriadneConformanceDeclaration`, `AriadneEpisodeGroup`), property names, constraint/index names.
 - The compact string encodings of `inference_signals` and `capabilities` stored on the Neo4j node (full structured records live on the audit trail).
 - The composite-scoring algorithm, embedding-model choice, and threshold values (all behavioral-tier, sovereign per §20 →12.1).
@@ -327,16 +328,39 @@ Full list in `adapters/neo4j/writer.py` `SCHEMA_CONSTRAINTS` / `SCHEMA_INDEXES`.
 
 ## 9. Storage Architecture & Write-Order Invariant (§20 →11.1, →11.5)
 
-The four-tier consistency hierarchy (§20 →11.1.1):
+SPEC §20 →11.1 defines four storage **roles** and the obligations of each. It names no provider: any system that meets a role's obligations may fill it, and one system may fill several. The table maps those roles to what the reference deployment uses. The right-hand column is this deployment's choice and carries no conformance weight.
 
-| Tier | Store | Role |
-|------|-------|------|
-| PRIMARY TRUTH | Neo4j | structural ground truth (synchronous) |
-| AUDIT TRUTH | Blob | append-only audit history (authoritative event log) |
-| DISCOVERY | QDrant | semantic search (eventually consistent) |
-| WORKING STATE | Redis | ephemeral cache / quarantine queue (reconstructable) |
+| Role (normative, §20 →11.1.1) | Obligation | Reference deployment |
+|------|------|------|
+| Authoritative structural store | structural ground truth; synchronous writes; single source of truth | Neo4j |
+| Append-only audit store | authoritative event log; synchronous writes; never modified | blob storage |
+| Semantic search index | link-candidate discovery; eventually consistent; derived | QDrant |
+| Ephemeral coordinator | caches and queues; always reconstructable | Redis |
 
-**Write-order invariant (§20 →11.5.1): Blob → Neo4j → QDrant (→ Redis).** Blob (audit) and Neo4j are atomic from the protocol's perspective — a write that lands in Neo4j but fails in Blob is a partial write and MUST be retried or rolled back. QDrant (`episode_content_vectors`, 1536-dim; `participant_context_vectors`, 768-dim) and Redis propagation are asynchronous within the consistency-window SLA (typical < 60s, max 5 minutes; §20 →11.5.2). No read on structural data may serve a response that contradicts Neo4j; QDrant/Redis divergence is a consistency error, not an alternative view.
+**Write-order invariant (§20 →11.5.1): structural store → audit store → search index → coordinator.** `assert_episode_link()` writes the link record and then the audit record, in that order. The first two writes are atomic from the protocol's perspective — a write that lands in the structural store but fails in the audit store is a partial write and MUST be retried or rolled back. Propagation to the search index and the coordinator is asynchronous within the consistency-window SLA (typical < 60s, max 5 minutes; §20 →11.5.2). No read on structural data may serve a response that contradicts the structural store; divergence of the index or the coordinator is a consistency error, not an alternative view.
+
+### 9.1 Reference deployment — search index layout
+
+§20 →11.1.3 requires two separate vector spaces and fixes their payload fields. Collection names, dimensionality, distance metric and embedding model are this deployment's choices:
+
+| Vector space (§20 →11.1.3) | Collection | Dimensions | Distance |
+|------|------|------|------|
+| Episode content | `episode_content_vectors` | 1536 | Cosine |
+| Participant context | `participant_context_vectors` | 768 | Cosine |
+
+Payload fields are as the specification lists them, stored as keyword fields except `indexed_at` (datetime) and the two `*_threshold_at_index` fields (float). The two collections use different embedding models of different sizes; embeddings from different model families are never mixed within a collection, which is the one constraint §20 →11.1.3 places on model choice.
+
+### 9.2 Reference deployment — coordinator keys
+
+§20 →11.1.4 requires a quarantine queue scoped per Episode, threshold calibration state, and a link-health cache, all reconstructable. Key names and data structures are this deployment's choices:
+
+```
+ariadne:quarantine:queue:{episode_id}    sorted set   score = quarantine deadline (Unix timestamp)
+ariadne:quarantine:ttl                   string       default TTL in seconds
+ariadne:calibration:thresholds           hash         current DISCOVERY_THRESHOLD, AUTO_ACCEPT_THRESHOLD
+ariadne:calibration:history:{date}       list         daily calibration snapshots
+ariadne:link:health:{link_id}            hash         cached health_state + checked_at
+```
 
 Verification proof types (§20 →11.2): `LINK_INTEGRITY` (content_hash matches canonical fields — the §4.2 field set), `MEMBERSHIP_CHAIN` (succession chain unbroken + hashes valid), `DECLARATION_COMPATIBILITY` (version transition compatible/breaking), `AUDIT_COMPLETENESS` (all required audit events present). Non-existence proofs are a flagged gap (§20 →11.2.1, →12.3).
 
