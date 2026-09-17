@@ -1,0 +1,46 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install
+        run: pip install -e ".[neo4j,dev]"
+      - name: Full suite
+        run: pytest -q
+      - name: Each test file on its own
+        # A file that only passes because another file ran first is a broken file.
+        run: |
+          status=0
+          for f in $(git ls-files 'tests/**/test_*.py'); do
+            env -u ARIADNE_ENABLED pytest -q "$f" || { echo "::error file=$f::fails when run alone"; status=1; }
+          done
+          exit $status
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
