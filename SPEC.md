@@ -1,6 +1,6 @@
 # ASTP — AI State Tree Protocol Specification
 
-**Version:** 4.4.0
+**Version:** 4.4.1
 **Status:** Stable
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-17
@@ -38,9 +38,9 @@ The protocol is agnostic to both cognitive architecture and node type. A system 
 | **Crystallization** | A protocol-level state transition that captures a point-in-time integrity snapshot. Immutable once written. |
 | **WIL** | Write Intent Log. A coordination protocol for multi-store writes that guarantees ordering and recoverability. |
 | **Dual Index** | The separation of `sequence_index` (immutable temporal position, in hash) from `tree_leaf_index` (mutable structural position, NOT in hash). The epistemological core of v2. |
-| **HITLEventNode** | A first-class node representing a human-in-the-loop decision gate. Two-phase lifecycle: INVOKED (gate raised) → RESOLVED/TIMED_OUT (decision recorded). Participates in the Merkle spine as a causal anchor. |
+| **HITLEventNode** | A first-class node representing a human-in-the-loop decision gate. Two-phase lifecycle: INVOKED (gate raised) → RESOLVED/TIMED_OUT (decision recorded). Its `node_hash` commits the decision (§4.6); it is not a spine leaf (§5.6). |
 | **HITL Gate** | An edge from an Episode to an HITLEventNode. Typed as BLOCKS (approval required) or FOLLOWS (advisory review). |
-| **Causal Anchor** | A Merkle spine leaf whose hash ancestry carries the authorization chain for subsequent segments. HITL nodes are causal anchors — post-approval segments cryptographically depend on the human decision. |
+| **Causal Anchor** | A node whose hash records an authorization that later Segments rely on. A resolved `HITLEventNode` is a causal anchor: its `node_hash` binds the invocation context to the human decision (§4.6), and Segments written under a pending gate reference it by ID. A causal anchor is not a spine leaf and, as of this version, is not committed into any sealed root (§5.6). |
 | **Adapter** | A database-specific implementation of persistence operations. |
 | **ASI** | Adapter Service Interface. The abstract contract any conforming adapter must implement. |
 | **Governance Rule** | A protocol invariant that any conforming implementation must enforce. |
@@ -137,7 +137,7 @@ The protocol defines three **persistence layers** — distinct from the code-arc
 | Layer | Contents | Owner | Hash Participation |
 |-------|----------|-------|-------------------|
 | **Layer 1 — Merkle Spine** | EpisodeNode, IntentionNode, BeliefNode, SignalNode, and other cognitive primitives | Protocol kernel | Hash-chained, witness-signable, authoritative cognitive record |
-| **Layer 2 — Episode Content** | Segments, BranchPoints, HITLEventNodes; Adaptive Merkle Tree under the Spine | Protocol kernel | Anchored to Layer 1 via parent references |
+| **Layer 2 — Episode Content** | Segments, BranchPoints, HITLEventNodes; the Episode spine tree (§5.6) | Protocol kernel | Anchored to Layer 1 via parent references |
 | **Layer 3 — Workflow & Execution DAG** | WorkflowDeclaration, ExecutionNode, SkillInvocation | Cognitive Implementation Authority (per workspace, per node type — see §21 §3) | **Isolated**: Layer 3 nodes do NOT participate in Spine hash computation. Cross-layer references are by ID only. |
 
 **Layer 3 is specified in §21 of this document.** The full Layer 3 surface — node schemas, hash preimage rules, immutability invariants, state machine, sole-writer principle (Cognitive Implementation Authority), and audit event types (`WORKFLOW_DECLARED`, `EXECUTION_RECORDED`, `SKILL_INVOKED`, `WORKFLOW_CLOSED`) — is normatively specified there. This section names Layer 3's existence and position in the persistence model; §21 is the authoritative reference for its semantics.
@@ -315,7 +315,7 @@ A directed edge from Episode to HITLEventNode with properties:
 
 **Spine participation:**
 
-Resolved HITL `node_hash` values participate in the Merkle spine as causal anchor leaves with `importance=2` (high). The spine hash changes when a HITL event resolves — the human decision becomes part of the episode's integrity fingerprint.
+A resolved HITL event's `node_hash` is the record of the human decision. It is **not** a spine leaf: the spine is the Episode's non-ephemeral Segments and nothing else (§5.6), and resolving a gate does not change the spine root. As of this version no sealed root commits to HITL events; §5.6 states what that means for a verifier.
 
 **Crystallization guard:**
 
@@ -410,19 +410,26 @@ The leaf hash is computed once at node creation and never recomputed.
 
 ### 5.3 Domain Separation
 
-To prevent second-preimage attacks across tree levels:
-- Leaf level: `SHA3-256(b"LEAF:" + leaf_hash)`
-- Internal nodes: `SHA3-256(b"NODE:" + left + right)`
+To prevent second-preimage attacks across tree levels, leaves and internal nodes are hashed under different prefixes:
+
+- Leaf level: `SHA3-256("LEAF:" ‖ x)`, where `x` is the tree's input for that leaf
+- Internal nodes: `SHA3-256("NODE:" ‖ left ‖ right)`
+
+**Encoding.** At every level of the tree a hash value is carried as its **64-character lowercase hexadecimal string**, and what is concatenated and hashed is the ASCII encoding of that string — not the 32 raw bytes. `"LEAF:"` and `"NODE:"` are the five ASCII bytes shown. So a leaf is `SHA3-256` over 5 + 64 bytes, and an internal node is `SHA3-256` over 5 + 64 + 64 bytes. (§5.2 differs: inside the leaf-hash preimage `content_hash` is 32 raw bytes. §5.2 and the tree are separate constructions with separate encodings.)
 
 ### 5.4 Merkle Tree
 
-A binary Merkle tree over domain-separated leaf hashes. Supports:
-- Full construction from leaf set
-- Incremental append (O(log n))
-- Inclusion proof generation (position-binding — the proof commits to the leaf's `sequence_index`, not only its content; §9.2)
-- Inclusion proof verification
+A binary Merkle tree over a list of leaf inputs, in the order given:
 
-The tree is node-type-agnostic — it operates on hash strings only.
+1. Hash each input at the leaf level (§5.3). This is level 0.
+2. To form the next level, take the current level's nodes in pairs from the left and hash each pair as an internal node. If the level has an odd number of nodes, the last node is **carried up unchanged** — it is not duplicated and not re-hashed.
+3. Repeat until one node remains. That node is the root.
+
+A tree with a single leaf therefore has that leaf's level-0 hash as its root. **The root of an empty list is undefined**: an implementation MUST refuse to compute one, and an Episode with no spine leaf cannot be sealed.
+
+The tree supports full construction from a leaf list, incremental append (O(log n)), and generation and verification of inclusion proofs (position-binding — the proof commits to the leaf's `sequence_index`, not only its content; §9.2). It is node-type-agnostic — it operates on hash strings only.
+
+**Two trees use this construction, over different inputs.** The tree of §9 (the five-test gate) and §16.5 (inclusion proofs in chain proofs) takes §5.2 position-binding **leaf hashes** as its inputs. The **Episode spine** (§5.6), whose root is what a seal records, takes Segment **content hashes**. They are the same algorithm and produce different roots for the same nodes; a `spine_root` is never a root over §5.2 leaf hashes. See the note on what the spine root binds in §5.6.
 
 ### 5.5 Type Isolation Property
 
@@ -430,8 +437,7 @@ A CognitiveNode with `node_type="episode"` and one with `node_type="signal"` at 
 
 ### 5.6 Episode Spine Leaf Set
 
-The spine of an Episode is the Merkle tree (§5.4) over **exactly** the Episode's
-non-ephemeral Segments, ordered by `sequence_index`. Nothing else is a spine leaf.
+The spine of an Episode is the Merkle tree (§5.4) whose leaf inputs are the **`content_hash` values of the Episode's non-ephemeral Segments**, ordered by `sequence_index`. No other node of the Episode is a spine leaf.
 
 - Segments whose `retention_tier` is `EPHEMERAL` (the epistemic record — PASS
   decisions, evaluation metadata) are **not** leaves; their content hashes enter
@@ -445,9 +451,14 @@ non-ephemeral Segments, ordered by `sequence_index`. Nothing else is a spine lea
   construction (§3.3 dual index; G-3), so the leaf order is total and needs no
   tiebreak.
 
+**The Episode-identifier leaf.** Under `spine_algorithm_version` 1 (§5.8) the leaf list is preceded by one additional input that is not a node: `SHA3-256(episode_id)`, where `episode_id` is the Episode's identifier in its canonical string form, UTF-8 encoded, and the result is carried as a hex string like any other input. It is always the first leaf. It binds the root to the Episode: without it, two Episodes whose Segments had the same content hashes in the same order would share a spine root. `spine_algorithm_version` 0 has no such leaf.
+
 A verifier MUST be able to rebuild the spine root from the stored Segment nodes
-alone. Any construction that requires state not present on the nodes — insertion
-order, a store's default sort, a cache — is non-conformant (§9.3).
+and the Episode's identifier alone. Any construction that requires state not
+present on the nodes — insertion order, a store's default sort, a cache — is
+non-conformant (§9.3).
+
+**What the spine root binds, and what it does not.** The spine root commits to the content of each non-ephemeral Segment and to their order. It does not commit to a Segment's `node_id`, `node_type`, `schema_version` or parent — those are bound by the §5.2 leaf hash, which is not the spine's input — so a Segment's identity is not recoverable from, or protected by, the spine root alone. `content_hash` is an unsalted `SHA3-256` of the Segment's content; nothing in the spine construction adds entropy to it, so a published list of spine leaves lets anyone test a guess at a Segment's content. Resolved `HITLEventNode`s, `BranchPointNode`s and the other structural nodes of §19 are not committed into the spine root or into the Episode root (§5.7): as of this version, removing one changes no sealed root. These are properties of the construction as it stands and are stated here so that implementers and verifiers do not assume otherwise.
 
 ### 5.7 Episode Root
 
@@ -462,6 +473,8 @@ episode_root_hash = SHA3-256("NODE:" || spine_root || signal_manifest_hash || ex
 | `spine_root` | non-ephemeral Segments (§5.6) | Merkle root, `sequence_index` order |
 | `signal_manifest_hash` | the Episode's SPINE-placed Signals | `SHA3-256("SIGNAL_MANIFEST:v1:" || sorted(content_hash) joined by "\|")`; empty set → `SHA3-256("SIGNAL_MANIFEST:v1:EMPTY")` |
 | `exclusion_hash` | Segments excluded from the spine | `SHA3-256("EXCLUSION:v1:" || sorted(content_hash) joined by "\|")`; empty set → `SHA3-256("EXCLUSION:v1:EMPTY")` |
+
+In all three constructions a hash value is its 64-character lowercase hex string, ASCII-encoded, as in §5.3. "sorted" is lexicographic order of those strings after de-duplication; the separator is the single byte `|`; the empty-set form hashes the prefix followed by the five bytes `EMPTY`.
 
 The manifest and the exclusion set are **sets**: membership binds, order does
 not. Duplicated hashes collapse. This is what makes signals verifiable without
@@ -480,8 +493,24 @@ identifiers carry that:
 | Field | On | Values | Meaning |
 |---|---|---|---|
 | `hash_version` | `CognitiveNode` | `1` (default) | which leaf-hash / content-hash construction produced the node's hashes (§5.2) |
-| `spine_algorithm_version` | `CrystallizationDelta` | `0` legacy iterative Merkle · `1` Adaptive Merkle Tree (current) | which tree construction produced `sealed_chain_root` |
-| `ordering_version` | `CrystallizationDelta` | `1` legacy (segments then SPINE signals by arrival time) · `2` current (§5.6, segments only) | which leaf set and ordering produced `sealed_chain_root` |
+| `spine_algorithm_version` | `CrystallizationDelta` | `0` · `1` (current) — defined below | which tree construction produced `sealed_chain_root` |
+| `ordering_version` | `CrystallizationDelta` | `1` · `2` (current) — defined below | which leaf set and ordering produced `sealed_chain_root` |
+
+**`spine_algorithm_version`.** Both values use the tree of §5.4 with the encoding of §5.3; they differ in one leaf.
+
+| Value | Leaf list |
+|---|---|
+| `0` | the ordered inputs given by `ordering_version`, and nothing else |
+| `1` | `SHA3-256(episode_id)` as the first leaf (§5.6), followed by the ordered inputs given by `ordering_version` |
+
+**`ordering_version`.**
+
+| Value | Ordered inputs |
+|---|---|
+| `1` | the `content_hash` of each non-ephemeral Segment in `sequence_index` order, **followed by** the `content_hash` of each SPINE-placed Signal in order of arrival time |
+| `2` | the `content_hash` of each non-ephemeral Segment in `sequence_index` order (§5.6). Signals commit through the manifest (§5.7) |
+
+`ordering_version` 1 does not determine a leaf order. Arrival time is not a total order — Signals can share a timestamp — and the order in which tied Signals were folded in at seal time is not recorded on any node. A seal made under `ordering_version` 1 whose Signals include such a tie can be reproduced only by trying the orderings of each tied group until one yields the stored root. That is the defect `ordering_version` 2 removes, and it is why §9.3 does not hold unconditionally for `ordering_version` 1 seals.
 
 These identifiers are diagnostic metadata **outside every hash preimage** (the
 same footing as the retroactive flags of v3.3.0): a verifier reads them to select
@@ -655,11 +684,16 @@ Verifier recomputes domain-separated leaf hash, walks the Merkle path, confirms 
 
 ### 9.3 Reproducibility Obligation
 
-A verifier holding only the stored nodes of a sealed Episode — its Segments,
-Signals and the seal record with its §5.8 version identifiers — MUST be able to
+A verifier holding only the stored nodes of a sealed Episode — its identifier,
+its Segments, Signals and the seal record with its §5.8 version identifiers — MUST be able to
 recompute `spine_root` and `episode_root_hash` and compare them to the sealed
 values, with no out-of-band state. The Five-Test Gate is only as strong as this
 obligation: a root that cannot be rebuilt cannot be tested.
+
+This holds for every seal made under `ordering_version` 2. For a seal made under
+`ordering_version` 1 it holds only up to the order of same-timestamp Signals, which
+no stored node records (§5.8): a verifier may have to search those orderings, and a
+seal whose tied groups are too large to search cannot be reproduced at all.
 
 An endpoint or tool that returns a *stored* root is an anchor lookup, not a
 verification, and MUST NOT be described as one.
@@ -1362,9 +1396,11 @@ Integrity link: `branch_point_hash` MUST equal the originating
 
 Branches create non-linear Episode graphs that must remain verifiable:
 
-- **Spine chain.** `BranchPointNode.content_hash` is included in the
-  spine chain. Branch *contents* are NOT — the spine is self-contained
-  and verifiable without them.
+- **Spine chain.** The spine is self-contained and verifiable without
+  branch contents. The `BranchPointNode` anchors to the spine by reference
+  — `source_segment_id` and `spine_merkle_snapshot` — and carries its own
+  `content_hash`; it is **not** a spine leaf, and as of this version no
+  sealed root commits to it (§5.6).
 - **Branch chain.** Starts at `BranchPointNode` and ends at
   `BranchTerminusNode`. Verifiable independently of the spine.
 - **Merge verification (Phase 2).** Requires three Merkle roots — see §19.3.3.
@@ -2366,7 +2402,7 @@ The ASTP protocol now defines **three layers** of cryptographic persistence, eac
 └────────────────────────┬─────────────────────────────────────┘
                          │ referenced by ID only
 ┌────────────────────────▼─────────────────────────────────────┐
-│  LAYER 2 — Episode Content (Adaptive Merkle Tree)            │
+│  LAYER 2 — Episode Content (Episode spine tree)              │
 │  Segments, BranchPoints, HITLEventNodes                      │
 │  → Episode body. Adaptive tree under the Spine.              │
 └────────────────────────┬─────────────────────────────────────┘

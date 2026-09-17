@@ -3,7 +3,7 @@
 **Version:** 1.0.0
 **Status:** Stable
 **Authors:** Scorched Earth Labs
-**Date:** 2026-09-17
+**Date:** 2026-07-04
 **Applies To:** SPEC.md §21 (Layer 3 — Workflow & Execution DAG), v3.2.1
 
 ---

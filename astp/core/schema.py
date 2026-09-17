@@ -486,9 +486,16 @@ EMPTY_SET_SENTINEL = b"EMPTY"
 
 
 def compute_spine_root_v2(segment_content_hashes: list[str], episode_id: Optional[str] = None) -> str:
-    """ORDERING_VERSION 2 spine root: the Merkle root over the Episode's non-ephemeral
-    segments in ``sequence_index`` order — and nothing else. Signals are not spine
-    leaves (SPEC §5.6). Uses the Adaptive Merkle Tree (SPINE_ALGORITHM_VERSION 1).
+    """ORDERING_VERSION 2 spine root: the Merkle root over the content hashes of the
+    Episode's non-ephemeral segments in ``sequence_index`` order. Signals are not
+    spine leaves (SPEC §5.6).
+
+    ``episode_id`` selects the tree (SPEC §5.8). Pass it to get
+    SPINE_ALGORITHM_VERSION 1, whose first leaf is SHA3-256(episode_id) — this is
+    what a seal records, so a verifier reproducing a seal MUST pass it. Omitted, the
+    result is the SPINE_ALGORITHM_VERSION 0 tree over the same leaves, which no
+    ORDERING_VERSION 2 seal uses.
+
     Deterministic: the only ordering key is ``sequence_index``, which is unique
     per Episode by construction (SPEC §3.3 dual index)."""
     if not segment_content_hashes:

@@ -3,7 +3,7 @@
 **Version:** 1.1.0
 **Status:** Working Draft
 **Authors:** Scorched Earth Labs
-**Date:** 2026-09-17
+**Date:** 2026-04-16
 **Applies To:** SPEC.md §16 (Phase 3 Trust Infrastructure) and §4.6 (HITL, Appendix C). Written against SPEC v2.4.0-draft; not yet re-verified against 4.x.
 **Conformance Reference:** Phase 3 Conformance Test Vectors v1.0.0
 
@@ -713,7 +713,7 @@ Phase 4 builds on Phase 3 infrastructure. Implement in this order:
 
 5. **Cryptographic attestation** — Sign `context_hash` with the agent's Ed25519 key at invocation. Sign `resolution_hash` with the human's Ed25519 key at resolution. Both use the Phase 3 HKDF key hierarchy with `entity_type` parameter ("agent" or "user").
 
-6. **Spine participation** — On HITL resolution, include `node_hash` as a causal anchor leaf (importance=2) in `compute_adaptive_spine_hash`. Invalidate spine tip cache.
+6. **No spine participation** — A resolved HITL event's `node_hash` records the decision; it is **not** a spine leaf. The spine is the Episode's non-ephemeral Segments and nothing else (SPEC §5.6), and no seal has ever included HITL hashes. Do not pass them to the spine computation.
 
 7. **Advisory gates** — For `REVIEW_ADVISORY` gates, tag segments written during the pending interval with `pending_hitl_ref`. These segments are `CONDITIONALLY_VALID` until the gate resolves. Advisory gates do NOT block crystallization or set `PENDING_HITL`.
 
@@ -737,7 +737,7 @@ A Phase 4 conforming implementation MUST:
 2. Compute `context_hash`, `resolution_hash`, `node_hash` with correct domain-separated prefixes
 3. Enforce G-17 (no resolution on INVOKED nodes)
 4. Enforce G-18 (crystallization blocked by pending blocking HITL)
-5. Include resolved HITL `node_hash` in spine computation as importance=2 leaves
+5. Keep resolved HITL `node_hash` values out of the spine computation (SPEC §5.6)
 6. Sign invocation with agent key and resolution with human key (using Phase 3 HKDF hierarchy)
 7. Tag segments written during advisory gates with `pending_hitl_ref`
 

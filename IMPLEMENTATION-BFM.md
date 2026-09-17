@@ -3,7 +3,7 @@
 **Version:** 1.2.0
 **Status:** Stable
 **Authors:** Scorched Earth Labs
-**Date:** 2026-09-17
+**Date:** 2026-07-04
 **Applies To:** SPEC.md §19 (Branch / Fork / Merge / Departure Fork / Aside / Soliloquy / CoherenceFingerprint + Orphan Recovery), v3.3.0
 **Scope:** All four phases of the Branch/Fork/Merge taxonomy (SPEC §19), plus the **Phase D departure-fork lifecycle** (SPEC §19.3.5–19.3.7, added §5 — incl. orphan recovery §5.8)
 **Target audience:** Implementers extending a conforming ASTP instance with the BFM taxonomy.

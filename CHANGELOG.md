@@ -10,6 +10,28 @@ The next change-set queues here.
 
 - `verify_proof_chain` verified each link's inclusion proof against the root *the proof* named, never against the link's own `spine_root`, so a chain whose links carried valid proofs for unrelated trees verified. §16.5.3 (1) has always required the proof to verify against `link.spine_root`; the reference implementation now does.
 
+## [4.4.1] — 2026-09-17
+
+**PATCH (errata).** The spine and Episode-root constructions are now stated byte-exactly, **as the reference implementation has always built them**. No construction changes; no sealed root changes. Where the text and the code disagreed, the text is corrected to the code, because §9.3 obliges a verifier to reproduce existing seals and the code is what made them. Constructions that should be different are a matter for the next MAJOR, not for an erratum.
+
+### Corrected
+- **§5.3 / §5.4** state what was unwritten: hash values enter the tree as 64-character lowercase hex strings, ASCII-encoded (not as raw bytes — §5.2 differs, and says so); nodes pair from the left; an unpaired node is carried up unchanged, neither duplicated nor re-hashed; a single-leaf tree's root is that leaf's hash; the root of an empty list is undefined and MUST be refused.
+- **§5.4 / §5.6 — the spine's leaf inputs are Segment `content_hash` values, not §5.2 leaf hashes.** The text read as a tree over position-binding leaf hashes; only the tree of §9 and §16.5 is that. The two are the same algorithm over different inputs and give different roots. §5.6 now says plainly what the spine root therefore binds (content and order) and does not (a Segment's `node_id`, type, schema version or parent).
+- **§5.6 — the Episode-identifier leaf.** Under `spine_algorithm_version` 1 the first leaf is `SHA3-256(episode_id)`. §5.6 said "Nothing else is a spine leaf" and `CONFORMANCE-REPRODUCIBILITY.md` RP-001 said "and nothing else", while RP-001's own inputs included an `episode_id` and every seal made under version 1 contains the leaf. §9.3 lists the Episode's identifier among what a verifier needs.
+- **§5.8 defines its version values**, which it had only named: `spine_algorithm_version` 0 and 1 are the same tree and differ by that one leaf; `ordering_version` 1 and 2 are given as exact leaf lists. It also states that **`ordering_version` 1 does not determine a leaf order** — arrival time is not total, and the order in which tied Signals were folded in is recorded nowhere — so such a seal may be reproducible only by search, and §9.3 is scoped accordingly.
+- **§5.7** states the encoding, sort order, separator and empty-set bytes of the manifest, exclusion and Episode-root constructions.
+- **HITL events and BranchPoints are not spine leaves, and never were.** §2, §4.6 and §19.2.3 said a resolved HITL `node_hash` "participates in the Merkle spine as a causal anchor leaf" and that a BranchPoint's `content_hash` "is included in the spine chain"; `IMPLEMENTATION-PHASE3.md` made the former a MUST. No seal has ever included either, and both statements contradicted §5.6. They are corrected. §5.6 records the consequence without softening it: as of this version no sealed root commits to those nodes, so removing one changes no root.
+- **`content_hash` is unsalted**, and §5.6 says so: a published list of spine leaves lets anyone test a guess at a Segment's content.
+- **Corpus figures** in the 4.3.0 entry below and in `CONFORMANCE-REPRODUCIBILITY.md` accounted for 58 of 62 Episodes and stated "no evidence of content tampering" without scope. The breakdown is 45 + 8 + 4 + 2 + 3; the finding holds for the 57 seals that were rebuilt, and the other 5 could not be evaluated.
+
+### Added (conformance)
+- `CONFORMANCE-REPRODUCIBILITY.md` RP-001 and RP-002 now carry **expected digests** — the first in any conformance document here — for the spine root under both algorithm versions, the signal manifest (five members, four members, empty), the empty exclusion set, and the Episode root.
+- The reference tests pin those digests, and separately re-implement §5.3–§5.8 from the prose with `hashlib` alone and compare it with the library across tree sizes, so that the specification text and the code cannot drift apart again unnoticed.
+
+### Changed (editorial)
+- Companion documents that were re-dated in 4.3.1 without a version change have their dates restored: a document's date moves with its version.
+- The reference function `compute_spine_root_v2` documents that `episode_id` selects the algorithm version and that reproducing a seal requires it. Behaviour is unchanged.
+
 ## [4.4.0] — 2026-09-17
 
 **MINOR.** Storage is specified as roles, not providers. Every implementation that conformed to 4.3.x conforms to 4.4.0 unchanged; implementations built on other providers, which the text of §20 had excluded by naming products, now can.
@@ -71,12 +93,16 @@ The next change-set queues here.
 
 **MINOR.** Reproducibility. Motivated by the first corpus-scale re-verification of the
 reference deployment's 62 sealed Episodes (2026-09-13): 45 spine roots rebuilt from
-stored nodes; 8 rebuildable only under the pre-2026-04-01 tree implementation (the
+stored nodes; 8 rebuildable only under the pre-2026-04-01 tree function (the
 function had been replaced in place before the versioning rule existed); 4 rebuildable
 only by searching orderings of same-timestamp signals (the seal ordered SPINE signals by
-arrival time — an ordering key signals do not reliably have); one post-closure append
-that the reference G-1 guard did not refuse because it covered SEALING/SEALED/ARCHIVED
-but not CLOSED. No evidence of content tampering. Every item below is additive.
+arrival time — an ordering key signals do not reliably have); 2 not rebuilt under any
+construction (one of them also holds a post-closure append that the reference G-1 guard
+did not refuse, because it covered SEALING/SEALED/ARCHIVED but not CLOSED); and 3 in a
+sealed status with no seal record, so no root to rebuild. Of the 57 that were rebuilt,
+none showed evidence of content tampering; the other 5 could not be evaluated.
+*(Figures corrected in 4.4.1: this entry originally accounted for 58 of the 62 and
+stated the tampering finding without that scope.)* Every item below is additive.
 
 ### Added
 - **§5.6 Episode Spine Leaf Set** — the spine is the Episode's non-ephemeral Segments in

@@ -3,7 +3,7 @@
 **Version:** 1.0.0
 **Status:** Working Draft
 **Authors:** Scorched Earth Labs
-**Date:** 2026-09-17
+**Date:** 2026-04-12
 **Applies To:** SPEC.md §16 (Phase 3 Trust Infrastructure). Written against SPEC v2.3.0-draft; not yet re-verified against 4.x.
 **Companion:** [CONFORMANCE-BFM.md](CONFORMANCE-BFM.md) covers SPEC §19 (Branch/Fork/Merge/Aside/Soliloquy/CoherenceFingerprint).
 
