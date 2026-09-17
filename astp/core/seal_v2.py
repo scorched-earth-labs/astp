@@ -132,19 +132,22 @@ def compute_episode_root_hash_v2(
 
 
 # ── structural manifest members ─────────────────────────────────────────────────
-# Field lists are those the 4.x constructions hash, in the same order, plus the two
-# structural fields 4.x omitted (``spine_merkle_snapshot``, ``merge_type``); what
-# changes otherwise is the encoding. ``parent_hash`` is NULL at the start of a
-# chain (4.x used the text "GENESIS").
+# A member's preimage holds its structural claims and nothing else. Relative to
+# 4.x that adds two fields 4.x omitted (``spine_merkle_snapshot``, ``merge_type``)
+# and drops the provenance and commentary 4.x bound on some nodes and not others
+# (``initiated_by``, ``initiator``, ``returned_by``, ``synthesis_summary``): who
+# acted is the audit chain's to bind, and free text proves nothing structural.
+# 4.x seals that bound those fields stay reproducible under 4.x. ``parent_hash``
+# is NULL at the start of a chain (4.x used the text "GENESIS").
 
 def compute_branch_point_hash_v2(branch_point_id: UUID, episode_id: UUID, branch_id: UUID, source_segment_id: UUID,
                                  spine_merkle_snapshot: str, branch_type: str, declaration_type: str,
-                                 initiated_by: str, created_at: datetime, parent_hash: Optional[str]) -> str:
+                                 created_at: datetime, parent_hash: Optional[str]) -> str:
     """``spine_merkle_snapshot`` binds the divergence to the spine state it left
     from; without it a BranchPoint could be re-pointed at a different history."""
     return hash_fields(BRANCH_POINT_V2, [
         (UUID_, branch_point_id), (UUID_, episode_id), (UUID_, branch_id), (UUID_, source_segment_id),
-        (HASH, spine_merkle_snapshot), (STRING, branch_type), (STRING, declaration_type), (STRING, initiated_by),
+        (HASH, spine_merkle_snapshot), (STRING, branch_type), (STRING, declaration_type),
         (TIMESTAMP, created_at), (HASH, parent_hash),
     ])
 
@@ -159,22 +162,24 @@ def compute_branch_terminus_hash_v2(terminus_id: UUID, branch_id: UUID, terminus
 
 
 def compute_fork_return_hash_v2(fork_return_id: UUID, fork_id: UUID, fork_episode_id: UUID, origin_episode_id: UUID,
-                                return_type: str, synthesis_summary: str, fork_final_spine_tip_hash: str,
-                                returned_by: str, created_at: datetime, parent_hash: Optional[str]) -> str:
-    """A member because removing it would falsify whether a fork rejoined."""
+                                return_type: str, fork_final_spine_tip_hash: str,
+                                created_at: datetime, parent_hash: Optional[str]) -> str:
+    """A member because removing it would falsify whether a fork rejoined. Its
+    fields are the join fact: which fork, returning to which Episode, how, and
+    from what state."""
     return hash_fields(FORK_RETURN_V2, [
         (UUID_, fork_return_id), (UUID_, fork_id), (UUID_, fork_episode_id), (UUID_, origin_episode_id),
-        (STRING, return_type), (STRING, synthesis_summary), (HASH, fork_final_spine_tip_hash),
-        (STRING, returned_by), (TIMESTAMP, created_at), (HASH, parent_hash),
+        (STRING, return_type), (HASH, fork_final_spine_tip_hash),
+        (TIMESTAMP, created_at), (HASH, parent_hash),
     ])
 
 
 def compute_fork_point_hash_v2(fork_point_id: UUID, fork_id: UUID, episode_id: UUID, origin_episode_id: UUID,
-                               origin_segment_id: UUID, fork_objective: str, initiator: str, sibling_index: int,
+                               origin_segment_id: UUID, fork_objective: str, sibling_index: int,
                                created_at: datetime, parent_hash: Optional[str]) -> str:
     return hash_fields(FORK_POINT_V2, [
         (UUID_, fork_point_id), (UUID_, fork_id), (UUID_, episode_id), (UUID_, origin_episode_id),
-        (UUID_, origin_segment_id), (STRING, fork_objective), (STRING, initiator), (UINT, sibling_index),
+        (UUID_, origin_segment_id), (STRING, fork_objective), (UINT, sibling_index),
         (TIMESTAMP, created_at), (HASH, parent_hash),
     ])
 
@@ -182,11 +187,11 @@ def compute_fork_point_hash_v2(fork_point_id: UUID, fork_id: UUID, episode_id: U
 def compute_departure_fork_point_hash_v2(fork_point_id: UUID, fork_id: UUID, fork_episode_id: UUID,
                                          origin_episode_id: UUID, origin_segment_id: UUID, fork_objective: str,
                                          fork_creation_trigger: str, spine_tip_hash_at_departure: str,
-                                         initiator: str, created_at: datetime, parent_hash: Optional[str]) -> str:
+                                         created_at: datetime, parent_hash: Optional[str]) -> str:
     return hash_fields(DEPARTURE_FORK_POINT_V2, [
         (UUID_, fork_point_id), (UUID_, fork_id), (UUID_, fork_episode_id), (UUID_, origin_episode_id),
         (UUID_, origin_segment_id), (STRING, fork_objective), (STRING, fork_creation_trigger),
-        (HASH, spine_tip_hash_at_departure), (STRING, initiator), (TIMESTAMP, created_at), (HASH, parent_hash),
+        (HASH, spine_tip_hash_at_departure), (TIMESTAMP, created_at), (HASH, parent_hash),
     ])
 
 

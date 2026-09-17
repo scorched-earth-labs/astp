@@ -117,21 +117,21 @@
   },
   "structural_members": {
     "timestamp": "2026-01-01T00:00:00.123000+00:00",
-    "branch_point_v2": "14d9696863ef8d1454bd571e60c6523c35838d56abd1282f8855ecc177cd5172",
-    "branch_terminus_v2": "8a44888170f1668a6a29eda5e7a50651a0b7560c509ae311484d84b0a3f81f81",
-    "fork_point_v2": "492c728e0c3e0b2e8a1d3c5641ae17ddb92e3d312c48ffbf9af072cb1c6f62d7",
-    "departure_fork_point_v2": "9b3c1a6c02e4b8ebed4cedf28c7a248867c97d6b232d8c34515717ea38a29d18",
-    "fork_return_v2": "8c690e4bfdb49cd6fa159b19f9ff2393cb297c186850057849100a3640898cfe",
-    "merge_point_v2": "d4ac9c5a6594f22eaea6764f79f792f368b893ca8eae98b9e824530199884516",
+    "branch_point_v2": "7e1932175f7ef510116f76aa22b68f152f7ed172d82783ec2fb341e13887de76",
+    "branch_terminus_v2": "b675296dd759538d145d54cd81850ddab7c25d99ac56995e56ce4376b4432c22",
+    "fork_point_v2": "f3af418f4004fb1297f39689b1090a0b66887c27381b2ca42496c274ac9793ea",
+    "departure_fork_point_v2": "0c54f19e565539f6e4116c82b2c3ac7c4d61b5ef7da6305af6b04709a6844408",
+    "fork_return_v2": "e94c66210fb7464521ee25717110e534af07a0ea10bed7657e68f08c8cb36421",
+    "merge_point_v2": "2c891a7ae57842ff819f8bd963c26454194d9f6338116746a13d93a3af457166",
     "hitl_context_v2": "0f667804dfbb9441f599c855d363d4cf1b3918b8c12d7450154626c7ab14dbf0",
     "hitl_resolution_v2": "7643c1c83b61214ad8abc35dc51d0024c079445a2371449f42bb89b67d311ca2",
     "hitl_node_v2": "d077b174d554cf1d30bd3d032f8448bd647636eb0b6a95d74503d8e100c8687c",
     "inputs": "see tests/conformance/test_seal_constructions_v2_vectors.py::test_structural_members for the exact field values"
   },
   "structural_manifest_v1": {
-    "seven_members_any_order": "cece6cd76dee5ae951003da9d7e2e214a657007f83b66ab34b258b82f8ce619c",
+    "seven_members_any_order": "0a4b777227b87ee0d6c8efd5b2e9a5fc05c02e61d677f2460f868ab06779b537",
     "empty": "259f1b6181d0341fa2dfa33ce55e0ad686f8a7bbf66d88a8b47cc081aa3d7519",
-    "with_branch_terminus_removed": "57f9cc4c5f632befd8d8581b47aba267d40a1801d80dfd0887c75d047800a4b7"
+    "with_branch_terminus_removed": "a7fe07f9ec014d8162fb2046adcf42a81ddf847d898956adaf83aa92fcf02c37"
   },
   "episode_root_v2": {
     "inputs": [
@@ -141,7 +141,7 @@
       "structural_manifest_v1.seven_members_any_order",
       "exclusion_v2.empty"
     ],
-    "hash": "116e7ffa7071f199f39f9f88808e9a0285d41515cfa428dd421bd43f95a32939",
+    "hash": "f0511b4d1be172554b9f87ec64d400d24a1409f1742ad72f628bf5ab7b7d33f0",
     "with_empty_structural_manifest": "a62b25ad6b2ec2ccd1ad91554ee92ec79d10a402befb63a9794e0677c71a6537"
   }
 }

@@ -175,13 +175,12 @@ def _members():
     t = datetime.fromisoformat(VECTORS["structural_members"]["timestamp"])
     u = lambda i: UUID(f"00000000-0000-4000-8000-{i:012x}")
     root3 = VECTORS["spine_root_sav2"]["3"]
-    bp = seal_v2.compute_branch_point_hash_v2(u(0x100), EPISODE, u(0x101), u(3), root3, "EXPLORATORY", "EXPLICIT", "agent-a", t, None)
+    bp = seal_v2.compute_branch_point_hash_v2(u(0x100), EPISODE, u(0x101), u(3), root3, "EXPLORATORY", "EXPLICIT", t, None)
     bt = seal_v2.compute_branch_terminus_hash_v2(u(0x102), u(0x101), "ABANDONED", bp, None, t)
-    fp = seal_v2.compute_fork_point_hash_v2(u(0x110), u(0x111), u(0x112), EPISODE, u(5), "evaluate the alternative", "agent-a", 0, t, bp)
+    fp = seal_v2.compute_fork_point_hash_v2(u(0x110), u(0x111), u(0x112), EPISODE, u(5), "evaluate the alternative", 0, t, bp)
     dfp = seal_v2.compute_departure_fork_point_hash_v2(u(0x120), u(0x121), u(0x122), EPISODE, u(5), "follow the tangent",
-                                                       "DRIFT_CONFIRMED", LEAVES[5], "agent-a", t, None)
-    fr = seal_v2.compute_fork_return_hash_v2(u(0x123), u(0x121), u(0x122), EPISODE, "COMPLETED", "the tangent was a dead end",
-                                             LEAVES[6], "agent-a", t, dfp)
+                                                       "DRIFT_CONFIRMED", LEAVES[5], t, None)
+    fr = seal_v2.compute_fork_return_hash_v2(u(0x123), u(0x121), u(0x122), EPISODE, "COMPLETED", LEAVES[6], t, dfp)
     mp = seal_v2.compute_merge_point_hash_v2(u(0x130), u(0x131), u(0x112), EPISODE, LEAVES[0], LEAVES[1], LEAVES[2], None, "CLEAN", t, fp)
     ctx = seal_v2.compute_hitl_context_hash_v2("req-1", EPISODE, "APPROVAL_REQUIRED", "agent-a", t, '{"action":"deploy"}')
     res = seal_v2.compute_hitl_resolution_hash_v2(u(0x140), "approved", "human-1", t, None)
@@ -206,14 +205,19 @@ def test_structural_fields_are_bound_and_commentary_is_not_a_field():
     u = lambda i: UUID(f"00000000-0000-4000-8000-{i:012x}")
     base = _members()
     other_snapshot = seal_v2.compute_branch_point_hash_v2(u(0x100), EPISODE, u(0x101), u(3), VECTORS["spine_root_sav2"]["2"],
-                                                          "EXPLORATORY", "EXPLICIT", "agent-a", t, None)
+                                                          "EXPLORATORY", "EXPLICIT", t, None)
     assert other_snapshot != base["branch_point_v2"]
     other_merge = seal_v2.compute_merge_point_hash_v2(u(0x130), u(0x131), u(0x112), EPISODE, LEAVES[0], LEAVES[1], LEAVES[2],
                                                       None, "PARTIAL", t, base["fork_point_v2"])
     assert other_merge != base["merge_point_v2"]
     import inspect
-    assert "branch_label" not in inspect.signature(seal_v2.compute_branch_point_hash_v2).parameters
-    assert "merge_summary" not in inspect.signature(seal_v2.compute_merge_point_hash_v2).parameters
+    bound = {name: set(inspect.signature(fn).parameters) for name, fn in vars(seal_v2).items()
+             if name.startswith("compute_") and name.endswith("_hash_v2")}
+    commentary_or_provenance = {"branch_label", "merge_summary", "synthesis_summary",
+                                "initiated_by", "initiator", "returned_by"}
+    for name in ("compute_branch_point_hash_v2", "compute_branch_terminus_hash_v2", "compute_fork_point_hash_v2",
+                 "compute_departure_fork_point_hash_v2", "compute_fork_return_hash_v2", "compute_merge_point_hash_v2"):
+        assert not (bound[name] & commentary_or_provenance), (name, bound[name] & commentary_or_provenance)
 
 
 def test_hitl_terminal_states():

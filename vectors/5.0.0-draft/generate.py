@@ -55,13 +55,12 @@ def build() -> dict:
     signals = [H(f"leaf-{i}".encode()) for i in range(100, 105)]
     root3, root7 = S.compute_spine_root_sav2(leaves[:3]), S.compute_spine_root_sav2(leaves)
 
-    bp = S.compute_branch_point_hash_v2(nid(0x100), ep, nid(0x101), nid(3), root3, "EXPLORATORY", "EXPLICIT", "agent-a", t, None)
+    bp = S.compute_branch_point_hash_v2(nid(0x100), ep, nid(0x101), nid(3), root3, "EXPLORATORY", "EXPLICIT", t, None)
     bt = S.compute_branch_terminus_hash_v2(nid(0x102), nid(0x101), "ABANDONED", bp, None, t)
-    fp = S.compute_fork_point_hash_v2(nid(0x110), nid(0x111), nid(0x112), ep, nid(5), "evaluate the alternative", "agent-a", 0, t, bp)
+    fp = S.compute_fork_point_hash_v2(nid(0x110), nid(0x111), nid(0x112), ep, nid(5), "evaluate the alternative", 0, t, bp)
     dfp = S.compute_departure_fork_point_hash_v2(nid(0x120), nid(0x121), nid(0x122), ep, nid(5), "follow the tangent",
-                                                 "DRIFT_CONFIRMED", leaves[5], "agent-a", t, None)
-    fr = S.compute_fork_return_hash_v2(nid(0x123), nid(0x121), nid(0x122), ep, "COMPLETED", "the tangent was a dead end",
-                                       leaves[6], "agent-a", t, dfp)
+                                                 "DRIFT_CONFIRMED", leaves[5], t, None)
+    fr = S.compute_fork_return_hash_v2(nid(0x123), nid(0x121), nid(0x122), ep, "COMPLETED", leaves[6], t, dfp)
     mp = S.compute_merge_point_hash_v2(nid(0x130), nid(0x131), nid(0x112), ep, leaves[0], leaves[1], leaves[2], None, "CLEAN", t, fp)
     ctx = S.compute_hitl_context_hash_v2("req-1", ep, "APPROVAL_REQUIRED", "agent-a", t, '{"action":"deploy"}')
     res = S.compute_hitl_resolution_hash_v2(nid(0x140), "approved", "human-1", t, None)
