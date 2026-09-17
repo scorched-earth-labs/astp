@@ -15,7 +15,7 @@
 
 Covers the minimal inline SegmentPayload, the create_segment_node convenience,
 self-registration on import, hash determinism (metadata excluded), validation,
-round-trip, and an RARI-shaped episode→segments audit-trail scenario.
+round-trip, and an episode→segments audit-trail scenario.
 """
 import pytest
 
@@ -76,12 +76,12 @@ def test_validate_requires_type_and_author():
 
 
 def test_payload_round_trip():
-    p = SegmentPayload(segment_type="artifact", author="gaia", content="C", metadata={"m": 1})
+    p = SegmentPayload(segment_type="artifact", author="agent-a", content="C", metadata={"m": 1})
     assert SegmentPayload.from_dict(p.to_dict()).to_dict() == p.to_dict()
 
 
-def test_rari_audit_trail_scenario():
-    """RARI shape: create an episode, append segments parented to it."""
+def test_episode_segments_audit_trail_scenario():
+    """Create an episode, append segments parented to it."""
     episode = create_episode_node("agent-1", 0, title="Demo", context_note="show audit trail")
     seg1 = create_segment_node("agent-1", 1, segment_type="conversation",
                                content="user asks a question", parent_node_id=episode.node_id)

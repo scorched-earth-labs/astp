@@ -13,15 +13,10 @@
 # limitations under the License.
 """A node writer must persist every field its model declares.
 
-`create_segment_node` dropped four of SegmentNode's twelve fields —
-content_text, retention_tier, signal_versions_read, pending_hitl_ref. The model
-said the data existed; the graph did not have it; nothing failed. A consumer
-that needed any of them had no option but to bypass the adapter and hand-write
-Cypher, which is what downstream did, and which is how a "conforming" write
-path quietly stops being the write path.
-
-Same shape as the WIL operation register: a declaration and its implementation
-kept in sync by hand, with no mechanism to notice when they diverge.
+A field the model carries but the writer does not persist is a silently
+lossy node: the model says the data exists, the graph does not have it, and
+nothing fails. These tests compare each model's declared fields with the
+parameters its writer sends, so the two cannot diverge unnoticed.
 """
 from __future__ import annotations
 
@@ -102,7 +97,7 @@ class TestSignalWriterParity:
 
 
 class TestCodicilWriterParity:
-    """create_codicil_node had no implementation at all until now."""
+    """create_codicil_node persists every CodicilNode field."""
 
     BODY = _writer_body("create_codicil_node", "create_exclusion_record")
 
@@ -135,7 +130,7 @@ class TestCodicilWriterParity:
 
 
 class TestClosureRecordWriterParity:
-    """create_closure_record_node had no implementation until now."""
+    """create_closure_record_node persists every EpisodeClosureRecord field."""
 
     BODY = _writer_body("create_closure_record_node", "create_codicil_node")
 
@@ -152,7 +147,7 @@ class TestClosureRecordWriterParity:
         assert missing == [], f"declared but never SET on the node: {missing}"
 
     def test_links_closure_to_episode(self):
-        """Edge direction is closure -> episode, matching the live graph."""
+        """Edge direction is closure -> episode."""
         assert "SEALS_EPISODE" in self.BODY
         assert "(cl)-[:SEALS_EPISODE" in self.BODY
 
@@ -215,7 +210,7 @@ class TestAttachmentWriterParity:
 
 
 class TestAmendmentLinkWriterParity:
-    """The last abstract adapter method that had no implementation."""
+    """create_amendment_link_node persists every AmendmentLink field."""
 
     BODY = _writer_body("create_amendment_link_node", "create_attachment_node")
 
@@ -250,11 +245,8 @@ class TestAmendmentLinkWriterParity:
 class TestAdapterSurfaceComplete:
     """Every abstract adapter method should have a Neo4j implementation.
 
-    Four were missing when this work started — create_codicil,
-    create_closure_record, update_episode_status and create_amendment_link —
-    and each one is why some consumer hand-wrote Cypher instead of calling the
-    adapter. A declared-but-unimplemented method is worse than an absent one:
-    it looks like a supported path.
+    A declared-but-unimplemented method is worse than an absent one: it
+    looks like a supported path.
     """
 
     #: Implementations whose names diverge from the abstract method.

@@ -12,19 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol — Cognitive persistence for multi-agent systems.
+ASTP (AI State Tree Protocol) — cognitive persistence for multi-agent systems.
 
-Bring your own cognitive architecture. Ariadne handles the persistence,
+Bring your own cognitive architecture. ASTP handles the persistence,
 integrity verification, and coordination of agent state transitions.
 
-Core modules:
-    astp.core.schema         — Episode/Segment/Signal models, governance rules G1-G9
-    astp.core.merkle         — Adaptive Merkle tree (integrity verification)
-    astp.core.crystallization — Crystallization delta state machine
-    astp.core.wil            — Write Intent Log (cross-system write coordination)
-
-Adapters:
-    astp.adapters.neo4j      — Reference implementation (Neo4j graph database)
+Packages:
+    astp.protocol            — layer-generic primitives: CognitiveNode, leaf hash,
+                               Merkle proofs, governance, keys, witness, anchor
+    astp.nodes               — node-type instantiations (episode, segment) and the
+                               governed node factory
+    astp.core                — episode schema and governance rules, adaptive Merkle
+                               tree, crystallization, Write Intent Log, branching,
+                               grouping, cross-episode linking, workflow execution
+    astp.adapters            — AriadneAdapter interface
+    astp.adapters.neo4j      — reference implementation (Neo4j graph database)
 """
 
 __version__ = "0.2.0"
+
+# The SPEC.md version this package implements.
+PROTOCOL_VERSION = "4.3.0"

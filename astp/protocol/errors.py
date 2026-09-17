@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Exception Hierarchy
+ASTP — Exception Hierarchy
 
 Base exceptions for all protocol-level errors. These are structural
 errors indicating protocol non-conformance, not application errors.
@@ -20,7 +20,7 @@ errors indicating protocol non-conformance, not application errors.
 
 
 class AriadneProtocolError(Exception):
-    """Base exception for all Ariadne v2 protocol violations."""
+    """Base exception for all ASTP protocol violations."""
     pass
 
 

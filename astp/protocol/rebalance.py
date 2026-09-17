@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Rebalance Event
+ASTP — Rebalance Event
 
 First-class audit record for tree rebalancing operations.
 Rebalancing modifies tree_leaf_index values without changing content —
@@ -23,12 +23,12 @@ The root-preservation invariant: pre_rebalance_root MUST equal
 post_rebalance_root for a correct rebalance. If they differ, the
 rebalance was corrupting (content was modified, not just restructured).
 
-Per v2 Synthesis Section 2.3: RebalanceEventNode is the forensically
-sensitive record that proves a rebalance was legitimate.
+RebalanceEventNode is the forensically sensitive record that proves a
+rebalance was legitimate (SPEC §14).
 """
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, model_validator

@@ -12,15 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Cross-Episode Linking — Amendment v2.0 schema primitives.
+Cross-Episode Linking — SPEC §20 Part I schema primitives.
 
 Defines the `EpisodeLink` node and its supporting enums, governance, and
 content-hash computation. This is the protocol-level type module — adapter
 modules import from here, never the reverse.
 
-The link types and their mutual-exclusivity rules are per Amendment v2.0 §3.
+The link types and their mutual-exclusivity rules are per SPEC §20 →3.
 The content-hash preimage excludes `quarantine_resolved_at` and
-`quarantine_resolution` per Amendment v2.0 §2 — resolution fields record
+`quarantine_resolution` per SPEC §20 →2 — resolution fields record
 lifecycle events after link creation and would otherwise invalidate the
 hash on every quarantine close. The audit log is the authoritative record
 of quarantine resolutions; the content hash commits to the link as
@@ -47,7 +47,7 @@ from astp.core.hash_canonical import hash_preimage
 
 
 class LinkType(str, Enum):
-    """Cross-episode link vocabulary — Amendment v2.0 §3.
+    """Cross-episode link vocabulary — SPEC §20 →3.
 
     Mutual exclusivity (a single (source, target) pair cannot carry both):
       - CONTINUES_FROM ⊕ SUPERSEDES
@@ -68,9 +68,9 @@ class LinkType(str, Enum):
 
 
 class LinkHealthState(str, Enum):
-    """Lifecycle state of a cross-episode link — Amendment v2.0 §6.
+    """Lifecycle state of a cross-episode link — SPEC §20 →6.
 
-    State transitions are specified in the amendment §6 state machine. The
+    State transitions are specified in the SPEC §20 →6 state machine. The
     QUARANTINED state requires explicit human review for exit; there is no
     automatic transition to BROKEN.
     """
@@ -83,7 +83,7 @@ class LinkHealthState(str, Enum):
 
 
 class QuarantineResolution(str, Enum):
-    """Terminal resolution of a quarantined link — Amendment v2.0 §11.3.1.
+    """Terminal resolution of a quarantined link — SPEC §20 →11.3.1.
 
     Set when a quarantine exits. CONFIRMED returns the link to VALID;
     DISSOLVED transitions to BROKEN; ESCALATED keeps the link in
@@ -97,7 +97,7 @@ class QuarantineResolution(str, Enum):
 
 
 class SignalType(str, Enum):
-    """Inference signal types — Amendment v2.0 §4.
+    """Inference signal types — SPEC §20 →4.
 
     The protocol enumerates the signal types that may contribute to a
     candidate's composite score. The combination (weights, composite
@@ -131,7 +131,7 @@ class Signal(BaseModel):
 
 
 class EpisodeLink(BaseModel):
-    """A typed cross-episode link — Amendment v2.0 §2.
+    """A typed cross-episode link — SPEC §20 →2.
 
     Identity fields (link_id, source_episode, target_episode, created_at,
     created_by) are immutable. Inference-provenance fields are immutable
@@ -146,7 +146,7 @@ class EpisodeLink(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     created_by: str  # agent_id
 
-    # Semantic characterization — Gap 1
+    # Semantic characterization — SPEC §20 →2
     link_type: LinkType
     link_strength: float = Field(ge=0.0, le=1.0)  # 0.0 = no relationship, 1.0 = near-identical
     is_inferred: bool                              # true = system-generated; false = human-asserted
@@ -162,7 +162,7 @@ class EpisodeLink(BaseModel):
     source_version: Optional[str] = None           # SemVer of source at link creation
     target_version: Optional[str] = None           # SemVer of target at link creation
 
-    # Quarantine — Gap 4; resolved_at + resolution EXCLUDED from content_hash
+    # Quarantine — SPEC §20 →2; resolved_at + resolution EXCLUDED from content_hash
     quarantine_reason: Optional[str] = None
     quarantined_at: Optional[datetime] = None
     quarantine_resolved_at: Optional[datetime] = None
@@ -175,7 +175,7 @@ class EpisodeLink(BaseModel):
 # ── Governance ───────────────────────────────────────────────────────────────
 
 
-# Per Amendment v2.0 §3 mutual exclusivity table. Each entry is an unordered
+# Per SPEC §20 →3 mutual exclusivity table. Each entry is an unordered
 # pair {LinkType, LinkType} that cannot both exist on a single (source,
 # target) pair. Checked by enforce_link_mutual_exclusivity.
 _MUTUALLY_EXCLUSIVE_LINK_TYPES: frozenset[frozenset[LinkType]] = frozenset({
@@ -193,7 +193,7 @@ def enforce_link_mutual_exclusivity(
     existing_link_types_for_pair: list[LinkType],
 ) -> None:
     """Check whether `new_link_type` can coexist with existing types on the
-    same (source, target) pair, per Amendment v2.0 §3.
+    same (source, target) pair, per SPEC §20 →3.
 
     Raises LinkGovernanceError on violation. Returns None on success.
 
@@ -218,7 +218,7 @@ def enforce_link_mutual_exclusivity(
 # order. Mutable health-state fields are included so that drift detection
 # can be cryptographically tied to the link's anchor state at write time.
 # `quarantine_resolved_at` and `quarantine_resolution` are EXCLUDED per
-# Amendment v2.0 §2 hash preimage note.
+# SPEC §20 →2 hash preimage note.
 _HASH_PREIMAGE_FIELDS: tuple[str, ...] = (
     "link_id",
     "source_episode",
@@ -244,7 +244,7 @@ def compute_episode_link_content_hash(link: EpisodeLink) -> str:
     """SHA3-256 of the EpisodeLink canonical preimage.
 
     Excludes `quarantine_resolved_at` and `quarantine_resolution` per
-    Amendment v2.0 §2 — these are mutable lifecycle annotations whose
+    SPEC §20 →2 — these are mutable lifecycle annotations whose
     integrity lives in the audit log, not the content hash.
 
     Canonicalization rules (UTC ISO 8601 datetimes, repr() floats, etc.)
@@ -290,7 +290,7 @@ class LinkAcceptedDelta(BaseModel):
 
 
 class LinkProposedDelta(BaseModel):
-    """Forward delta for `CognitiveDeltaType.LINK_PROPOSED` (Amendment §5).
+    """Forward delta for `CognitiveDeltaType.LINK_PROPOSED` (SPEC §20 →5).
 
     Fires when discovery surfaces a candidate at or above
     DISCOVERY_THRESHOLD but below AUTO_ACCEPT_THRESHOLD — i.e., the
@@ -338,7 +338,7 @@ class LinkRejectedDelta(BaseModel):
 
 
 class CandidateRejectedDelta(BaseModel):
-    """Forward delta for `CognitiveDeltaType.CANDIDATE_REJECTED` (Amendment §5).
+    """Forward delta for `CognitiveDeltaType.CANDIDATE_REJECTED` (SPEC §20 →5).
 
     Fires when discovery scores a candidate strictly BELOW
     DISCOVERY_THRESHOLD. The candidate is NOT surfaced for human review;
@@ -358,7 +358,7 @@ class CandidateRejectedDelta(BaseModel):
 
 
 class RejectionReason(str, Enum):
-    """Structured rejection reasons per Amendment v2.0 §5.
+    """Structured rejection reasons per SPEC §20 →5.
 
     Used by LinkRejectedDelta — implementations should pick the most
     specific value. NOT_RELATED and LOW_CONFIDENCE are the calibration-
@@ -489,7 +489,7 @@ def assert_episode_link(
 #
 # These operations emit audit-only events. None create EpisodeLink nodes.
 # They feed the calibration loop and (for LINK_PROPOSED) the human-review
-# queue. See Amendment v2.0 §5 and §12.2 (audit-the-decision pattern).
+# queue. See SPEC §20 →5 and →12.2 (audit-the-decision pattern).
 
 
 def propose_link_candidate(

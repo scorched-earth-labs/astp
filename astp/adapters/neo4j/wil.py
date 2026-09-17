@@ -23,7 +23,6 @@ This module handles only the database operations.
 """
 
 import logging
-import os
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -238,7 +237,7 @@ async def execute_episode_create(
     post_state_hash: str = "",
 ) -> str:
     """
-    Coordinated write for EPISODE_CREATE (SPEC S12.4, Tier 1).
+    Coordinated write for EPISODE_CREATE (SPEC §12.4, Tier 1).
 
     Returns intent_id.
 
@@ -294,20 +293,20 @@ async def execute_consultation_commit(
     post_state_hash: str = "",
 ) -> str:
     """
-    Coordinated write for CONSULTATION_COMMIT (SPEC §12.4, Tier 2).
+    Coordinated write for CONSULTATION_COMMIT (SPEC §12.4.1, Tier 1).
 
     Returns intent_id.
 
-    Tier 2, not Tier 1: the consultation, its exchange entries and the
-    participation record all land in one authoritative store, so there is no
-    cross-store ordering to protect. A single completed entry at commit is the
-    correct form (G-38).
+    Tier 1 although everything lands in one authoritative store: the write
+    spans the consultation, its exchange entries and the participation
+    record, so an interruption can leave recoverable partial work — which is
+    what the tier turns on, not store count (SPEC §12.4).
 
     Entries are written in sequence order because each one's `previous_hash`
     references the prior entry's `content_hash` — writing them out of order
     would build the chain backwards and G-8 exists to catch exactly that.
 
-    `participant` is the consulted agent's record (D3) and is optional: a
+    `participant` is the consulted agent's record and is optional: a
     consultation with no distinct consulted episode has none.
     """
     if not ARIADNE_ENABLED:
@@ -395,14 +394,11 @@ async def execute_codicil_append(
     post_state_hash: str = "",
 ) -> str:
     """
-    Coordinated write for CODICIL_APPEND (SPEC S12.4, Tier 1).
+    Coordinated write for CODICIL_APPEND (SPEC §12.4, Tier 1).
 
     Returns intent_id.
 
-    Delegates to `create_codicil_node`, which until now did not exist — the
-    adapter interface declared `create_codicil` abstract and no Neo4j
-    implementation was ever written, so consumers hand-rolled both the node and
-    its ledger entry. That is the gap this closes.
+    Delegates the node write to `create_codicil_node`.
 
     `post_state_hash` defaults to the codicil's own content_hash: a codicil is
     appended rather than integrated, so the meaningful commitment is to the
@@ -448,7 +444,7 @@ async def execute_episode_archive(
     post_state_hash: str = "",
 ) -> str:
     """
-    Coordinated write for EPISODE_ARCHIVE (SPEC S12.4, Tier 1).
+    Coordinated write for EPISODE_ARCHIVE (SPEC §12.4, Tier 1).
 
     Returns intent_id.
 
@@ -504,7 +500,7 @@ async def execute_crystallization(
     post_state_hash: str = "",
 ) -> str:
     """
-    Coordinated write for CRYSTALLIZATION (SPEC S12.4, Tier 1).
+    Coordinated write for CRYSTALLIZATION (SPEC §12.4, Tier 1).
 
     Returns intent_id, or "" if the crystallization lock could not be acquired.
 
@@ -575,7 +571,7 @@ async def execute_episode_close(
     post_state_hash: str = "",
 ) -> str:
     """
-    Coordinated write for EPISODE_CLOSE (SPEC S12.4, Tier 1).
+    Coordinated write for EPISODE_CLOSE (SPEC §12.4, Tier 1).
 
     Returns intent_id.
 
@@ -684,7 +680,7 @@ async def execute_segment_commit(
     is_provisional: bool = False,
 ) -> str:
     """
-    Coordinated write for SEGMENT_COMMIT (SPEC S12.4, Tier 1).
+    Coordinated write for SEGMENT_COMMIT (SPEC §12.4, Tier 1).
 
     Blob write must be done by caller BEFORE calling this function.
     Returns intent_id.
@@ -694,10 +690,6 @@ async def execute_segment_commit(
     is deliberate: the segment writer enforces G-1 and the crystallization lock
     guard, and duplicating its MERGE here would silently bypass both. A
     coordinated write must not be a way around governance.
-
-    Prior to this function, segment commits were the one core spine operation
-    with no ledger coverage — callers wrote the segment directly, and the
-    absence of a WIL entry was indistinguishable from a lost one.
     """
     if not ARIADNE_ENABLED:
         return ""

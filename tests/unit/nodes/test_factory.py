@@ -18,6 +18,11 @@ Covers the one governed creation path shared by every node type: governance
 the position-binding leaf hash, episode delegation, and the adopter-facing
 register_node_type extensibility hook.
 """
+import subprocess
+import sys
+from pathlib import Path
+from uuid import uuid4
+
 import pytest
 
 from astp.core.schema import sha3_256
@@ -64,13 +69,39 @@ def test_unregistered_type_rejected_by_governance():
         )
 
 
-def test_register_node_type_enables_creation():
-    assert not REGISTRY.is_registered("unit_test_custom_type")
-    defn = register_node_type("unit_test_custom_type", "Unit Test Custom")
-    assert defn.type_id == "unit_test_custom_type"
-    assert REGISTRY.is_registered("unit_test_custom_type")
-    n = create_node("unit_test_custom_type", agent_id="a", sequence_index=2, payload=_episode_payload())
-    assert n.node_type == "unit_test_custom_type" and n.leaf_hash
+@pytest.fixture
+def custom_type_id():
+    """A type id unique to this test run, removed from the global registry afterwards.
+
+    REGISTRY is a process-wide singleton with no public unregister, so the
+    test must not depend on (or leave behind) a fixed name.
+    """
+    type_id = f"unit_test_custom_type_{uuid4().hex}"
+    yield type_id
+    REGISTRY._registry.pop(type_id, None)
+
+
+def test_register_node_type_enables_creation(custom_type_id):
+    assert not REGISTRY.is_registered(custom_type_id)
+    defn = register_node_type(custom_type_id, "Unit Test Custom")
+    assert defn.type_id == custom_type_id
+    assert REGISTRY.is_registered(custom_type_id)
+    n = create_node(custom_type_id, agent_id="a", sequence_index=2, payload=_episode_payload())
+    assert n.node_type == custom_type_id and n.leaf_hash
+
+
+def test_importing_astp_nodes_registers_builtin_types():
+    """``import astp.nodes`` alone must make every built-in node type creatable."""
+    code = (
+        "import astp.nodes\n"
+        "from astp.protocol.registry import REGISTRY\n"
+        "print(sorted(REGISTRY.list_types()))\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True,
+        cwd=Path(__file__).resolve().parents[3],
+    )
+    assert out.stdout.strip() == "['episode', 'segment']"
 
 
 def test_payload_validate_is_enforced():

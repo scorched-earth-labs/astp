@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Merkle Tree
+ASTP — Merkle Tree
 
 Position-binding Merkle tree with domain-separated hashing and
 inclusion proof generation. Operates on pre-computed leaf hashes
@@ -27,7 +27,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel
 
-from astp.core.schema import sha3_256
+from astp.protocol.hashing import sha3_256
 
 
 def _domain_leaf(leaf_hash: str) -> str:

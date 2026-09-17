@@ -17,13 +17,10 @@ Write Intent Log (WIL) — cross-system write coordination standard.
 Protocol-level definitions: enums, models, write ordering invariant,
 TTL policy, provisional state guard. Database-agnostic.
 
-Three storage invariants from OQ-D01 resolution:
+Three storage invariants (SPEC §12.1):
 1. Redis as ephemeral coordinator, not persistent store
 2. Blob -> Neo4j -> QDrant write ordering (formal invariant)
 3. Provisional state never enters persistent storage
-
-Spec 8 of Phase 2 Ariadne Persistence Layer.
-Source: CLO-CONSOLIDATED-1.1 S6, S8; OQ-D01 Resolution.
 """
 
 import logging
@@ -35,14 +32,14 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from astp.core.schema import AriadneGovernanceError, sha3_256
+from astp.core.schema import AriadneGovernanceError
 
 logger = logging.getLogger(__name__)
 
 ARIADNE_ENABLED = os.getenv("ARIADNE_ENABLED", "false").lower() == "true"
 
 # PROVISIONAL_WINDOW_PENDING_EMPIRICAL_VALIDATION
-# 4 hours is the conservative upper bound per OQ-D01 resolution.
+# 4 hours is the conservative upper bound.
 # Measurement target: T_wil_p99 = P99(delta write initiated -> Neo4j write confirmed)
 PROVISIONAL_WINDOW_HOURS = float(os.getenv("ARIADNE_PROVISIONAL_WINDOW_HOURS", "4"))
 PROVISIONAL_WINDOW_SECONDS = int(PROVISIONAL_WINDOW_HOURS * 3600)
@@ -52,20 +49,9 @@ PROVISIONAL_WINDOW_SECONDS = int(PROVISIONAL_WINDOW_HOURS * 3600)
 
 class WILOperation(str, Enum):
     EPISODE_CREATE = "EPISODE_CREATE"
-    # Segment appended to the spine.
-    #
-    # NOT YET EMITTED BY THIS LIBRARY. `create_segment_node` (adapters/neo4j/
-    # writer.py) currently writes the segment directly, without declaring a
-    # write intent — segment commits are the one core spine operation with no
-    # ledger coverage. The member is defined here because the value already
-    # exists on AriadneWILEntry nodes in the field: downstream writers filled
-    # the gap out-of-band, so the vocabulary must account for it even though
-    # the coordinated write path does not exist yet.
-    #
-    # Closing that gap means giving create_segment_node the same
-    # declare_write_intent / record_store_completion treatment SIGNAL_COMMIT
-    # gets in adapters/neo4j/wil.py. Tracked separately — it is a behavioural
-    # change on the hottest write path in the protocol, not a vocabulary edit.
+    # Segment appended to the spine. The coordinated write path is
+    # `execute_segment_commit` in adapters/neo4j/wil.py; calling
+    # `create_segment_node` directly writes the segment without a ledger entry.
     SEGMENT_COMMIT = "SEGMENT_COMMIT"
     SIGNAL_COMMIT = "SIGNAL_COMMIT"
     EPISODE_SEAL = "EPISODE_SEAL"
@@ -74,15 +60,13 @@ class WILOperation(str, Enum):
     EPISODE_ARCHIVE = "EPISODE_ARCHIVE"
     EPISODE_CLOSE = "EPISODE_CLOSE"                  # Episode sealed (closure)
     CODICIL_APPEND = "CODICIL_APPEND"                # Codicil added to sealed episode
-    ATTACHMENT_COMMIT = "ATTACHMENT_COMMIT"          # External content injected (S4.7)
+    ATTACHMENT_COMMIT = "ATTACHMENT_COMMIT"          # External content injected (§4.7)
     CONSULTATION_COMMIT = "CONSULTATION_COMMIT"      # Cross-agent exchange (G-8, G-9)
-    # Branch / Fork / Merge lifecycle (SPEC S19).
+    # Branch / Fork / Merge lifecycle (SPEC §19).
     #
     # Every BFM ledger write goes through `_write_branch_wil` in
     # branch_operations.py. These members exist so that helper can take a
-    # WILOperation rather than a bare str — previously it accepted any string
-    # and eight of the ten operations it is called with were absent here, which
-    # made this enum read as the authoritative operation list without being one.
+    # WILOperation rather than a bare str.
     #
     # NOTE: these values are intentionally NOT aligned with the corresponding
     # CognitiveDeltaType names (SOLILOQUY_INIT here vs SOLILOQUY_INITIATED
@@ -121,7 +105,7 @@ class StoreLayer(str, Enum):
 
 
 class WritePhase(str, Enum):
-    """Three-phase write protocol per CLO-06 S6.3."""
+    """Three-phase write protocol (SPEC §12.2)."""
     INTENT_DECLARED = "INTENT_DECLARED"
     WRITE_EXECUTION = "WRITE_EXECUTION"
     COMPLETION = "COMPLETION"
@@ -131,7 +115,7 @@ class WritePhase(str, Enum):
 
 class WriteIntentEntry(BaseModel):
     """
-    WIL entry schema per CLO-06 S6.2.
+    WIL entry schema (SPEC §12.2).
     An incomplete entry (completed_at is null) indicates an interrupted write.
     All writes are idempotent — re-execution is safe.
     """
@@ -180,7 +164,7 @@ def enforce_write_order(stores: list[StoreLayer]) -> list[StoreLayer]:
 
 
 # ── Redis Key Schema and TTL Policy ──────────────────────────────────────────
-# Per CLO-08 S8.3: Every ariadne::* key carries an explicit TTL.
+# SPEC §12.3: every ariadne::* key carries an explicit TTL.
 
 REDIS_TTL_POLICY: dict[str, int] = {
     "ariadne::episode::{id}": 4 * 3600,                # Session lifetime max (4h)
@@ -225,7 +209,7 @@ def build_redis_merkle_key(leaf_id: str) -> str:
 
 
 # ── Provisional State Guard ──────────────────────────────────────────────────
-# Invariant 3 from OQ-D01: Provisional state never enters persistent storage.
+# Invariant 3 (SPEC §12.1): provisional state never enters persistent storage.
 
 PROVISIONAL_PERSISTENT_STORES = {StoreLayer.NEO4J, StoreLayer.QDRANT, StoreLayer.BLOB}
 

@@ -12,11 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Position-Binding Leaf Hash
+ASTP — Position-Binding Leaf Hash
 
-The authoritative leaf hash computation per Node-Generic Architecture
-Revised Section 3.1. This is the cryptographic foundation of the
-entire protocol.
+The authoritative leaf hash computation (SPEC §5.2). This is the
+cryptographic foundation of the entire protocol.
 
 The preimage includes:
   - node_id: identity
@@ -41,7 +40,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from astp.core.schema import sha3_256
+from astp.protocol.hashing import sha3_256
 
 
 def compute_leaf_hash(

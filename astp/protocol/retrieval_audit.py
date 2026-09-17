@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Retrieval Audit Record
+ASTP — Retrieval Audit Record
 
 Side-channel record of every agent retrieval operation. This is the
 read-path observability complement: WIL tracks writes, retrieval
@@ -34,7 +34,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from astp.core.schema import sha3_256
+from astp.protocol.hashing import sha3_256
 
 
 class RetrievalAuditRecord(BaseModel):

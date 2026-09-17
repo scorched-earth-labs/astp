@@ -12,11 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-ASTP Core — database-agnostic protocol definitions.
+ASTP — Hash Primitive
 
-This package contains the protocol specification as executable code:
-- Schema: node models, enums, hash functions, governance rules
-- Merkle: adaptive Merkle tree for integrity verification
-- Crystallization: delta state machine for episode lifecycle
-- WIL: Write Intent Log for cross-system write coordination
+The single SHA3-256 helper used by every hash construction in the package
+(SPEC §5.1). It lives in the protocol layer so that ``astp.protocol`` has no
+dependency on ``astp.core``; ``astp.core.schema`` re-exports it.
 """
+
+import hashlib
+
+
+def sha3_256(data: bytes) -> str:
+    """Canonical hash function for all Ariadne content hashing. Returns hex string."""
+    return hashlib.sha3_256(data).hexdigest()

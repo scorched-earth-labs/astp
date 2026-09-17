@@ -12,24 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Episode/Segment Schema — Canonical schema definition module.
+ASTP Episode/Segment Schema — Canonical schema definition module.
 
-All other Ariadne modules import from here. Defines:
-- Neo4j node type enums and Pydantic models
-- SHA3-256 hash utilities with Merkle domain separation
-- Governance rule enforcement (G-1, G-5, G-7, taxonomy)
-
-Spec 5 of Phase 2 Ariadne Persistence Layer.
-Source: CLO-CONSOLIDATED-1.1, Phase 1 Architecture Synthesis.
+All other core modules import from here. Defines:
+- Node type enums and Pydantic models (SPEC §4)
+- SHA3-256 hash utilities with Merkle domain separation (SPEC §5)
+- Governance rule enforcement (G-1, G-5, G-7, G-8, G-9, taxonomy; SPEC §6)
 """
 
-import hashlib
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
+
+# sha3_256 is defined in the protocol layer and re-exported here so that
+# ``from astp.core.schema import sha3_256`` keeps working.
+from astp.protocol.hashing import sha3_256
 
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
@@ -276,7 +276,7 @@ class ConsultationNode(BaseModel):
     """
     First-class Ariadne node representing a cross-agent consultation.
     Lives in the initiating agent's episode as a branch.
-    D2: branch event, not spine append. D4: created BEFORE exchange begins.
+    A branch event, not a spine append; created BEFORE the exchange begins.
     """
     consultation_id: UUID = Field(default_factory=uuid4)
     episode_id: UUID
@@ -315,7 +315,7 @@ class ExchangeEntry(BaseModel):
 class ConsultationParticipantNode(BaseModel):
     """
     Lightweight participation record on the CONSULTED agent's episode.
-    D3: consulted agent records participation, not the full exchange.
+    The consulted agent records participation, not the full exchange.
     """
     participant_id: UUID = Field(default_factory=uuid4)
     consultation_id: UUID
@@ -363,19 +363,15 @@ class AttachmentNode(BaseModel):
 
 class DocumentNode(BaseModel):
     """
-    LEGACY. Superseded by AttachmentNode (SPEC §4.7).
+    LEGACY. Superseded by AttachmentNode (SPEC §4.7). Not a protocol node:
+    the specification does not define it.
 
-    This docstring used to read "Protocol-level primitive: any Ariadne
-    implementation needs this." That was never true — the claim was asserted
-    here and never conferred by the specification, which did not mention this
-    node at all.
+    `drive_url` names a vendor, and `content_text` / `char_count` assume the
+    attachment is text. Neither belongs in a protocol node. What the protocol
+    needs from an attachment is narrower — episode, content hash, who attached
+    it, when — and that is AttachmentNode.
 
-    The shape shows why: `drive_url` names a vendor, and `content_text` /
-    `char_count` assume the attachment is text. Neither belongs in a protocol
-    node. What the protocol actually needs from an attachment is narrower —
-    episode, content hash, who attached it, when — and that is AttachmentNode.
-
-    Retained because implementations have live data and writers behind it.
+    Retained because implementations have stored data and writers behind it.
     New code should use AttachmentNode; the surplus fields belong on an
     implementation-side record.
     """
@@ -448,11 +444,6 @@ class AmendmentLink(BaseModel):
 
 # ── Hash Utilities ────────────────────────────────────────────────────────────
 
-def sha3_256(data: bytes) -> str:
-    """Canonical hash function for all Ariadne content hashing. Returns hex string."""
-    return hashlib.sha3_256(data).hexdigest()
-
-
 def compute_spine_hash(segment_content_hashes: list[str], spine_signal_hashes: list[str]) -> str:
     """
     Merkle spine hash over ordered segments + SPINE-placed signals.
@@ -465,7 +456,7 @@ def compute_spine_hash(segment_content_hashes: list[str], spine_signal_hashes: l
     - Configurable ordering functions
 
     For the full adaptive API (fingerprints, incremental appends, significance
-    comparison), use ignis.ariadne.adaptive_merkle.AdaptiveMerkleTree directly.
+    comparison), use astp.core.merkle.AdaptiveMerkleTree directly.
 
     Input ordering: segments by sequence_index ASC, then SPINE signals by received_at ASC.
     Domain separation: each leaf prefixed with b'LEAF:' before hashing.
@@ -499,7 +490,7 @@ def compute_spine_root_v2(segment_content_hashes: list[str], episode_id: Optiona
     segments in ``sequence_index`` order — and nothing else. Signals are not spine
     leaves (SPEC §5.6). Uses the Adaptive Merkle Tree (SPINE_ALGORITHM_VERSION 1).
     Deterministic: the only ordering key is ``sequence_index``, which is unique
-    per Episode by construction (§4.1 dual index)."""
+    per Episode by construction (SPEC §3.3 dual index)."""
     if not segment_content_hashes:
         raise ValueError("Cannot compute spine root: no segment leaves provided")
     from astp.core.merkle import compute_adaptive_spine_hash
@@ -529,8 +520,7 @@ def compute_exclusion_hash(excluded_content_hashes: list[str]) -> str:
 def compute_episode_root_hash(spine_hash: str, signal_manifest_hash: str, exclusion_hash: str) -> str:
     """
     episode_root_hash = H(NODE: spine_hash || signal_manifest_hash || exclusion_hash)
-    The three-component Episode root (SPEC §5.7; formerly internal
-    CLO-CONSOLIDATED-1.1 S5.3, published in 4.3.0).
+    The three-component Episode root (SPEC §5.7).
     """
     return sha3_256(
         b"NODE:" +
@@ -564,11 +554,7 @@ G1_FROZEN_STATES: frozenset = frozenset({
 def enforce_G1_write_guard(episode_status: EpisodeStatus) -> None:
     """Rule G-1: no segment or signal may be appended to an Episode whose record is
     fixed. Refuses in every state of ``G1_FROZEN_STATES``; codicils use their own
-    path and are not subject to this guard.
-
-    History: before SPEC 4.3.0 this guard covered only SEALING/SEALED/ARCHIVED and
-    missed CLOSED, the state the reference deployment actually seals into. One
-    post-closure append in the production corpus (2026-03-27) got through it.
+    path and are not subject to this guard (SPEC §6, G-1).
     """
     if episode_status in G1_FROZEN_STATES:
         raise AriadneGovernanceError(
@@ -596,7 +582,7 @@ def enforce_G7_triggered_edge(signal: SignalNode, has_triggered_edge: bool) -> N
 
 def validate_signal_classification(signal: SignalNode) -> None:
     """
-    Validates the dual taxonomy composition rules from CLO-03 S3.1.
+    Validates the dual taxonomy composition rules for signals.
     EPHEMERAL type + causal class requires placement=BRANCH_LEAF (not SPINE).
     STRUCTURAL type must have signal_class=causal (structural signals are by definition causal).
     """
@@ -614,7 +600,7 @@ def validate_signal_classification(signal: SignalNode) -> None:
         )
 
 
-# ── Consultation Hash Utilities (Spec 9) ────────────────────────────────────
+# ── Consultation Hash Utilities ──────────────────────────────────────────────
 
 
 def compute_exchange_chain_hash(entries: list[ExchangeEntry]) -> str:
@@ -657,7 +643,7 @@ def compute_initiation_hash(
     )
 
 
-# ── Consultation Governance Rules (Spec 9) ──────────────────────────────────
+# ── Consultation Governance Rules ────────────────────────────────────────────
 
 
 def enforce_G8_initiation_before_exchange(
@@ -680,7 +666,7 @@ def enforce_G9_resolution_requires_entries(
         )
 
 
-# ── HITL Event Node (Protocol Amendment v1.2.0) ─────────────────────────────
+# ── HITL Event Node (SPEC §4.6) ─────────────────────────────────────────────
 
 
 class HITLEventNode(BaseModel):

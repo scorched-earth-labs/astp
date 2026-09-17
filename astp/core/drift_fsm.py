@@ -13,36 +13,33 @@
 # limitations under the License.
 """ACI drift detection — derivative + hysteresis state machine (pure logic).
 
-Implements Clotho's v4 detection model (Episode e87b60f0, artifact "Ariadne ACI
-Drift: Derivative + Hysteresis Detection State Machine — v4"). Absolute per-turn
-drift is not thresholdable (EWM centroid chasing + compressed embedding space);
-the signal lives in the *rate of change* (derivative) plus *sustained elevation*,
-with a *hysteresis cooldown* to suppress re-fires.
+Absolute per-turn drift is not thresholdable (EWM centroid chasing + compressed
+embedding space); the signal lives in the *rate of change* (derivative) plus
+*sustained elevation*, with a *hysteresis cooldown* to suppress re-fires.
 
 This module is PURE: no Neo4j, no Redis, no I/O. `DriftDetectionState` is the
-working state; the caller (ignis-os) persists it in Redis between turns
-(`ariadne::drift_fsm_state::{episode_id}`) — ariadne-protocol has no Redis of its
-own. `advance_drift_fsm` is the single transition step; it mirrors the validated
-reference simulator (`ignis-os/scripts/aci_fsm_sim.py`).
+working state; the caller persists it between turns (the reference deployment
+keeps it in the ephemeral coordinator under
+`ariadne::drift_fsm_state::{episode_id}`) — this package has no coordinator of
+its own. `advance_drift_fsm` is the single transition step.
 
-Calibration (locked): DELTA_THRESHOLD=0.055, N=2, M=4, ELEVATION_FLOOR=mean+0.5σ
-over scored turns, first-content warm-up turn ignored. Source episodes:
-8b2a37e4 (α-experiment → 0.055), 7b6e79d0 (N=2), bf6c3143 (M cooldown), 615c639e
-(agent-solo filter — applied UPSTREAM in ignis-os; AGENT_WORK batches never reach
-this FSM, so every call here is an EXCHANGE turn and M counts exchanges only).
+Default calibration: DELTA_THRESHOLD=0.055, N=2, M=4, ELEVATION_FLOOR=mean+0.5σ
+over scored turns, first-content warm-up turn ignored. Callers are expected to
+filter out turns with no exchange (agent-only work batches) before calling, so
+every call here is an exchange turn and M counts exchanges only.
 """
 from __future__ import annotations
 
 import math
-from typing import Literal, Optional, Tuple
+from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 FSMState = Literal["NOMINAL", "CANDIDATE", "MATERIALIZED", "COOLDOWN"]
 
 
 class DriftFSMThresholds(BaseModel):
-    """Locked Phase-A thresholds (overridable for Phase-B tuning)."""
+    """Default thresholds (overridable for tuning)."""
     delta_threshold: float = 0.055     # derivative trigger
     n_sustained: int = 2               # turns of elevation to confirm a pivot
     m_cooldown: int = 4                # post-materialize suppression (EXCHANGE turns)
@@ -103,7 +100,7 @@ def advance_drift_fsm(
 ) -> DriftFSMResult:
     """One FSM step for one scored (EXCHANGE) turn. Returns a new state.
 
-    Pure: does not mutate `state`. Mirrors aci_fsm_sim.simulate exactly —
+    Pure: does not mutate `state`.
       - warm-up: first turn (prev None) and the first computable delta are ignored
       - NOMINAL → CANDIDATE on Δdrift > delta_threshold
       - CANDIDATE → MATERIALIZED on sustain-drift > floor for N turns; → NOMINAL if it decays
@@ -111,7 +108,7 @@ def advance_drift_fsm(
 
     `drift` is always vs the live (EWM) centroid — it drives the derivative
     trigger and the running floor. `drift_vs_anchor` (caller-supplied, the pre-pivot
-    "where we were" centroid — Clotho's ruling, Episode 839c5f91) is used for the
+    "where we were" centroid) is used for the
     SUSTAIN gate only, so a jump-and-park pivot doesn't read as decayed when the
     live centroid chases it. None → sustain falls back to `drift` (back-compat).
     The protocol stays embedding-agnostic: the caller owns the centroid snapshot

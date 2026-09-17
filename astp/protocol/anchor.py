@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Transparency Log Anchoring
+ASTP — Transparency Log Anchoring
 
 Provides external, independently verifiable proof that a node's
 state existed at a specific point in time. Anchoring occurs at
@@ -29,12 +29,11 @@ Per IMPLEMENTATION-PHASE3.md Section 4.
 import json
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
-from uuid import UUID, uuid4
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from astp.core.schema import sha3_256
+from astp.protocol.hashing import sha3_256
 
 
 class AnchorCommitment(BaseModel):

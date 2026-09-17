@@ -12,20 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Neo4j write operations.
+ASTP Neo4j write operations.
 All writes are gated by ARIADNE_ENABLED feature flag.
-
-Spec 5 of Phase 2 Ariadne Persistence Layer.
 
 IMPORTANT: Neo4j session.run() signature is run(query, parameters=None, **kwargs).
 All parameters are passed as an explicit dict (positional arg) to avoid collisions
-with session.run()'s own 'parameters' argument. See bdi.py commit history for context.
+with session.run()'s own 'parameters' argument.
 """
 
 import logging
 import os
 from typing import List, Optional
-from uuid import UUID
 
 from astp.core.schema import (
     AmendmentLink,
@@ -69,12 +66,12 @@ SCHEMA_CONSTRAINTS = [
     "CREATE CONSTRAINT ariadne_signal_id IF NOT EXISTS FOR (sig:AriadneSignal) REQUIRE sig.signal_id IS UNIQUE",
     "CREATE CONSTRAINT ariadne_seal_id IF NOT EXISTS FOR (seal:AriadneSeal) REQUIRE seal.seal_id IS UNIQUE",
     "CREATE CONSTRAINT ariadne_exclusion_id IF NOT EXISTS FOR (ex:AriadneExclusion) REQUIRE ex.exclusion_id IS UNIQUE",
-    # Spec 7: Crystallization delta uniqueness
+    # Crystallization delta uniqueness
     "CREATE CONSTRAINT ariadne_crystallization_delta_id IF NOT EXISTS FOR (cd:AriadneCrystallizationDelta) REQUIRE cd.delta_id IS UNIQUE",
-    # Spec 8: WIL and manifest uniqueness
+    # WIL and manifest uniqueness
     "CREATE CONSTRAINT ariadne_wil_intent_id IF NOT EXISTS FOR (w:AriadneWILEntry) REQUIRE w.intent_id IS UNIQUE",
     "CREATE CONSTRAINT ariadne_manifest_episode_id IF NOT EXISTS FOR (m:AriadneSignalManifest) REQUIRE m.episode_id IS UNIQUE",
-    # Spec 9: Consultation Node uniqueness
+    # Consultation Node uniqueness
     "CREATE CONSTRAINT ariadne_consultation_id IF NOT EXISTS FOR (c:AriadneConsultation) REQUIRE c.consultation_id IS UNIQUE",
     "CREATE CONSTRAINT ariadne_exchange_entry_id IF NOT EXISTS FOR (ex:AriadneExchangeEntry) REQUIRE ex.entry_id IS UNIQUE",
     "CREATE CONSTRAINT ariadne_consultation_participant_id IF NOT EXISTS FOR (cp:AriadneConsultationParticipant) REQUIRE cp.participant_id IS UNIQUE",
@@ -84,7 +81,7 @@ SCHEMA_CONSTRAINTS = [
     "CREATE CONSTRAINT ariadne_codicil_id IF NOT EXISTS FOR (cod:AriadneCodicil) REQUIRE cod.codicil_id IS UNIQUE",
     "CREATE CONSTRAINT ariadne_closure_id IF NOT EXISTS FOR (cl:AriadneClosureRecord) REQUIRE cl.closure_id IS UNIQUE",
     "CREATE CONSTRAINT ariadne_amendment_id IF NOT EXISTS FOR (am:AriadneAmendment) REQUIRE am.amendment_id IS UNIQUE",
-    # HITL Event Nodes (Protocol Amendment v1.2.0)
+    # HITL Event Nodes (SPEC §4.6)
     "CREATE CONSTRAINT ariadne_hitl_event_id IF NOT EXISTS FOR (h:AriadneHITLEvent) REQUIRE h.hitl_event_id IS UNIQUE",
     # Branch/Fork/Merge (Phase 1)
     "CREATE CONSTRAINT ariadne_branch_point_id IF NOT EXISTS FOR (bp:AriadneBranchPoint) REQUIRE bp.branch_point_id IS UNIQUE",
@@ -117,17 +114,17 @@ SCHEMA_INDEXES = [
     "CREATE INDEX ariadne_signal_type IF NOT EXISTS FOR (sig:AriadneSignal) ON (sig.signal_type)",
     "CREATE INDEX ariadne_signal_class IF NOT EXISTS FOR (sig:AriadneSignal) ON (sig.signal_class)",
     "CREATE INDEX ariadne_signal_status IF NOT EXISTS FOR (sig:AriadneSignal) ON (sig.signal_status)",
-    # Spec 6: BDI Bridge indexes for intention-episode linkage
+    # BDI Bridge indexes for intention-episode linkage
     "CREATE INDEX ariadne_intention_episode IF NOT EXISTS FOR (i:Intention) ON (i.episode_id)",
     "CREATE INDEX ariadne_intention_status IF NOT EXISTS FOR (i:Intention) ON (i.status)",
     "CREATE INDEX ariadne_intention_key IF NOT EXISTS FOR (i:Intention) ON (i.intention_key)",
-    # Spec 7: Crystallization delta indexes
+    # Crystallization delta indexes
     "CREATE INDEX ariadne_crystallization_episode IF NOT EXISTS FOR (cd:AriadneCrystallizationDelta) ON (cd.episode_id)",
     "CREATE INDEX ariadne_crystallization_chain_position IF NOT EXISTS FOR (cd:AriadneCrystallizationDelta) ON (cd.chain_position)",
-    # Spec 8: WIL indexes
+    # WIL indexes
     "CREATE INDEX ariadne_wil_episode IF NOT EXISTS FOR (w:AriadneWILEntry) ON (w.episode_id)",
     "CREATE INDEX ariadne_wil_status IF NOT EXISTS FOR (w:AriadneWILEntry) ON (w.status)",
-    # Spec 9: Consultation indexes
+    # Consultation indexes
     "CREATE INDEX ariadne_consultation_episode IF NOT EXISTS FOR (c:AriadneConsultation) ON (c.episode_id)",
     "CREATE INDEX ariadne_consultation_type IF NOT EXISTS FOR (c:AriadneConsultation) ON (c.consultation_type)",
     "CREATE INDEX ariadne_consultation_initiating_agent IF NOT EXISTS FOR (c:AriadneConsultation) ON (c.initiating_agent)",
@@ -140,7 +137,7 @@ SCHEMA_INDEXES = [
     "CREATE INDEX ariadne_codicil_episode IF NOT EXISTS FOR (cod:AriadneCodicil) ON (cod.episode_id)",
     "CREATE INDEX ariadne_closure_episode IF NOT EXISTS FOR (cl:AriadneClosureRecord) ON (cl.episode_id)",
     "CREATE INDEX ariadne_amendment_source IF NOT EXISTS FOR (am:AriadneAmendment) ON (am.source_episode_id)",
-    # HITL Event indexes (Protocol Amendment v1.2.0)
+    # HITL Event indexes (SPEC §4.6)
     "CREATE INDEX ariadne_hitl_episode IF NOT EXISTS FOR (h:AriadneHITLEvent) ON (h.episode_id)",
     "CREATE INDEX ariadne_hitl_status IF NOT EXISTS FOR (h:AriadneHITLEvent) ON (h.status)",
     "CREATE INDEX ariadne_hitl_gate_type IF NOT EXISTS FOR (h:AriadneHITLEvent) ON (h.gate_type)",
@@ -173,14 +170,14 @@ SCHEMA_INDEXES = [
     # Phase D — Orphan detection (fork_id already indexed via its uniqueness constraint)
     "CREATE INDEX ariadne_fork_orphan_marker_origin IF NOT EXISTS FOR (m:AriadneForkOrphanMarker) ON (m.origin_episode_id)",
     "CREATE INDEX ariadne_fork_orphan_marker_class IF NOT EXISTS FOR (m:AriadneForkOrphanMarker) ON (m.orphan_class)",
-    # Cross-Episode Linking (Amendment v2.0). Label is `AriadneEpisodeLink`
-    # for consistency with the Ariadne* prefix convention; the amendment's
+    # Cross-Episode Linking (SPEC §20). Label is `AriadneEpisodeLink`
+    # for consistency with the Ariadne* prefix convention; the spec's
     # bare `EpisodeLink` notation is the protocol-level abstraction.
     "CREATE CONSTRAINT ariadne_episode_link_id IF NOT EXISTS FOR (l:AriadneEpisodeLink) REQUIRE l.link_id IS UNIQUE",
     "CREATE INDEX ariadne_episode_link_health IF NOT EXISTS FOR (l:AriadneEpisodeLink) ON (l.health_state)",
     "CREATE INDEX ariadne_episode_link_source IF NOT EXISTS FOR (l:AriadneEpisodeLink) ON (l.source_episode)",
     "CREATE INDEX ariadne_episode_link_target IF NOT EXISTS FOR (l:AriadneEpisodeLink) ON (l.target_episode)",
-    # Episode Grouping (Amendment v2.0 §7-§8). Same labeling convention.
+    # Episode Grouping (SPEC §20 →7-→8). Same labeling convention.
     "CREATE CONSTRAINT ariadne_membership_record_id IF NOT EXISTS FOR (m:AriadneMembershipRecord) REQUIRE m.record_id IS UNIQUE",
     "CREATE INDEX ariadne_membership_episode IF NOT EXISTS FOR (m:AriadneMembershipRecord) ON (m.episode_id)",
     "CREATE INDEX ariadne_membership_group IF NOT EXISTS FOR (m:AriadneMembershipRecord) ON (m.group_id)",
@@ -216,7 +213,7 @@ async def initialize_ariadne_schema(driver) -> None:
         for index in SCHEMA_INDEXES:
             await session.run(index)
         await session.run(SCHEMA_VERSION_SEED)
-    logger.info("Ariadne Neo4j schema initialized (5 constraints, 9 indexes, schema version seed)")
+    logger.info("Ariadne Neo4j schema initialized (constraints, indexes, schema version seed)")
 
 
 # ── Node Creation ─────────────────────────────────────────────────────────────
@@ -281,19 +278,13 @@ async def create_segment_node(driver, segment: SegmentNode, episode_status: Epis
         return
     enforce_G1_write_guard(episode_status)  # Rule G-1
     from astp.core.crystallization import enforce_crystallization_lock_guard
-    enforce_crystallization_lock_guard(episode_status.value)  # Spec 7
-    # Every field SegmentNode declares is persisted. Four used to be dropped
-    # here — content_text, retention_tier, signal_versions_read and
-    # pending_hitl_ref — so the adapter silently wrote a lossy node: the model
-    # said the data existed, the graph did not have it, and nothing failed.
-    #
-    # None of them are decorative. content_text is the durable content readers
-    # reconstruct an episode from; retention_tier separates PERSISTENT
-    # conversation from EPHEMERAL evaluation records; signal_versions_read is
-    # the SPEC S4.5 stale-read audit; pending_hitl_ref is the SPEC S4.6
-    # advisory gate that marks a segment CONDITIONALLY_VALID. A consumer that
-    # needed any of them had to bypass this function and write its own Cypher,
-    # which is exactly what downstream did.
+    enforce_crystallization_lock_guard(episode_status.value)  # crystallization lock
+    # Every field SegmentNode declares is persisted — a field the model
+    # carries but the graph lacks is a silently lossy node. content_text is
+    # the durable content readers reconstruct an episode from; retention_tier
+    # separates PERSISTENT conversation from EPHEMERAL evaluation records;
+    # signal_versions_read is the SPEC §4.5 stale-read audit; pending_hitl_ref
+    # is the SPEC §4.6 advisory gate that marks a segment CONDITIONALLY_VALID.
     params = {
         "segment_id": str(segment.segment_id),
         "episode_id": str(segment.episode_id),
@@ -346,7 +337,7 @@ async def create_signal_node(
         return
     enforce_G1_write_guard(episode_status)  # Rule G-1
     from astp.core.crystallization import enforce_crystallization_lock_guard
-    enforce_crystallization_lock_guard(episode_status.value)  # Spec 7
+    enforce_crystallization_lock_guard(episode_status.value)  # crystallization lock
     enforce_G5_placement_rationale(signal)  # Rule G-5
     validate_signal_classification(signal)  # Taxonomy rules
     has_triggered = bool(triggered_segment_ids)
@@ -523,13 +514,7 @@ async def update_episode_status(driver, episode_id, status, **fields) -> None:
 async def create_closure_record_node(driver, closure: EpisodeClosureRecord) -> None:
     """Persist the structured record generated when an episode is closed.
 
-    Another abstract-only adapter method (`create_closure_record`) with no
-    implementation, so :AriadneClosureRecord had no writer in the protocol —
-    the same gap as codicils, and for the same reason it was hand-rolled
-    downstream.
-
-    The SEALS_EPISODE edge runs closure -> episode, matching the direction
-    already in the live graph.
+    The SEALS_EPISODE edge runs closure -> episode.
     """
     if not _ariadne_guard():
         return
@@ -579,14 +564,12 @@ async def create_closure_record_node(driver, closure: EpisodeClosureRecord) -> N
 async def create_consultation_node(driver, consultation: ConsultationNode) -> None:
     """Persist a consultation — a cross-agent exchange within an Episode.
 
-    Consultation is protocol surface: G-8 and G-9 have governed it since v1,
-    and compute_consultation_node_hash / compute_exchange_chain_hash are
-    protocol hash functions. v3.5.0 removed its WIL operations on the premise
-    that the protocol does not define consultation; that premise contradicted
-    the governance section and is corrected in 4.2.0.
+    Consultation is protocol surface: G-8 and G-9 govern it, and
+    compute_consultation_node_hash / compute_exchange_chain_hash are
+    protocol hash functions.
 
-    G-1 is not enforced: a consultation is a branch event, not a spine append
-    (D2), so it does not extend the segment chain.
+    G-1 is not enforced: a consultation is a branch event, not a spine append,
+    so it does not extend the segment chain.
     """
     if not _ariadne_guard():
         return
@@ -627,8 +610,8 @@ async def create_consultation_node(driver, consultation: ConsultationNode) -> No
               c.consultation_node_hash   = $consultation_node_hash,
               c.schema_version           = $schema_version
         """, params)
-        # INITIATED: the consultation lives in the INITIATING agent's episode
-        # (D2); the consulted agent records a participation node instead (D3).
+        # INITIATED: the consultation lives in the INITIATING agent's episode;
+        # the consulted agent records a participation node instead.
         await session.run("""
             MATCH (e:AriadneEpisode {episode_id: $episode_id})
             MATCH (c:AriadneConsultation {consultation_id: $consultation_id})
@@ -693,7 +676,7 @@ async def create_consultation_participant_node(
 ) -> None:
     """Record participation on the CONSULTED agent's episode.
 
-    D3: the consulted agent records that it participated, not the full
+    The consulted agent records that it participated, not the full
     exchange — the exchange belongs to the initiating agent's episode. Two
     records of one consultation from opposite sides, neither duplicating the
     other.
@@ -739,11 +722,6 @@ async def create_consultation_participant_node(
 
 async def create_amendment_link_node(driver, amendment: AmendmentLink) -> None:
     """Link a new Episode to a sealed source Episode.
-
-    The last of the abstract adapter methods that was never implemented.
-    `AriadneAdapter.create_amendment_link` was declared and left `...`, so
-    consumers that needed to reopen a sealed episode wrote their own node and
-    edges — the same gap as codicils, closure records and attachments.
 
     Writes the node and both edges: AMENDS to the source, PRODUCES to the new
     episode. Two edges rather than one because the link is not symmetric — a
@@ -851,11 +829,6 @@ async def create_attachment_node(driver, attachment: AttachmentNode) -> None:
 async def create_codicil_node(driver, codicil: CodicilNode) -> None:
     """Persist a codicil — a bounded addendum to an already-closed episode.
 
-    This had no Neo4j implementation: `AriadneAdapter.create_codicil` was
-    declared abstract and never realised, so every consumer that needed a
-    codicil wrote its own Cypher against :AriadneCodicil. That is why the
-    operation was hand-rolled downstream rather than ledgered by the protocol.
-
     NOTE: G-1 is deliberately NOT enforced here. G-1 blocks writes to SEALING /
     SEALED / ARCHIVED episodes, and a codicil is the protocol's sanctioned
     exception — the whole point is a post-closure addendum that preserves the
@@ -949,12 +922,12 @@ async def create_branch_episode(
 ) -> None:
     """
     Creates a branch episode and the BRANCHES_FROM edge.
-    Rule G-2: parent episode must be in ACTIVE state.
+    The parent episode must be in ACTIVE state.
     """
     if not _ariadne_guard():
         return
     async with driver.session() as session:
-        # Verify G-2
+        # Verify the parent episode is ACTIVE
         result = await session.run("""
             MATCH (e:AriadneEpisode {episode_id: $parent_id})
             RETURN e.episode_status AS status
@@ -1041,8 +1014,8 @@ def write_document_node_sync(driver, document: DocumentNode) -> None:
     Create an AriadneDocument node and ATTACHED_TO edge to its episode.
     Sync variant — safe to call from non-async artifact service.
 
-    This is used both by the user-upload path (server.py endpoint) and
-    the artifact→Ariadne bridge (when agent-produced artifacts are published).
+    Used both for user uploads and for agent-produced artifacts that the
+    host application publishes into an episode.
     """
     if not _ariadne_guard():
         return
@@ -1117,7 +1090,7 @@ def write_document_node_sync(driver, document: DocumentNode) -> None:
         logger.warning(f"Ariadne: Failed to write document node: {e}")
 
 
-# ── HITL Event Writer (Protocol Amendment v1.2.0) ────────────────────────────
+# ── HITL Event Writer (SPEC §4.6) ────────────────────────────────────────────
 
 
 def write_hitl_event_invocation_sync(driver, hitl_event) -> None:
@@ -1127,8 +1100,7 @@ def write_hitl_event_invocation_sync(driver, hitl_event) -> None:
     edge from the episode. The node is immutable after this write until
     the INVOKED → RESOLVED transition.
 
-    Sync variant — called from HITLService.request_intervention() which
-    runs in the server's sync context.
+    Sync variant — for callers running in a synchronous context.
     """
     if not _ariadne_guard():
         return
@@ -1224,9 +1196,9 @@ def write_hitl_event_resolution_sync(
 
     Updates an existing AriadneHITLEvent node from INVOKED to RESOLVED
     (or TIMED_OUT/ESCALATED). This is the one permitted mutation on an
-    otherwise immutable node — enforced by G-10 governance.
+    otherwise immutable node (SPEC §6, G-17).
 
-    Sync variant — called from resolve_hitl_request in server.py.
+    Sync variant — for callers running in a synchronous context.
     """
     if not _ariadne_guard():
         return
@@ -1841,7 +1813,7 @@ def set_departure_fork_anchor_index_sync(driver, fork_episode_id: str, anchor_in
     the orphan detector keys on (a non-null anchor with NO DepartureForkPointNode is the
     Class-B corruption indicator). Idempotent — re-patching to the same value is safe, so
     a patch-only retry after a STEP-5-done/STEP-6-missing partial failure is a clean fix.
-    A write primitive; recovery orchestration (ignis-os) may call it directly."""
+    A write primitive; the host application's recovery orchestration may call it directly."""
     if not _ariadne_guard():
         return
     try:
@@ -1926,7 +1898,7 @@ def write_fork_return_node_sync(driver, frn) -> None:
 
 # ── Phase D — Orphan-recovery write primitives (§19.3.7) ─────────────────────
 # Protocol exposes the WRITES; detection + which-recovery-to-run is orchestrated by
-# the consumer (ignis-os). All are append-only or set-once field mutations — no deletes.
+# the host application. All are append-only or set-once field mutations — no deletes.
 
 
 def write_fork_orphan_marker_sync(driver, marker) -> None:
@@ -2127,6 +2099,8 @@ def mark_fork_point_status_sync(driver, fork_point_id: str, status: str) -> None
         return
 
     try:
+        from datetime import datetime, timezone
+
         with driver.session() as session:
             session.run("""
                 MATCH (fp:AriadneForkPoint {fork_point_id: $fork_point_id})
@@ -2135,9 +2109,7 @@ def mark_fork_point_status_sync(driver, fork_point_id: str, status: str) -> None
             """, {
                 "fork_point_id": fork_point_id,
                 "status": status,
-                "resolved_at": __import__("datetime").datetime.now(
-                    __import__("datetime").timezone.utc
-                ).isoformat(),
+                "resolved_at": datetime.now(timezone.utc).isoformat(),
             })
     except Exception as e:
         logger.warning(f"Ariadne: Failed to update fork point status: {e}")
@@ -2748,11 +2720,11 @@ def get_last_nominal_segment_sync(driver, episode_id: str) -> Optional[str]:
         return None
 
 
-# ── Cross-Episode Linking (Amendment v2.0) ──────────────────────────────────
+# ── Cross-Episode Linking (SPEC §20) ────────────────────────────────────────
 
 
 def write_episode_link_sync(driver, link) -> None:
-    """Persist an EpisodeLink to Neo4j — Amendment v2.0 §2 + §11.1.2.
+    """Persist an EpisodeLink to Neo4j — SPEC §20 →2 + →11.1.2.
 
     Pre-write contract:
     1. Both source and target episodes must exist as `AriadneEpisode` nodes.
@@ -2908,11 +2880,11 @@ def write_episode_link_sync(driver, link) -> None:
     )
 
 
-# ── Episode Grouping (Amendment v2.0 §7-§8) ────────────────────────────────
+# ── Episode Grouping (SPEC §20 →7-→8) ────────────────────────────────
 
 
 def write_membership_record_sync(driver, record) -> None:
-    """Persist a MembershipRecord to Neo4j — Amendment v2.0 §7 + §11.1.2.
+    """Persist a MembershipRecord to Neo4j — SPEC §20 →7 + →11.1.2.
 
     Pre-write contract:
     1. The target Episode must exist (no orphan memberships).
@@ -2924,10 +2896,9 @@ def write_membership_record_sync(driver, record) -> None:
     - `(:AriadneMembershipRecord {...})` node holding all immutable fields
     - `(:AriadneEpisode)-[:MEMBER_OF {via: record_id}]->(:AriadneEpisodeGroup)` edge
 
-    The :AriadneEpisodeGroup node is stub-merged on first reference (same
-    pattern as :Artifact and :ExternalSessionRef in the lineage writer).
-    The grouping itself may live outside Ariadne's structural layer — see
-    amendment §3 (Part II) on the boundary.
+    The :AriadneEpisodeGroup node is stub-merged on first reference.
+    The grouping itself may live outside the protocol's structural layer — see
+    SPEC §20 Part II on the boundary.
 
     If supersedes_record_id is set:
     - Creates `(new)-[:SUPERSEDES]->(prior)` edge
@@ -3079,7 +3050,7 @@ def write_membership_record_sync(driver, record) -> None:
 
 
 def write_conformance_declaration_sync(driver, declaration) -> None:
-    """Persist a ConformanceDeclaration — Amendment v2.0 §8 + §11.1.2.
+    """Persist a ConformanceDeclaration — SPEC §20 →8 + →11.1.2.
 
     Pre-write contract:
     1. SemVer format validation on declaration_version.

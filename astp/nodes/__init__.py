@@ -23,4 +23,9 @@ NodeTypeRegistry. The protocol layer never imports from here.
 
 from astp.nodes.factory import create_node, register_node_type
 
+# Imported for its side effect: the package registers "segment" with the
+# NodeTypeRegistry ("episode" is pre-registered by astp.protocol.registry),
+# so ``import astp.nodes`` makes every built-in type creatable.
+from astp.nodes import segment as _segment  # noqa: F401
+
 __all__ = ["create_node", "register_node_type"]

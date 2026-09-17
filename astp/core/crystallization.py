@@ -12,16 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-CRYSTALLIZATION_DELTA — first-class spine event for Ariadne episode chains.
+CRYSTALLIZATION_DELTA — first-class spine event for episode chains.
 
 Protocol-level definitions: models, enums, hash construction, version vectors,
 governance guards. Database-agnostic — no persistence operations.
 
-Architectural decision: OQ-D02 (2026-03-08)
-Decision: Crystallization is a state transition IN the chain, not a receipt ABOUT it.
-
-Spec 7 of Phase 2 Ariadne Persistence Layer.
-Source: OQ-D02 Resolution, CLO-CONSOLIDATED-1.1 S5.5-5.7.
+Crystallization is a state transition IN the chain, not a receipt ABOUT it.
 """
 
 import json
@@ -34,9 +30,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, model_validator
 
 from astp.core.schema import (
-    ARIADNE_SCHEMA_VERSION,
     AriadneGovernanceError,
-    EpisodeStatus,
     compute_spine_hash,
     sha3_256,
 )
@@ -66,7 +60,7 @@ class DeltaType(str, Enum):
 
 class EpisodeVersionVector(BaseModel):
     """
-    Three-layer versioning per OQ-D02 resolution.
+    Three-layer versioning.
 
     content_version:   increments on APPEND, MODIFY, BRANCH, MERGE
     lifecycle_version: increments on CRYSTALLIZATION, ARCHIVE, EXPIRY
@@ -273,7 +267,7 @@ async def attempt_amend_crystallization_delta(driver, delta_id: str, correcting_
     """
     This function always raises. It exists to make the architectural invariant
     explicit. Erroneous crystallizations are corrected via successor episodes,
-    not in-place amendment. See OQ-D02 Immutability Governance section.
+    not in-place amendment.
     """
     raise AriadneGovernanceError(
         f"Immutability violation: CrystallizationDelta {delta_id} cannot be amended. "
@@ -306,7 +300,7 @@ def verify_crystallization_hashes(
     delta_id: str,
 ) -> CrystallizationVerificationResult:
     """
-    Pure protocol-level two-phase verification per OQ-D02.
+    Pure protocol-level two-phase verification.
     Phase 1: predecessor_hash -> node_hash consistency
     Phase 2: sealed_chain_root matches reconstructed Merkle root
 

@@ -12,23 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Episode Grouping Interface — Amendment v2.0 §7-§9 schema primitives.
+Episode Grouping Interface — SPEC §20 →7-→9 schema primitives.
 
 Defines `MembershipRecord` (the protocol's owned artifact — the assertion
 that an Episode belongs to a Grouping) and `ConformanceDeclaration` (a
 native grouping implementation's registration as conforming to the
 EpisodeGrouping behavioral interface).
 
-The amendment's design principle: a Grouping itself may live OUTSIDE
-Ariadne's structural layer (e.g., Claude's native Project store, Notion's
-Database, SEL/Thermyt's Collection). The protocol cannot fully verify or
+The design principle: a Grouping itself may live OUTSIDE the protocol's
+structural layer (in whatever native construct the host product uses for
+projects, databases or collections). The protocol cannot fully verify or
 control that native construct. What the protocol DOES own is the
 `MembershipRecord` — the verifiable assertion that an Episode belongs to
 a Grouping. **The grouping is opaque; the membership record is the
-protocol's artifact.** See amendment §3 (Part II).
+protocol's artifact.** See SPEC §20 Part II.
 
 Both `MembershipRecord` and `ConformanceDeclaration` use the
-immutable-with-succession pattern (Gap 6 and Gap 7 respectively). A
+immutable-with-succession pattern (SPEC §20 →7 and →8 respectively). A
 record/declaration is created once and never modified. State changes
 produce a new record/declaration with `supersedes_record_id` /
 `superseded_by` linking the chain. Forward pointers (`superseded_by_*`)
@@ -52,9 +52,9 @@ from astp.core.hash_canonical import hash_preimage
 
 
 class MembershipRole(str, Enum):
-    """An Episode's role within a Grouping — Amendment v2.0 §7.
+    """An Episode's role within a Grouping — SPEC §20 →7.
 
-    Included in `MembershipRecord.content_hash` per Gap 6: role changes
+    Included in `MembershipRecord.content_hash` per SPEC §20 →7: role changes
     are role-content changes, not lifecycle annotations, so the hash
     commits to the role. Role changes therefore create a NEW
     MembershipRecord via succession; the prior record is preserved.
@@ -69,11 +69,11 @@ class MembershipRole(str, Enum):
 class GroupingSystem(str, Enum):
     """Identifiers for known native grouping implementations. The protocol
     does not constrain implementations to register from this list — any
-    string identifier is valid — but these are the conformance-declared
-    reference implementations.
+    string identifier is valid — these are illustrative group-system
+    identifiers.
 
-    Implementations register their conformance via `ConformanceDeclaration`.
-    See amendment §4.1 for reference declarations.
+    Implementations register their conformance via `ConformanceDeclaration`
+    (SPEC §20 →8).
     """
 
     # Reserved values; implementations may declare arbitrary group_system strings.
@@ -102,7 +102,7 @@ class Capability(BaseModel):
 
 
 class MembershipRecord(BaseModel):
-    """A typed Episode→Grouping membership assertion — Amendment v2.0 §7.
+    """A typed Episode→Grouping membership assertion — SPEC §20 →7.
 
     Immutable after creation. Role changes are recorded by creating a new
     `MembershipRecord` with `supersedes_record_id` pointing to the prior
@@ -116,14 +116,14 @@ class MembershipRecord(BaseModel):
     record_id: UUID = Field(default_factory=uuid4)
     episode_id: UUID
     group_id: str                       # External identifier (UUID or implementation-specific)
-    group_system: str                   # e.g., "sel-thermyt:Collection", "claude:Project"
+    group_system: str                   # e.g., "ariadne_native", "vendor:Collection"
     asserted_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     asserted_by: str                    # agent_id or user_id
 
-    # Role — included in content_hash per Gap 6
+    # Role — included in content_hash per SPEC §20 →7
     membership_role: MembershipRole
 
-    # Succession — Gap 6
+    # Succession — SPEC §20 →7
     # supersedes_record_id is INCLUDED in this record's content_hash
     # (this record's commitment to the chain history).
     supersedes_record_id: Optional[UUID] = None
@@ -141,9 +141,9 @@ class MembershipRecord(BaseModel):
 
 class ConformanceDeclaration(BaseModel):
     """Registration that a native grouping implementation conforms to the
-    EpisodeGrouping behavioral interface — Amendment v2.0 §8.
+    EpisodeGrouping behavioral interface — SPEC §20 →8.
 
-    Versioned via SemVer (Gap 7). Version bump semantics:
+    Versioned via SemVer (SPEC §20 →8). Version bump semantics:
       - Major (field rename, type change, removal, capability removal):
         new declaration via succession. Existing MembershipRecords retain
         reference to the old declaration version.
@@ -162,7 +162,7 @@ class ConformanceDeclaration(BaseModel):
     declared_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     declared_by: str                    # agent_id
 
-    # Versioning — Gap 7
+    # Versioning — SPEC §20 →8
     declaration_version: str            # SemVer string (e.g., "1.0.0", "2.1.3")
 
     # Capabilities — included in content_hash
@@ -234,8 +234,8 @@ def classify_version_bump(old_version: str, new_version: str) -> str:
 # ── Content hash — MembershipRecord ─────────────────────────────────────────
 
 
-# Fields included in MembershipRecord content_hash, per Amendment v2.0 §7
-# (note: Gap 6 explicitly includes membership_role; supersedes_record_id is
+# Fields included in MembershipRecord content_hash, per SPEC §20 →7
+# (note: SPEC §20 →7 explicitly includes membership_role; supersedes_record_id is
 # included as the chain's commitment to its predecessor; superseded_by_*
 # is EXCLUDED per the §10 forward-pointer-exclusion rule).
 _MEMBERSHIP_HASH_PREIMAGE_FIELDS: tuple[str, ...] = (
@@ -254,7 +254,7 @@ _MEMBERSHIP_HASH_PREIMAGE_FIELDS: tuple[str, ...] = (
 # ── Content hash — ConformanceDeclaration ───────────────────────────────────
 
 
-# Per Amendment v2.0 §8 + §10. Excludes superseded_by (forward pointer).
+# Per SPEC §20 →8. Excludes superseded_by (forward pointer).
 _DECLARATION_HASH_PREIMAGE_FIELDS: tuple[str, ...] = (
     "declaration_id",
     "group_id",
@@ -274,7 +274,7 @@ _DECLARATION_HASH_PREIMAGE_FIELDS: tuple[str, ...] = (
 def compute_membership_record_content_hash(record: MembershipRecord) -> str:
     """SHA3-256 of the MembershipRecord canonical preimage — §7.
 
-    Includes `membership_role` per Gap 6. Mutating role requires a new
+    Includes `membership_role` per SPEC §20 →7. Mutating role requires a new
     record (via succession), so the hash on the original record stays
     valid as the historical commitment to "this episode had this role
     at this time."

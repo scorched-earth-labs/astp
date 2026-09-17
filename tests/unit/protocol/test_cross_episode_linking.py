@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Amendment v2.0 — Cross-Episode Linking schema + governance unit tests.
+SPEC §20 Part I — Cross-Episode Linking schema + governance unit tests.
 
 Covers the protocol-core surface of `astp.core.cross_episode`:
 - Enum vocabulary (LinkType, LinkHealthState, QuarantineResolution, SignalType)
@@ -29,21 +29,11 @@ development — protocol-core tests here are pure / mock-free.
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest
-
-# Enable the adapter guard before importing the writer — the writer reads
-# ARIADNE_ENABLED at module import time and short-circuits all writes when
-# the flag is False. Phase 2 operation-layer tests round-trip through the
-# real writer, so the flag must be true.
-os.environ.setdefault("ARIADNE_ENABLED", "true")
-import importlib
-from astp.adapters.neo4j import writer as _ariadne_writer
-importlib.reload(_ariadne_writer)
-_ariadne_writer.ARIADNE_ENABLED = True
+from pydantic import ValidationError
 
 from astp.core.branching import CognitiveDeltaType
 from astp.core.cross_episode import (
@@ -70,7 +60,7 @@ from astp.core.cross_episode import (
 
 class TestLinkType:
     def test_eight_types_per_amendment_section_3(self):
-        # Amendment v2.0 §3 declares exactly these eight values.
+        # SPEC §20 →3 declares exactly these eight values.
         assert {lt.value for lt in LinkType} == {
             "CONTINUES_FROM",
             "SUPERSEDES",
@@ -85,7 +75,7 @@ class TestLinkType:
 
 class TestLinkHealthState:
     def test_five_states_including_quarantined(self):
-        # QUARANTINED is the Gap 4 addition relative to v1.x.
+        # QUARANTINED requires explicit human review to exit (SPEC §20 →6).
         assert {hs.value for hs in LinkHealthState} == {
             "VALID",
             "STALE",
@@ -116,7 +106,7 @@ class TestSignalType:
 
 
 class TestCognitiveDeltaTypeAdditions:
-    """Amendment v2.0 adds three link events to the existing audit
+    """SPEC §20 adds three link events to the existing audit
     delta-type vocabulary. They must coexist with the existing BFM values."""
 
     def test_link_events_registered(self):
@@ -140,7 +130,7 @@ def _make_link(**overrides) -> EpisodeLink:
     base = {
         "source_episode": uuid4(),
         "target_episode": uuid4(),
-        "created_by": "clotho",
+        "created_by": "agent-a",
         "link_type": LinkType.CONTINUES_FROM,
         "link_strength": 0.8,
         "is_inferred": False,
@@ -161,9 +151,9 @@ class TestEpisodeLinkInstantiation:
 
     def test_link_strength_range_validation(self):
         # link_strength must be in [0.0, 1.0]. Pydantic Field constraints.
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             _make_link(link_strength=1.5)
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             _make_link(link_strength=-0.1)
 
     def test_inference_signals_attached(self):
@@ -190,7 +180,7 @@ class TestContentHash:
         assert len(h1) == 64  # SHA3-256 hex
 
     def test_excludes_quarantine_resolution_fields_per_section_2(self):
-        """Amendment v2.0 §2 hash preimage note: quarantine_resolved_at
+        """SPEC §20 →2 hash preimage note: quarantine_resolved_at
         and quarantine_resolution are EXCLUDED. Mutating them must not
         change the hash, so the link's commit-time fingerprint survives
         quarantine close."""
@@ -218,7 +208,7 @@ class TestContentHash:
         kwargs = {
             "source_episode": uuid4(),
             "target_episode": uuid4(),
-            "created_by": "clotho",
+            "created_by": "agent-a",
             "link_strength": 0.5,
             "is_inferred": False,
         }
@@ -360,7 +350,7 @@ def _make_signal(
 
 class TestRejectionReason:
     def test_four_reasons_per_amendment_section_5(self):
-        # Amendment v2.0 §5 declares these four structured rejection reasons.
+        # SPEC §20 →5 declares these four structured rejection reasons.
         assert {r.value for r in RejectionReason} == {
             "LOW_CONFIDENCE",
             "WRONG_RELATIONSHIP_TYPE",
@@ -401,7 +391,7 @@ class TestLinkRejectedDelta:
             source_episode=str(uuid4()),
             target_episode=str(uuid4()),
             proposed_link_type="REFERENCES",
-            rejecting_agent="clotho",
+            rejecting_agent="agent-a",
             rejection_reason=RejectionReason.NOT_RELATED.value,
         )
         assert delta.proposed_audit_event_id == proposal_id
@@ -414,7 +404,7 @@ class TestLinkRejectedDelta:
             source_episode=str(uuid4()),
             target_episode=str(uuid4()),
             proposed_link_type="REFERENCES",
-            rejecting_agent="clotho",
+            rejecting_agent="agent-a",
             rejection_reason=RejectionReason.WRONG_RELATIONSHIP_TYPE.value,
             rejection_note="should be SUPERSEDES instead",
         )
@@ -508,13 +498,13 @@ class TestProposeLinkCandidate:
             inference_signals=[_make_signal()],
             discovery_threshold=0.75,
             auto_accept_threshold=0.90,
-            proposing_agent="clotho",
+            proposing_agent="agent-a",
         )
         assert UUID(audit_id)
         assert len(driver.audit_records) == 1
         rec = driver.audit_records[0]
         assert rec["delta_type"] == "LINK_PROPOSED"
-        assert rec["agent_id"] == "clotho"
+        assert rec["agent_id"] == "agent-a"
         assert rec["caught_by"] == "AGENT"
         assert rec["trigger_context"] == "agent_detected"
         assert rec["prior_audit_hash"] == "GENESIS"
@@ -537,7 +527,7 @@ class TestProposeLinkCandidate:
             inference_signals=[_make_signal()],
             discovery_threshold=0.70,
             auto_accept_threshold=0.95,
-            proposing_agent="clotho",
+            proposing_agent="agent-a",
         )
         forward = _json.loads(driver.audit_records[0]["forward_delta"])
         # The whole point of audit-the-decision (§12.2) — thresholds are
@@ -560,7 +550,7 @@ class TestRecordCandidateRejection:
             composite_score=0.55,
             inference_signals=[_make_signal(strength=0.55)],
             discovery_threshold=0.75,
-            detecting_agent="clotho",
+            detecting_agent="agent-a",
         )
         assert UUID(audit_id)
         rec = driver.audit_records[0]
@@ -582,7 +572,7 @@ class TestRecordLinkRejection:
             source_episode=str(uuid4()),
             target_episode=str(uuid4()),
             proposed_link_type=LinkType.REFERENCES,
-            rejecting_agent="devin",
+            rejecting_agent="human-1",
             rejection_reason=RejectionReason.NOT_RELATED,
             rejection_note="overlap is coincidental",
         )

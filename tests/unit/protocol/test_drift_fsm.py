@@ -14,8 +14,7 @@
 """Derivative + hysteresis drift FSM (astp.core.drift_fsm) + its wiring into
 detect_branch_candidate.
 
-Pins Clotho's v4 model against the validated reference simulator
-(ignis-os/scripts/aci_fsm_sim.py) and the calibration episodes. The FSM is pure
+Pins the FSM's transitions on fixed drift sequences. The FSM is pure
 (no Neo4j/Redis), so the bulk runs without a driver; detect_branch_candidate's
 routing (legacy when fsm_state is None, FSM when provided) is checked on a
 non-materializing turn so no driver is touched.
@@ -84,18 +83,18 @@ def test_candidate_decays_is_false_alarm():
 # ── Cooldown suppression (the M test) ────────────────────────────────────
 
 
-def test_bf6c3143_weather_materializes_daycjob_suppressed():
-    # The validated stress-test episode: weather pivot materializes (seq10);
-    # the 2nd pivot (seq18 Δ+0.188) lands inside the M=4 cooldown and is
-    # suppressed — neither triggers nor materializes.
+def test_first_pivot_materializes_second_pivot_in_cooldown_suppressed():
+    # Two pivots in one episode: the first materializes (seq10); the second
+    # (seq18 Δ+0.188) lands inside the M=4 cooldown and is suppressed — it
+    # neither triggers nor materializes.
     drifts = [(2,0.0),(4,0.303),(6,0.266),(8,0.499),(10,0.431),(12,0.344),
               (14,0.199),(16,0.202),(18,0.390),(20,0.340),(22,0.269),(24,0.297)]
     res = _run(drifts)
     by_seq = {drifts[i][0]: res[i] for i in range(len(drifts))}
-    assert by_seq[8].triggered_on_derivative         # weather trigger
+    assert by_seq[8].triggered_on_derivative         # first-pivot trigger
     assert by_seq[10].materialized                    # confirms
     assert by_seq[10].fsm_state == "COOLDOWN"
-    # seq18 day-job is inside cooldown → not a fresh trigger, not materialized
+    # seq18 second pivot is inside cooldown → not a fresh trigger, not materialized
     assert not by_seq[18].triggered_on_derivative
     assert not by_seq[18].materialized
     # exactly one materialization in the episode
@@ -148,9 +147,9 @@ def test_detect_branch_candidate_fsm_path_returns_new_state():
     assert res.new_state in (DetectionState.NOMINAL, DetectionState.CANDIDATE)
 
 
-# ── Pre-pivot anchor: jump-and-park (Clotho's ruling, Episode 839c5f91) ──────
+# ── Pre-pivot anchor: jump-and-park ──────────────────────────────────────
 #
-# The S3 calibration failure: a pivot jumps, the live (EWM) centroid chases it,
+# The failure mode: a pivot jumps, the live (EWM) centroid chases it,
 # so the next turn on the SAME parked topic reads as decayed live-drift and the
 # sustain gate resets. drift_vs_anchor measures the parked turn against the
 # pre-pivot centroid, where it stays elevated — so a jump-and-park materializes.

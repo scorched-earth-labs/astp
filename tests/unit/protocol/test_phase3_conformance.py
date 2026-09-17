@@ -19,23 +19,23 @@ must pass for Phase 3 Protocol Conformance (Level 1).
 """
 
 from datetime import datetime, timezone
-from uuid import uuid4
+
+import pytest
 
 from astp.core.schema import sha3_256
 from astp.protocol.keys import (
     derive_workspace_key, derive_node_key, derive_seal_key,
-    NodeKeyRecord, enforce_key_version_monotonicity,
+    enforce_key_version_monotonicity,
 )
 from astp.protocol.anchor import (
     AnchorCommitment, build_anchor_commitment,
 )
 from astp.protocol.witness import (
-    WitnessRole, WitnessRecord, compute_witness_commitment,
+    WitnessRecord, compute_witness_commitment,
     verify_witness_commitment, enforce_witness_threshold,
 )
 from astp.protocol.chain_proof import (
-    ProofLink, ProofChain, ChainVerificationResult,
-    compute_chain_root, build_proof_chain, verify_proof_chain,
+    ProofLink, build_proof_chain, verify_proof_chain,
 )
 from astp.protocol.merkle import MerkleTree
 from astp.protocol.leaf_hash import compute_leaf_hash
@@ -92,18 +92,12 @@ class TestKeyHierarchy:
         enforce_key_version_monotonicity(3, 4)  # Should not raise
 
         # Rollback
-        try:
+        with pytest.raises(MonotonicityViolation):
             enforce_key_version_monotonicity(3, 2)
-            assert False, "Should have rejected version rollback"
-        except MonotonicityViolation:
-            pass
 
         # Duplicate
-        try:
+        with pytest.raises(MonotonicityViolation):
             enforce_key_version_monotonicity(3, 3)
-            assert False, "Should have rejected duplicate version"
-        except MonotonicityViolation:
-            pass
 
     def test_kh005_node_type_always_in_derivation(self):
         """KH-005: No code path derives a node key without node_type."""
@@ -260,11 +254,8 @@ class TestWitnessSignatures:
             role="REVIEWER", commitment_hash="tampered_hash",
         )
 
-        try:
+        with pytest.raises(GovernanceViolation):
             enforce_witness_threshold([valid_record, invalid_record], min_counter_signatures=2)
-            assert False, "Should fail — only 1 valid distinct witness"
-        except GovernanceViolation:
-            pass
 
     def test_ws006_distinct_witness_id_required(self):
         """WS-006: Same witness_id counts as ONE (G-11)."""
@@ -286,18 +277,15 @@ class TestWitnessSignatures:
             role="AUDITOR", commitment_hash=hash_auditor,
         )
 
-        try:
+        with pytest.raises(GovernanceViolation):
             enforce_witness_threshold([record_1, record_2], min_counter_signatures=2)
-            assert False, "Should fail — same witness_id, only 1 distinct"
-        except GovernanceViolation:
-            pass
 
 
 # ── Chain Proof Vectors ──────────────────────────────────────────────────────
 
 def _make_test_tree_and_root(content: str = "test") -> tuple:
     """Helper: build a simple Merkle tree and return (root, inclusion_proof)."""
-    from astp.protocol.merkle import MerkleTree, InclusionProof
+    from astp.protocol.merkle import MerkleTree
     from astp.protocol.leaf_hash import compute_leaf_hash
     from uuid import UUID
 

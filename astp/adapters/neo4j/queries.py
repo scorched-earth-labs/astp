@@ -12,10 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne read-only Neo4j queries for Thermyt-Lite UI.
+ASTP read-only Neo4j queries.
 
-All queries use asyncio.to_thread() to wrap the sync Neo4j driver,
-matching the pattern established in server.py.
+All queries use asyncio.to_thread() to wrap the sync Neo4j driver.
 
 IMPORTANT: Neo4j session.run() signature is run(query, parameters=None, **kwargs).
 All parameters are passed as an explicit dict (positional arg) to avoid collisions.
@@ -29,13 +28,6 @@ from typing import Any, Optional
 logger = logging.getLogger("astp.adapters.neo4j.queries")
 
 ARIADNE_ENABLED = os.getenv("ARIADNE_ENABLED", "false").lower() == "true"
-
-
-def _empty_if_disabled(default=None):
-    """Return default value when Ariadne is not enabled."""
-    if default is None:
-        return []
-    return default
 
 
 # ── Episode Queries ──────────────────────────────────────────────────────────
@@ -218,8 +210,9 @@ async def get_execution_dag_for_episode(driver, episode_id: str) -> dict[str, An
 
     Returns the workflow declarations anchored to the episode, their execution
     steps, and the PRECEDES edges between steps — the raw material for a DAG
-    visualization. The DAG is written exclusively by the ignis-mcp-server, so
-    most episodes have none; in that case workflows/steps/edges come back empty.
+    visualization. The DAG is written only by the workspace's Cognitive
+    Implementation Authority for Layer 3 (SPEC §21 §3), so many episodes have
+    none; in that case workflows/steps/edges come back empty.
 
     Shape::
 
@@ -917,7 +910,7 @@ async def get_audit_trail(
     return await asyncio.to_thread(_query)
 
 
-# ── Cross-Episode Linking (Amendment v2.0) ──────────────────────────────────
+# ── Cross-Episode Linking (SPEC §20) ────────────────────────────────────────
 
 
 async def list_links_for_episode(
@@ -928,7 +921,7 @@ async def list_links_for_episode(
     link_type_filter: Optional[list[str]] = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
-    """Return cross-episode links for an episode — Amendment v2.0 §11.1.6 Pattern.
+    """Return cross-episode links for an episode — SPEC §20 →11.1.2.
 
     Args:
         episode_id: Episode whose links to fetch.
@@ -1048,7 +1041,7 @@ async def list_pending_link_candidates(
         proposal was elevated into an actual link by the user).
 
     The query keys off the source_episode's audit chain — proposals
-    anchor their audit records there (Amendment v2.0 §5).
+    anchor their audit records there (SPEC §20 →5).
 
     Returns: list of dicts with proposal_audit_id, source_episode,
     target_episode, proposed_link_type, composite_score,
@@ -1137,7 +1130,7 @@ async def list_pending_link_candidates(
     return await asyncio.to_thread(_query)
 
 
-# ── Episode Grouping (Amendment v2.0 §7-§8) ─────────────────────────────────
+# ── Episode Grouping (SPEC §20 →7-→8) ─────────────────────────────────
 
 
 async def list_memberships_for_episode(

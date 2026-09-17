@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Node Type Registry
+ASTP — Node Type Registry
 
 Open enum registration for cognitive node types. "episode" is
 pre-registered as the Phase 1 instantiation. New types (signal,

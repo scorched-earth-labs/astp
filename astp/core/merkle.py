@@ -34,7 +34,6 @@ that keeps these adaptive properties while maintaining cryptographic integrity.
 
 import hashlib
 import logging
-import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Protocol v2 — Delta Records
+ASTP — Delta Records
 
 Every state transition (segment append, rebalance, seal) is recorded
 as a DeltaRecord. The pre_root → post_root chain is the authoritative
