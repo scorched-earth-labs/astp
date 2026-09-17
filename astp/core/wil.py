@@ -95,13 +95,19 @@ class WILStatus(str, Enum):
 
 class StoreLayer(str, Enum):
     """
-    Storage layers in write-ordering priority.
-    Blob -> Neo4j -> QDrant is a formal invariant, not a convention.
+    Storage roles in write-ordering priority (SPEC §12.1): durable content
+    store -> authoritative structural store -> ephemeral coordinator ->
+    semantic search index. The order is a formal invariant, not a convention.
+
+    The protocol names roles, not providers. The member names and values below
+    are the reference deployment's providers; they are recorded in ledger
+    entries (`stores_involved`), so they are stored data and are not renamed
+    here.
     """
-    BLOB = "blob"      # Highest durability — always written first
-    NEO4J = "neo4j"    # Authoritative structural record — written second
-    REDIS = "redis"    # Ephemeral coordinator — written concurrently with Neo4j
-    QDRANT = "qdrant"  # Semantic search — written last; degradation is recoverable
+    BLOB = "blob"      # Durable content store — highest durability, always written first
+    NEO4J = "neo4j"    # Authoritative structural store — written second
+    REDIS = "redis"    # Ephemeral coordinator — written concurrently with the structural store
+    QDRANT = "qdrant"  # Semantic search index — written last; degradation is recoverable
 
 
 class WritePhase(str, Enum):

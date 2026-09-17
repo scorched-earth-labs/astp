@@ -115,7 +115,7 @@ SHA3-256 hash of a node's payload, computed via the payload's `to_content_hash_i
 
 ### `content_ref`
 
-Pointer to the full content in durable storage (e.g. an S3 key, a filesystem path, a blob ID). The hash chain references this pointer plus the `content_hash`; the content bytes themselves do not need to be hash-chain-resident, which lets content scale independently of the integrity layer.
+Pointer to the full content in durable storage (e.g. an object-store key, a filesystem path). The hash chain references this pointer plus the `content_hash`; the content bytes themselves do not need to be hash-chain-resident, which lets content scale independently of the integrity layer.
 
 ### `leaf_hash`
 
@@ -275,10 +275,12 @@ See SPEC §5.5 (Type Isolation Property) and SPEC §6 (Governance Rules).
 
 A coordination protocol for multi-store writes that guarantees ordering and recoverability. Writes proceed in **strict durability order**:
 
-1. **Durable content store** (e.g. S3, filesystem) — where the bytes live.
-2. **Authoritative structural store** (e.g. Neo4j) — where the hash chain and graph live.
-3. **Ephemeral coordinator** (e.g. Redis) — runtime coordination state.
-4. **Semantic search index** (e.g. QDrant) — derived retrieval surface.
+1. **Durable content store** — where the bytes live.
+2. **Authoritative structural store** — where the hash chain and graph live.
+3. **Ephemeral coordinator** — runtime coordination state.
+4. **Semantic search index** — derived retrieval surface.
+
+These are **roles, not products**: the protocol names no storage provider, the implementer chooses what fills each role, and one system may fill more than one.
 
 An interrupted write at any phase **must be recoverable** — all writes must be idempotent. The WIL state machine tracks each write through these phases and replays incomplete writes on recovery.
 

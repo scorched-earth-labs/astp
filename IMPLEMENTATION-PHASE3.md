@@ -733,7 +733,7 @@ Phase 4 builds on Phase 3 infrastructure. Implement in this order:
 
 A Phase 4 conforming implementation MUST:
 
-1. Create `AriadneHITLEvent` nodes with correct two-phase lifecycle
+1. Record HITL events with the correct two-phase lifecycle (the reference adapter stores them under the `AriadneHITLEvent` label; the representation is an adapter choice)
 2. Compute `context_hash`, `resolution_hash`, `node_hash` with correct domain-separated prefixes
 3. Enforce G-17 (no resolution on INVOKED nodes)
 4. Enforce G-18 (crystallization blocked by pending blocking HITL)

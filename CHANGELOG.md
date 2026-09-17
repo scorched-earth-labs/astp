@@ -10,6 +10,27 @@ The next change-set queues here.
 
 - `verify_proof_chain` verified each link's inclusion proof against the root *the proof* named, never against the link's own `spine_root`, so a chain whose links carried valid proofs for unrelated trees verified. §16.5.3 (1) has always required the proof to verify against `link.spine_root`; the reference implementation now does.
 
+## [4.4.0] — 2026-09-17
+
+**MINOR.** Storage is specified as roles, not providers. Every implementation that conformed to 4.3.x conforms to 4.4.0 unchanged; implementations built on other providers, which the text of §20 had excluded by naming products, now can.
+
+§2.5.3 has always said a storage adapter may be "any conforming ASI implementation", and §12.1 has always named storage by role — durable content store, authoritative structural store, ephemeral coordinator, semantic search index. §20, written as a standalone amendment against one deployment, named that deployment's products in normative text instead. This release makes §20 say what the rest of the specification already meant.
+
+### Changed
+- **§20 →11.1 Storage Architecture** defines four roles — authoritative structural store, append-only audit store, semantic search index, ephemeral coordinator — with the consistency obligation of each, and states that the provider filling a role is the implementer's choice and that one system may fill several. The obligations themselves are unchanged: the structural store is the single source of truth, the audit store is append-only and authoritative for the event log, the index is derived and eventually consistent, and the coordinator is always reconstructable.
+- **§20 →11.1.2** lists the structural record types and relationships in provider-neutral notation (it was a schema in one graph database's query language). The active-record index obligation is unchanged.
+- **§20 →11.1.3** requires two separate vector spaces and fixes their payload fields, including the two threshold-at-index fields that make a discovery decision auditable. **Collection names, dimensionality, distance metric and embedding model are now implementation choices.** Still required: embeddings from different model families MUST NOT be mixed within one vector space.
+- **§20 →11.1.4** requires a quarantine queue **scoped per Episode**, threshold calibration state and a link-health cache, all reconstructable. **Key names and data structures are now implementation choices.** A single global quarantine queue remains non-conforming. The §20 conformance checklist and `CONFORMANCE-CROSS-EPISODE-LINKING.md` LH-003 state the scope rule instead of a literal key.
+- **§20 →11.2.1, →11.4, →11.5 and the §21 audit event registry** name the role a record lives in ("structural store", "audit store") instead of a product. The write path order and the consistency-window SLA are unchanged.
+- **§21 Appendix A** (non-normative notes on one adapter) is now a pointer to `IMPLEMENTATION-LAYER3.md` §6, which already carried the same material. §10.5 and §13 no longer give products as examples.
+
+### Changed (companion documents)
+- `IMPLEMENTATION-CROSS-EPISODE-LINKING.md` §9 maps the four roles to the providers the reference deployment uses, and records that deployment's search-index layout and coordinator keys — the material removed from §20 — marked as its own choices. Its statement of the write order is corrected to the one §20 →11.5.1 specifies and the code follows (structural store, then audit store); it previously gave the reverse.
+- `IMPLEMENTATION-PHASE3.md`: the HITL conformance list no longer requires a particular graph label. `GLOSSARY.md` §8 describes the WIL stores as roles.
+
+### Notes
+- The reference package's `StoreLayer` members and values still carry provider names. They are written into ledger entries, so renaming them is a stored-data change and is left for the next MAJOR.
+
 ## [4.3.1] — 2026-09-17
 
 **PATCH (errata).** Editorial pass over `SPEC.md` and the companion documents ahead of public release. **No normative change:** no hash construction, governance rule, field, state or requirement is altered, and every 4.3.0-conformant implementation is 4.3.1-conformant unchanged.

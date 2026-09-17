@@ -1,6 +1,6 @@
 # ASTP — AI State Tree Protocol Specification
 
-**Version:** 4.3.1
+**Version:** 4.4.0
 **Status:** Stable
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-17
@@ -710,7 +710,7 @@ When an agent is actively writing segments to the Episode spine, other agents ca
 
 **Scope:** The advisory is a soft coordination signal, not a hard lock. It does not prevent writes or reads — it adjusts snapshot boundaries to avoid phantom reads of uncommitted segments.
 
-**Implementation note:** The advisory is in-process state (not persisted to the ephemeral coordinator) when all agents run in the same process. Distributed deployments require the advisory to be stored in the ephemeral coordinator (e.g., Redis) with a short TTL as a safety bound.
+**Implementation note:** The advisory is in-process state (not persisted to the ephemeral coordinator) when all agents run in the same process. Distributed deployments require the advisory to be stored in the ephemeral coordinator with a short TTL as a safety bound.
 
 ### 10.6 HITL Re-Validation Gate
 
@@ -937,14 +937,14 @@ a completed entry or no entry conveys, and is why Tier 1 exists.
 
 Segment append and snapshot capture both need to know the current `max(sequence_index)` for an Episode. Without caching, every such operation requires a database traversal.
 
-A conforming implementation SHOULD maintain a cached spine tip per Episode in the ephemeral coordinator (e.g., Redis). The cache lifecycle:
+A conforming implementation SHOULD maintain a cached spine tip per Episode in the ephemeral coordinator. The cache lifecycle:
 
 1. **Invalidate** before any segment write begins (ensures no stale reads during the write window)
 2. **Update** after segment write commits (sets cache to the new max sequence_index)
 3. **Read** during snapshot capture — cache hit avoids database traversal
 4. **TTL** as safety bound — cached entries expire if not refreshed (handles crashed writes that never reach the update step)
 
-**The spine tip cache is a performance optimization, not a source of truth.** The authoritative max_sequence_index is always in the structural store (e.g., Neo4j). If the cache is empty, unavailable, or suspected of being stale, the system falls back to querying the structural store directly.
+**The spine tip cache is a performance optimization, not a source of truth.** The authoritative max_sequence_index is always in the structural store. If the cache is empty, unavailable, or suspected of being stale, the system falls back to querying the structural store directly.
 
 A conforming adapter MUST implement `get_spine_snapshot_index()` which returns the authoritative max_sequence_index from the structural store. The cache layer sits above this function and is implementation-defined.
 
@@ -1713,7 +1713,7 @@ Expiry is checked at read time; expired entries are discarded.
 ### 19.7 Implementation Status
 
 All four BFM phases **plus the Phase D departure-fork lifecycle** are implemented
-and covered by unit tests against the Neo4j adapter (mocked driver). See
+and covered by unit tests against the reference adapter (mocked driver). See
 `tests/unit/protocol/test_phase2_*.py`, `test_phase3_*.py`, `test_phase4_*.py`, and
 the departure-fork suites in `test_phase2_operations.py` (`TestCreateDepartureFork`,
 `TestDepartureForkFSM`).
@@ -1970,24 +1970,24 @@ Implementations referencing phases in documentation or tooling MUST use scoped l
 
 ##### 11.1.1 Consistency Model
 
-The ASTP storage layer is a four-tier distributed system. The consistency hierarchy is:
+The protocol names four storage **roles**. They are roles, not products: the provider that fills each role is the implementer's choice (§2.5.3), and one system MAY fill more than one role provided it meets the obligations of each. The role names are those of §12.1.
+
+| Role | Holds | Consistency obligation |
+|------|-------|------------------------|
+| **Authoritative structural store** | Structural ground truth — links, membership records, declarations, and their relationships | Written synchronously. The single source of truth for structural state. |
+| **Append-only audit store** | The audit history | Written synchronously. Authoritative for the event log. Never modified, never deleted. |
+| **Semantic search index** | Vectors used to discover link candidates | Eventually consistent with the structural store. Derived; never authoritative. |
+| **Ephemeral coordinator** | Working state — caches and queues | Eventually consistent. Always reconstructable from the structural and audit stores. |
+
+**The authoritative structural store is the single source of truth for structural state.** No read operation on structural data (link health, membership records, declaration versions) may serve a response that contradicts it. Divergence of the semantic search index or the ephemeral coordinator from the structural store is a consistency error, not an alternative view.
+
+##### 11.1.2 Structural Records
+
+New record types and relationships introduced in Amendment v2.0. The notation is illustrative — it names what must be recorded and how records relate, not how an adapter represents them:
 
 ```
-PRIMARY TRUTH:   Neo4j       (structural ground truth — synchronous writes)
-AUDIT TRUTH:     Blob        (append-only audit history — authoritative for event log)
-DISCOVERY:       QDrant      (semantic search — eventually consistent with Neo4j)
-WORKING STATE:   Redis       (ephemeral cache and queues — always reconstructable)
-```
-
-**Neo4j is the single source of truth for structural state.** No read operation on structural data (link health, membership records, declaration versions) may serve a response that contradicts Neo4j. QDrant and Redis divergence from Neo4j is a consistency error, not an alternative view.
-
-##### 11.1.2 Neo4j Schema (Structural Memory)
-
-New node types and relationships introduced in Amendment v2.0:
-
-```cypher
-// Node types
-(:EpisodeLink {
+// Record types
+EpisodeLink {
   link_id,
   link_strength,              // Float [0.0, 1.0]
   is_inferred,                // Boolean
@@ -1996,89 +1996,61 @@ New node types and relationships introduced in Amendment v2.0:
   quarantined_at,             // Optional<Timestamp>
   quarantine_resolved_at,     // Optional<Timestamp>
   quarantine_resolution       // Optional<QuarantineResolution>
-})
+}
 
-(:MembershipRecord {
+MembershipRecord {
   record_id,
   membership_role,            // included in content_hash
   content_hash,
   supersedes_record_id        // Optional — succession
-})
+}
 
-(:ConformanceDeclaration {
+ConformanceDeclaration {
   declaration_id,
   declaration_version,        // SemVer
   declaration_hash,
   superseded_by               // Optional — succession; excluded from hash
-})
+}
 
 // Relationships
-(e1:Episode)-[:LINKED_TO {via: link_id}]->(e2:Episode)
-(mr:MembershipRecord)-[:SUPERSEDES]->(mr_prev:MembershipRecord)
-(cd:ConformanceDeclaration)-[:SUPERSEDED_BY]->(cd_new:ConformanceDeclaration)
-(ep:Episode)-[:MEMBER_OF {record_id}]->(eg:EpisodeGroup)
+Episode            —LINKED_TO {via: link_id}→   Episode
+MembershipRecord   —SUPERSEDES→                 MembershipRecord (prior)
+ConformanceDeclaration —SUPERSEDED_BY→          ConformanceDeclaration (successor)
+Episode            —MEMBER_OF {record_id}→      EpisodeGroup
 ```
 
 **Active-record index:** Implementations MUST maintain a materialized index for the active `MembershipRecord` per `(episode_id, group_id)` pair — defined as the record with no `superseded_by_record_id`. This is a storage-layer obligation, not a protocol mandate on query strategy.
 
-##### 11.1.3 QDrant Schema (Semantic Discovery)
+##### 11.1.3 Semantic Search Index
 
-**Collection: `episode_content_vectors`**
+Discovery uses two vector spaces, which MUST be kept separate:
 
-> **Naming note:** This collection was previously named `episode_link_candidates`. That name was a misnomer — candidates are the result of a similarity query, not stored objects. The collection stores per-episode content vectors; candidates emerge at query time.
+| Vector space | One entry per | Required payload |
+|--------------|---------------|------------------|
+| **Episode content** | Episode | `episode_id`, `spine_version`, `indexed_at`, `discovery_threshold_at_index`, `auto_accept_threshold_at_index` |
+| **Participant context** | (Episode, participant) | `episode_id`, `participant_id`, `context_type` |
 
-```json
-{
-  "collection": "episode_content_vectors",
-  "vector_size": 1536,
-  "distance": "Cosine",
-  "payload_schema": {
-    "episode_id": "keyword",
-    "spine_version": "keyword",
-    "indexed_at": "datetime",
-    "discovery_threshold_at_index": "float",
-    "auto_accept_threshold_at_index": "float"
-  }
-}
-```
+The index stores per-Episode vectors. Link candidates are the *result* of a similarity query over them; candidates are not stored objects.
 
 **Threshold payload fields:** `discovery_threshold_at_index` and `auto_accept_threshold_at_index` record the protocol threshold values in effect at the time this vector was indexed. This enables retrospective comparison — if thresholds were recalibrated between index time and query time, the stored values allow an auditor to determine whether a link would have been proposed under the prior regime. This is an audit-the-decision application (§12).
 
-**Collection: `participant_context_vectors`**
+**Embedding model, dimensionality and distance metric are implementation choices**, and the two vector spaces need not share them — participant identity signals occupy a smaller semantic space than full episode content, and a lower-dimensional model is appropriate there. Implementations MUST NOT mix embeddings from different model families within the same vector space.
 
-```json
-{
-  "collection": "participant_context_vectors",
-  "vector_size": 768,
-  "distance": "Cosine",
-  "payload_schema": {
-    "episode_id": "keyword",
-    "participant_id": "keyword",
-    "context_type": "keyword"
-  }
-}
-```
+##### 11.1.4 Ephemeral Coordinator (Working State)
 
-**Vector dimension note:** `episode_content_vectors` uses 1536 dimensions (text-embedding-3-large or equivalent); `participant_context_vectors` uses 768 dimensions. The asymmetry is intentional — participant identity signals occupy a smaller semantic space than full episode content, and a reduced-dimension model is appropriate. Implementations MUST NOT mix embeddings from different model families within the same collection.
+The coordinator holds three kinds of working state:
 
-##### 11.1.4 Redis Schema (Working State)
+| State | Scope | Notes |
+|-------|-------|-------|
+| **Quarantine queue** | One per Episode, ordered by quarantine deadline | The default quarantine TTL is implementation-configurable. |
+| **Threshold calibration state** | Workspace | Current `DISCOVERY_THRESHOLD` and `AUTO_ACCEPT_THRESHOLD`, with a history of calibration snapshots. |
+| **Link health cache** | One per link | Cached `health_state` and the time it was checked. |
 
-```
-// Quarantine queue — per-Episode
-ariadne:quarantine:queue:{episode_id}    ZSET  // score = quarantine_deadline (Unix timestamp)
-ariadne:quarantine:ttl                   STRING // default TTL in seconds (implementation-configurable)
+Key names, data structures and encodings are implementation choices.
 
-// Threshold calibration state
-ariadne:calibration:thresholds           HASH  // current DISCOVERY_THRESHOLD, AUTO_ACCEPT_THRESHOLD
-ariadne:calibration:history:{date}       LIST  // daily calibration snapshots
+**Quarantine queue scope:** The quarantine queue MUST be scoped per Episode. A single global queue across all Episodes would create scaling problems and scope confusion — a quarantine event in one Episode would be processed in the context of another. Implementations using a single global queue are non-conforming.
 
-// Link health cache
-ariadne:link:health:{link_id}            HASH  // cached health_state + checked_at; always reconstructable from Neo4j
-```
-
-**Quarantine queue scope:** The quarantine queue is keyed per-Episode (`ariadne:quarantine:queue:{episode_id}`). A single global queue across all Episodes would create scaling problems and scope confusion — a quarantine event in one Episode would be processed in the context of another. Implementations using a global key are non-conforming.
-
-**Redis is always reconstructable.** All Redis state can be rebuilt from Neo4j and Blob. Redis failure does not constitute data loss; it constitutes a consistency window until reconstruction completes.
+**The coordinator is always reconstructable.** All coordinator state can be rebuilt from the structural store and the audit store. Coordinator failure does not constitute data loss; it constitutes a consistency window until reconstruction completes.
 
 ---
 
@@ -2088,12 +2060,12 @@ ariadne:link:health:{link_id}            HASH  // cached health_state + checked_
 
 Four proof types are defined for this amendment. A fifth (non-existence proof) is flagged as a known gap.
 
-| Proof Type | What It Proves | Primary Storage |
+| Proof Type | What It Proves | Verified Against |
 |------------|---------------|-----------------|
-| `LINK_INTEGRITY` | `content_hash` matches canonical field set | Neo4j |
-| `MEMBERSHIP_CHAIN` | Succession chain is unbroken and hashes are valid | Neo4j |
-| `DECLARATION_COMPATIBILITY` | Version transition is compatible (minor/patch) or breaking (major) | Neo4j |
-| `AUDIT_COMPLETENESS` | All required audit events are present for a lifecycle | Blob |
+| `LINK_INTEGRITY` | `content_hash` matches canonical field set | Structural store |
+| `MEMBERSHIP_CHAIN` | Succession chain is unbroken and hashes are valid | Structural store |
+| `DECLARATION_COMPATIBILITY` | Version transition is compatible (minor/patch) or breaking (major) | Structural store |
+| `AUDIT_COMPLETENESS` | All required audit events are present for a lifecycle | Audit store |
 
 **Known gap — non-existence proof:** Proof that no `EpisodeLink` exists between Episode A and Episode B is not specified in this amendment. This is a meaningful proof type — "we never connected these two episodes" is an auditable claim — but specifying it requires additional Merkle commitments not introduced here. Implementations requiring negative-space proofs should treat this as a future amendment item.
 
@@ -2232,20 +2204,20 @@ Complete registry of all audit events introduced in Amendment v2.0:
 
 | Event Type | Trigger | Required Fields | Storage |
 |------------|---------|-----------------|---------|
-| `LINK_PROPOSED` | Candidate score >= DISCOVERY_THRESHOLD | link_id, score, signals, threshold | Blob |
-| `LINK_ACCEPTED` | Human confirmation or auto-accept | link_id, accepted_by, method | Blob |
-| `LINK_REJECTED` | Human rejection of proposed candidate | link_id, rejected_by, reason | Blob |
-| `CANDIDATE_REJECTED` | Candidate below DISCOVERY_THRESHOLD | episode_pair, score, threshold | Blob |
-| `LINK_HEALTH_CHANGED` | Health state transition | link_id, prior_state, new_state | Blob |
-| `LINK_QUARANTINED` | Link moved to QUARANTINED | link_id, reason, ttl_deadline | Blob |
-| `LINK_QUARANTINE_RESOLVED` | Quarantine exited | link_id, resolution, resolved_by | Blob |
-| `QUARANTINE_ESCALATED` | Quarantine TTL exceeded | link_id, escalation_reason | Blob |
-| `MEMBERSHIP_RECORD_CREATED` | New MembershipRecord asserted | record_id, episode_id, group_id | Blob |
-| `MEMBERSHIP_RECORD_SUPERSEDED` | Succession recorded | prior_record_id, new_record_id | Blob |
-| `DECLARATION_VERSION_BUMPED` | ConformanceDeclaration versioned | declaration_id, prior_version, new_version, classification | Blob |
-| `DECLARATION_SUPERSEDED` | Declaration succeeded | prior_declaration_id, new_declaration_id | Blob |
+| `LINK_PROPOSED` | Candidate score >= DISCOVERY_THRESHOLD | link_id, score, signals, threshold | Audit store |
+| `LINK_ACCEPTED` | Human confirmation or auto-accept | link_id, accepted_by, method | Audit store |
+| `LINK_REJECTED` | Human rejection of proposed candidate | link_id, rejected_by, reason | Audit store |
+| `CANDIDATE_REJECTED` | Candidate below DISCOVERY_THRESHOLD | episode_pair, score, threshold | Audit store |
+| `LINK_HEALTH_CHANGED` | Health state transition | link_id, prior_state, new_state | Audit store |
+| `LINK_QUARANTINED` | Link moved to QUARANTINED | link_id, reason, ttl_deadline | Audit store |
+| `LINK_QUARANTINE_RESOLVED` | Quarantine exited | link_id, resolution, resolved_by | Audit store |
+| `QUARANTINE_ESCALATED` | Quarantine TTL exceeded | link_id, escalation_reason | Audit store |
+| `MEMBERSHIP_RECORD_CREATED` | New MembershipRecord asserted | record_id, episode_id, group_id | Audit store |
+| `MEMBERSHIP_RECORD_SUPERSEDED` | Succession recorded | prior_record_id, new_record_id | Audit store |
+| `DECLARATION_VERSION_BUMPED` | ConformanceDeclaration versioned | declaration_id, prior_version, new_version, classification | Audit store |
+| `DECLARATION_SUPERSEDED` | Declaration succeeded | prior_declaration_id, new_declaration_id | Audit store |
 
-All audit events are append-only and stored in Blob. Audit events are never modified or deleted.
+All audit events are stored in the append-only audit store. Audit events are never modified or deleted.
 
 ---
 
@@ -2254,23 +2226,23 @@ All audit events are append-only and stored in Blob. Audit events are never modi
 ##### 11.5.1 Write Path
 
 ```
-1. Write to Neo4j (synchronous — must succeed before continuing)
-2. Append to Blob audit log (synchronous — must succeed before continuing)
-3. Propagate to QDrant (asynchronous — within consistency window)
-4. Update Redis cache/queues (asynchronous — within consistency window)
+1. Write to the authoritative structural store (synchronous — must succeed before continuing)
+2. Append to the audit store (synchronous — must succeed before continuing)
+3. Propagate to the semantic search index (asynchronous — within consistency window)
+4. Update the ephemeral coordinator's caches and queues (asynchronous — within consistency window)
 ```
 
-Steps 1 and 2 are atomic from the protocol's perspective. A write that succeeds in Neo4j but fails in Blob is a partial write and MUST be retried or rolled back.
+Steps 1 and 2 are atomic from the protocol's perspective. A write that succeeds in the structural store but fails in the audit store is a partial write and MUST be retried or rolled back.
 
 ##### 11.5.2 Consistency Window SLA
 
-Implementations MUST define a maximum consistency window for QDrant and Redis propagation.
+Implementations MUST define a maximum consistency window for propagation to the semantic search index and the ephemeral coordinator.
 
 **Required SLA:**
 - Typical propagation: < 60 seconds
 - Maximum propagation: 5 minutes
 
-Implementations exceeding the maximum propagation window without a documented exception are non-conforming at the state tier (§12). Implementations MUST expose a consistency status endpoint or mechanism that allows callers to determine whether QDrant/Redis state is within the consistency window.
+Implementations exceeding the maximum propagation window without a documented exception are non-conforming at the state tier (§12). Implementations MUST expose a consistency status endpoint or mechanism that allows callers to determine whether the semantic search index and the ephemeral coordinator are within the consistency window.
 
 ##### 11.5.3 Sequence Numbers and Timestamps
 
@@ -2364,7 +2336,7 @@ An implementation claiming conformance with Amendment v2.0 MUST:
 - [ ] Implement all `LinkHealthState` values including `QUARANTINED`
 - [ ] Implement all `AuditEventType` values in §11.4
 - [ ] Implement quarantine lifecycle including TTL and escalation (§11.3.1, §11.3.3)
-- [ ] Key Redis quarantine queue per-Episode: `ariadne:quarantine:queue:{episode_id}`
+- [ ] Scope the quarantine queue per Episode (§11.1.4); a single global queue is non-conforming
 - [ ] Define and publish consistency window SLA within bounds specified in §11.5.2
 - [ ] Use sequence numbers for within-Episode completeness proofs; timestamps assigned by a workspace-wide monotonic timestamp authority for cross-Episode ordering
 
@@ -2438,7 +2410,7 @@ A second invariant governs **who** may write Layer 3:
 
 A CIA is a protocol-level role, not a specific implementation technology. The CIA for `WorkflowDeclaration` in a workspace may be:
 
-- An MCP server (as in the reference implementation — Appendix A.4),
+- An MCP server (as in the reference implementation — `IMPLEMENTATION-LAYER3.md` §6.4),
 - An in-process module of a single-process implementation,
 - A network-attached daemon with cryptographic identity,
 - Any other entity that the workspace's `ConformanceDeclaration` names.
@@ -2708,16 +2680,16 @@ Layer 3 writes are anchored to the protocol's audit chain by four new `Cognitive
 
 | Event Type | Trigger | Required Fields | Storage |
 |------------|---------|-----------------|---------|
-| `WORKFLOW_DECLARED` | `WorkflowDeclaration` creation | `workflow_id`, `episode_id`, `intention_id` (nullable), `mandate_id` (nullable), `declared_by`, `declared_at`, `content_hash`, `cia_identifier` | Blob, append-only |
-| `EXECUTION_RECORDED` | `ExecutionNode` creation | `execution_node_id`, `workflow_id`, `episode_id`, `sequence_index`, `agent_id`, `status`, `executed_at`, `content_hash`, `cia_identifier` | Blob, append-only |
-| `SKILL_INVOKED` | `SkillInvocation` creation | `skill_invocation_id`, `execution_node_id`, `workflow_id`, `episode_id`, `skill_id`, `skill_source`, `invoked_by`, `invoked_at`, `status`, `content_hash`, `cia_identifier` | Blob, append-only |
-| `WORKFLOW_CLOSED` | `close_workflow` operation (§10) | `workflow_id`, `final_status`, `status_updated_at`, `error_detail` (nullable), `cia_identifier` | Blob, append-only |
+| `WORKFLOW_DECLARED` | `WorkflowDeclaration` creation | `workflow_id`, `episode_id`, `intention_id` (nullable), `mandate_id` (nullable), `declared_by`, `declared_at`, `content_hash`, `cia_identifier` | Audit store, append-only |
+| `EXECUTION_RECORDED` | `ExecutionNode` creation | `execution_node_id`, `workflow_id`, `episode_id`, `sequence_index`, `agent_id`, `status`, `executed_at`, `content_hash`, `cia_identifier` | Audit store, append-only |
+| `SKILL_INVOKED` | `SkillInvocation` creation | `skill_invocation_id`, `execution_node_id`, `workflow_id`, `episode_id`, `skill_id`, `skill_source`, `invoked_by`, `invoked_at`, `status`, `content_hash`, `cia_identifier` | Audit store, append-only |
+| `WORKFLOW_CLOSED` | `close_workflow` operation (§10) | `workflow_id`, `final_status`, `status_updated_at`, `error_detail` (nullable), `cia_identifier` | Audit store, append-only |
 
 **Audit chain integrity.** Each Layer 3 audit event is hash-chained per the existing protocol convention: each record carries `prev_audit_hash` pointing at the preceding record in its chain, and records form an append-only sequence per workspace (or per chain-key as the implementation declares). The chain key for Layer 3 events MAY be the `episode_id` (reference implementation choice) or any other declared key, provided the implementation documents the choice in its `ConformanceDeclaration` and is consistent within a workspace.
 
 **`cia_identifier` is mandatory in every Layer 3 audit event.** The principal that performed the write — the workspace's designated CIA for that node type — MUST be recorded. This is what makes the sole-writer principle (§3) verifiable: a verifier walking the audit chain can confirm that every L3 write was performed by the declared CIA, and that no other principal contributed.
 
-**Conformance W-L3-4 (Audit Emission).** Every Layer 3 node creation and every `WorkflowDeclaration.status` mutation MUST emit the corresponding audit event into the chain **before** the operation is considered durable. Implementations MAY use the existing protocol convention of Blob → Adapter → Index write ordering, in which case the audit-event blob write precedes the node creation in the adapter store.
+**Conformance W-L3-4 (Audit Emission).** Every Layer 3 node creation and every `WorkflowDeclaration.status` mutation MUST emit the corresponding audit event into the chain **before** the operation is considered durable. Implementations MAY order these writes audit store → structural store → index, in which case the audit-event write precedes the node creation in the structural store.
 
 ---
 
@@ -2758,68 +2730,7 @@ Three protocol surfaces touched by this amendment are explicitly deferred to fut
 
 ### Appendix A — Reference Adapter Notes (Non-Normative)
 
-The following notes derive from the Layer 3 reference implementation in Ignis OS, Scorched Earth Labs' agent runtime and the first consumer of this protocol. They are non-normative: conforming implementations need not adopt them. They are included to illustrate one complete adapter path and to inform implementers considering similar designs.
-
-#### A.1 Neo4j edge vocabulary
-
-The reference implementation stores Layer 3 edges as native Neo4j relationships with the names given in §7:
-
-```cypher
-(:WorkflowDeclaration)-[:DECLARED_WITHIN {declared_at}]->(:EpisodeNode)
-(:WorkflowDeclaration)-[:SERVES_INTENTION {declared_at}]->(:IntentionNode)
-(:WorkflowDeclaration)-[:SPAWNED_BY_MANDATE {declared_at}]->(:Mandate)
-(:ExecutionNode)-[:EXECUTES_WITHIN {sequence_index}]->(:WorkflowDeclaration)
-(:ExecutionNode)-[:PRECEDES {sequence_gap, edge_type}]->(:ExecutionNode)
-(:SkillInvocation)-[:INVOKED_WITHIN {invoked_at}]->(:ExecutionNode)
-(:SkillInvocation)-[:SKILL_PRECEDES {sequence_index}]->(:SkillInvocation)
-```
-
-#### A.2 Suggested indexes
-
-```cypher
-CREATE INDEX workflow_episode_idx FOR (w:WorkflowDeclaration) ON (w.episode_id);
-CREATE INDEX workflow_mandate_idx FOR (w:WorkflowDeclaration) ON (w.mandate_id);
-CREATE INDEX workflow_status_idx FOR (w:WorkflowDeclaration) ON (w.status);
-CREATE INDEX execution_workflow_idx FOR (e:ExecutionNode) ON (e.workflow_id);
-CREATE INDEX execution_status_idx FOR (e:ExecutionNode) ON (e.status);
-CREATE INDEX execution_agent_status_idx FOR (e:ExecutionNode) ON (e.agent_id, e.status);
-CREATE INDEX skill_execution_idx FOR (s:SkillInvocation) ON (s.execution_node_id);
-CREATE INDEX skill_id_idx FOR (s:SkillInvocation) ON (s.skill_id);
-CREATE CONSTRAINT workflow_node_id_unique FOR (w:WorkflowDeclaration) REQUIRE w.node_id IS UNIQUE;
-CREATE CONSTRAINT execution_node_id_unique FOR (e:ExecutionNode) REQUIRE e.node_id IS UNIQUE;
-CREATE CONSTRAINT skill_node_id_unique FOR (s:SkillInvocation) REQUIRE s.node_id IS UNIQUE;
-```
-
-#### A.3 Reference forensic query patterns
-
-**"What led to this failure?"**
-```cypher
-MATCH (w:WorkflowDeclaration {node_id: $workflow_id})
-OPTIONAL MATCH (w)<-[:EXECUTES_WITHIN]-(e:ExecutionNode)
-OPTIONAL MATCH (e)<-[:INVOKED_WITHIN]-(s:SkillInvocation)
-RETURN w.workflow_name, w.status, e.step_name, e.status, e.error_type,
-       e.error_detail, s.skill_id, s.status, s.error_detail
-ORDER BY e.sequence_index, s.invoked_at
-```
-
-**"Full provenance chain: intention → mandate → workflow → execution"**
-```cypher
-MATCH (i:IntentionNode {node_id: $intention_id})
-OPTIONAL MATCH (i)<-[:SERVES_INTENTION]-(w:WorkflowDeclaration)
-OPTIONAL MATCH (w)-[:SPAWNED_BY_MANDATE]->(m:Mandate)
-OPTIONAL MATCH (w)<-[:EXECUTES_WITHIN]-(e:ExecutionNode)
-RETURN i, m, w, collect(e) AS executions
-```
-
-#### A.4 Reference CIA implementation
-
-The reference implementation designates a single MCP server (the `ignis_mcp_server`) as the CIA for all three Layer 3 node types in its workspace. Enforcement is achieved through:
-
-- **Application-layer guard:** no other process holds Neo4j credentials with INSERT privileges on the Layer 3 labels.
-- **MCP-tool surface:** the four write tools (`ignis_declare_workflow`, `ignis_record_execution_step`, `ignis_record_skill_invocation`, `ignis_close_workflow`) are the only authorized write paths.
-- **Database constraint:** `node_id` uniqueness constraints (above) prevent accidental duplicate writes from any source.
-
-The `cia_identifier` value emitted in audit events for this implementation is `ignis_mcp_server@<workspace_id>`.
+This specification does not describe any particular storage provider. One complete adapter path for Layer 3 — edge storage, suggested indexes, forensic query patterns, and how a deployment designates and enforces its Cognitive Implementation Authority — is described in [`IMPLEMENTATION-LAYER3.md`](./IMPLEMENTATION-LAYER3.md) §6. That material is non-normative: conforming implementations need not adopt any of it.
 
 ---
 
