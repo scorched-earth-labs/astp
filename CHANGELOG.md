@@ -6,6 +6,10 @@ All notable changes to ASTP (the AI State Tree Protocol). Version numbering foll
 
 The next change-set queues here.
 
+### Fixed (reference package — conformance to existing text)
+
+- `verify_proof_chain` verified each link's inclusion proof against the root *the proof* named, never against the link's own `spine_root`, so a chain whose links carried valid proofs for unrelated trees verified. §16.5.3 (1) has always required the proof to verify against `link.spine_root`; the reference implementation now does.
+
 ## [4.3.1] — 2026-09-17
 
 **PATCH (errata).** Editorial pass over `SPEC.md` and the companion documents ahead of public release. **No normative change:** no hash construction, governance rule, field, state or requirement is altered, and every 4.3.0-conformant implementation is 4.3.1-conformant unchanged.

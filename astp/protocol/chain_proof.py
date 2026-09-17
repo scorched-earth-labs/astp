@@ -126,6 +126,18 @@ def verify_proof_chain(chain: ProofChain) -> ChainVerificationResult:
     # Condition 1: Verify each link's inclusion proof
     for i, link in enumerate(chain.links):
         if link.inclusion_proof is not None:
+            # §16.5.3 (1): the proof is verified against the link's spine_root.
+            # A proof that is valid for some other root proves nothing here.
+            if link.inclusion_proof.spine_root != link.spine_root:
+                return ChainVerificationResult(
+                    valid=False,
+                    reason=(
+                        f"link {i} inclusion proof is for a different spine_root "
+                        f"than the link declares"
+                    ),
+                    links_verified=i,
+                    total_links=total,
+                )
             if not MerkleTree.verify_inclusion_proof(link.inclusion_proof):
                 return ChainVerificationResult(
                     valid=False,
