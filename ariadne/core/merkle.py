@@ -12,11 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Adaptive Merkle Tree — Patent-Pending Technology
-
-Implements the adaptive Merkle tree described in:
-  "Maintaining Property Data Provenance and Integrity"
-  Patent pending — Scorched Earth Labs / Devin Caster
+Adaptive Merkle Tree
 
 Key properties that distinguish this from a standard static Merkle tree:
 1. ORDERING FUNCTION: Leaves sorted by configurable criteria before construction
@@ -33,7 +29,7 @@ Applied to Ariadne:
 - The tree grows with the episode; no full rebuild required
 
 This module replaces the static compute_spine_hash() with an incremental structure
-that honors the patent's adaptive properties while maintaining cryptographic integrity.
+that keeps these adaptive properties while maintaining cryptographic integrity.
 """
 
 import hashlib
@@ -66,11 +62,11 @@ def _node_hash(left: str, right: str) -> str:
 
 
 # ============================================================================
-# Ordering Functions (Patent Claim 5)
+# Ordering Functions
 # ============================================================================
 
 class OrderingCriteria(str, Enum):
-    """Ordering criteria for adaptive Merkle tree leaves (Patent Claim 5)."""
+    """Ordering criteria for adaptive Merkle tree leaves."""
     CHRONOLOGICAL = "chronological"     # Default for episodes — sequence_index order
     IMPORTANCE = "importance"           # Spine segments before branch segments
     SIZE = "size"                       # Larger segments first
@@ -108,7 +104,7 @@ ORDERING_FUNCTIONS: Dict[OrderingCriteria, Callable] = {
 
 
 # ============================================================================
-# Adaptive Merkle Tree (Patent Core)
+# Adaptive Merkle Tree
 # ============================================================================
 
 @dataclass
@@ -125,7 +121,7 @@ class AdaptiveMerkleTree:
     """
     Adaptive Merkle tree with incremental updates and compact fingerprints.
 
-    Implements the patent's key claims:
+    Key behaviours:
     - Claim 1: Ordered construction from data collection using ordering function
     - Claim 2: Selective recalculation on change detection
     - Claim 3: Only affected nodes recalculated
@@ -142,7 +138,7 @@ class AdaptiveMerkleTree:
         # Get the root hash (compatible with compute_spine_hash)
         root = tree.root_hash
 
-        # Get the compact fingerprint (patent's leftmost branch array)
+        # Get the compact fingerprint (leftmost branch array)
         fingerprint = tree.extract_fingerprint()
 
         # Compare fingerprints for significance
@@ -156,7 +152,7 @@ class AdaptiveMerkleTree:
     ):
         self._ordering = ordering
         self._order_fn = ORDERING_FUNCTIONS.get(ordering, chronological_ordering)
-        self._unique_id = unique_identifier  # Episode ID — becomes first leaf per patent
+        self._unique_id = unique_identifier  # Episode ID — becomes first leaf
         self._leaves: List[LeafEntry] = []
         self._leaf_hashes: List[str] = []    # Cached leaf-level hashes
         self._levels: List[List[str]] = []   # All levels of the tree [leaves, ..., root]
@@ -185,7 +181,7 @@ class AdaptiveMerkleTree:
         """
         Append a new leaf to the tree. O(log n) update.
 
-        Patent Claim 2: Detects the addition and recalculates only affected nodes.
+        Detects the addition and recalculates only affected nodes.
         """
         self._leaves.append(entry)
         leaf_hash = entry.leaf_hash
@@ -207,7 +203,7 @@ class AdaptiveMerkleTree:
         """
         Update a leaf's content hash. O(log n) recalculation.
 
-        Patent Claim 3: Only nodes affected by the change are recalculated.
+        Only nodes affected by the change are recalculated.
         """
         if index >= len(self._leaves):
             raise IndexError(f"Leaf index {index} out of range (have {len(self._leaves)})")
@@ -225,16 +221,16 @@ class AdaptiveMerkleTree:
         """
         Build the tree from a complete set of leaves.
 
-        Patent Claim 1: Applies the ordering function before construction.
+        Applies the ordering function before construction.
         Returns the root hash.
         """
         self._leaves = list(leaves)
 
-        # Apply ordering function (Patent Claim 5)
+        # Apply ordering function
         ordered = self._order_fn(self._leaves)
         self._leaves = ordered
 
-        # Optionally prepend unique identifier as first leaf (Patent Fig. 2)
+        # Optionally prepend unique identifier as first leaf
         if self._unique_id:
             uid_entry = LeafEntry(
                 content_hash=_sha3_256(self._unique_id.encode()),
@@ -249,22 +245,22 @@ class AdaptiveMerkleTree:
         return self._root
 
     # ========================================================================
-    # Compact Fingerprint (Patent Claim 4, Fig. 2, Fig. 4)
+    # Compact Fingerprint
     # ========================================================================
 
     def extract_fingerprint(self, branch: str = "leftmost", k: int = 8) -> str:
         """
         Extract a compact fingerprint from a branch of the tree.
 
-        Patent Fig. 2: The fingerprint is constructed from the leftmost leaf,
+        The fingerprint is constructed from the leftmost leaf,
         nodes along the leftmost branch, and the root.
 
-        Patent Fig. 4 / Claim 4: Each component contributes a substring of
+        Each component contributes a substring of
         length k characters, producing a compact fixed-format fingerprint.
 
         Args:
-            branch: "leftmost" (default per patent) or "rightmost"
-            k: Number of hex characters per component (Patent Fig. 4)
+            branch: "leftmost" (default) or "rightmost"
+            k: Number of hex characters per component
 
         Returns:
             Compact hexadecimal fingerprint string
@@ -274,7 +270,7 @@ class AdaptiveMerkleTree:
 
         components = self._extract_branch_path(branch)
 
-        # Patent Claim 4: Extract k-character substrings from each component
+        # Extract k-character substrings from each component
         fingerprint_parts = [comp[:k] for comp in components]
         return "".join(fingerprint_parts)
 
@@ -282,7 +278,7 @@ class AdaptiveMerkleTree:
         """
         Extract the full branch array (all hashes along a branch path).
 
-        Patent Fig. 2: Array comprising leftmost leaf, branch nodes, and root.
+        Array comprising leftmost leaf, branch nodes, and root.
         This is the full-resolution version of the fingerprint.
         """
         return self._extract_branch_path(branch)
@@ -296,7 +292,7 @@ class AdaptiveMerkleTree:
         """
         Compare two fingerprints for significance.
 
-        Patent Fig. 5: The position of the first difference indicates the
+        The position of the first difference indicates the
         importance of the change. Earlier differences = more significant changes
         (because the ordering function places important data leftward/upward).
 
@@ -342,7 +338,7 @@ class AdaptiveMerkleTree:
                 components_changed += 1
 
         # Significance based on which component differs first
-        # Patent Fig. 5: "predetermined threshold position"
+        # Threshold position separating significant from minor changes
         # Component 0 = leaf/UID (most significant)
         # Last component = root (changes on any modification)
         if component == 0:
@@ -393,7 +389,7 @@ class AdaptiveMerkleTree:
         """
         Append a new leaf and update only the affected path. O(log n).
 
-        Patent Claim 2 & 3: Only recalculates nodes affected by the addition.
+        Only recalculates nodes affected by the addition.
         """
         # Add to leaf level
         self._levels[0].append(new_leaf_hash)
@@ -439,7 +435,7 @@ class AdaptiveMerkleTree:
         """
         Recalculate only the path from a changed leaf to the root. O(log n).
 
-        Patent Claim 3: Determines affected nodes and recalculates only those.
+        Determines affected nodes and recalculates only those.
         """
         # Update leaf level
         self._levels[0][leaf_index] = self._leaf_hashes[leaf_index]
@@ -471,7 +467,7 @@ class AdaptiveMerkleTree:
 
         components = []
         if branch == "leftmost":
-            # Patent Fig. 2: leftmost leaf, then leftmost branch nodes to root
+            # Leftmost leaf, then leftmost branch nodes to root
             for level in self._levels:
                 if level:
                     components.append(level[0])
@@ -504,7 +500,7 @@ def compute_adaptive_spine_hash(
     Args:
         segment_content_hashes: Ordered segment content hashes
         spine_signal_hashes: SPINE-placed signal hashes
-        episode_id: Optional unique identifier (becomes first leaf per patent)
+        episode_id: Optional unique identifier (becomes first leaf)
         ordering: Ordering criteria for leaves
         hitl_node_hashes: Resolved HITL event node_hashes (causal anchors)
 

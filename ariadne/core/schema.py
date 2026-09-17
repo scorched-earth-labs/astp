@@ -170,7 +170,7 @@ class EpisodeNode(BaseModel):
     crystallization_status: Optional[CrystallizationStatus] = None
     participants: list[str] = Field(default_factory=list)  # agent_ids
     spine_hash: Optional[str] = None  # SHA3-256 Merkle root; null until sealed
-    spine_fingerprint: Optional[str] = None  # Adaptive Merkle leftmost branch fingerprint (Patent Fig. 2)
+    spine_fingerprint: Optional[str] = None  # Adaptive Merkle leftmost branch fingerprint
     spine_depth: Optional[int] = None  # Merkle tree depth (fingerprint component count)
     signal_manifest_hash: Optional[str] = None  # null until sealed
     episode_root_hash: Optional[str] = None  # H(spine || signal_manifest || exclusion); null until sealed
@@ -457,7 +457,7 @@ def compute_spine_hash(segment_content_hashes: list[str], spine_signal_hashes: l
     """
     Merkle spine hash over ordered segments + SPINE-placed signals.
 
-    Now delegates to the Adaptive Merkle Tree (patent-pending technology)
+    Now delegates to the Adaptive Merkle Tree
     which produces an identical root hash but also supports:
     - O(log n) incremental updates
     - Compact branch fingerprints for external verification
