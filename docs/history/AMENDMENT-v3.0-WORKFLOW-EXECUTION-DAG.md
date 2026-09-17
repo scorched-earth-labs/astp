@@ -1,11 +1,12 @@
-> **⚠️ HISTORICAL REFERENCE — INTEGRATED INTO THE SPEC BODY (v3.2.1).**
-> The normative content of this amendment now lives in **[`SPEC.md`](./SPEC.md) §21 — Layer 3 Workflow & Execution DAG**. Under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) this amendment corresponds to **SPEC v3.1.0**. This file is retained **for provenance only** and is no longer maintained; the SPEC body is authoritative. **Note:** the CIA conformance rule numbered **G-19** below was renumbered to **G-36** on integration (the authoring numeral collided with the BFM Taxonomy's G-19). Section numbers referenced below (§1–§13) are internal to this amendment and appear as subsections of SPEC §21.
+> **HISTORICAL — retained for provenance. Superseded by [`SPEC.md`](../../SPEC.md); do not implement from this document.**
+>
+> The normative content of this amendment was published as SPEC 3.1.0 (2026-06-07) and folded into the body of `SPEC.md` at 3.2.1 (2026-07-04) as **§21 — Layer 3 Workflow & Execution DAG**. `SPEC.md` is authoritative; this file is no longer maintained. Amendment filenames keep their authoring numerals; see [`VERSIONING.md`](../../VERSIONING.md). The CIA conformance rule numbered **G-19** below was renumbered to **G-36** on integration (the authoring numeral collided with the BFM Taxonomy's G-19). Section numbers referenced below (§1–§13) are internal to this amendment and appear as subsections of SPEC §21.
 
 # Workflow & Execution DAG — Layer 3 Codification
 ## Protocol Amendment — Schema Version 3.0.0
 
 **Supersedes:** Schema v2.x.x
-**Status:** Working Draft
+**Status:** Integrated — published as SPEC v3.1.0 (2026-06-07); text folded into `SPEC.md` §21 at v3.2.1 (2026-07-04). No longer maintained.
 **Episode of Record:** Autonomous Agentic Workflows and Skills (`615b41e2-33cf-49e4-8491-b8a3f2e4cd75`)
 **Breaking Changes:** None — Layer 3 is net-new protocol surface. No existing node hash preimage is altered.
 **Compatible Changes:**
@@ -505,4 +506,4 @@ A conforming Layer 3 implementation MUST NOT:
 
 ---
 
-*Amendment v3.0.0 — Working Draft. Episode of Record: `615b41e2-33cf-49e4-8491-b8a3f2e4cd75` (Autonomous Agentic Workflows and Skills). Pending ratification in a sealing episode.*
+*Amendment v3.0.0 — integrated into `SPEC.md` §21 (see Status above). Episode of Record: `615b41e2-33cf-49e4-8491-b8a3f2e4cd75` (Autonomous Agentic Workflows and Skills).*

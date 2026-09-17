@@ -1,3 +1,7 @@
+> **HISTORICAL — retained for provenance. Superseded by [`SPEC.md`](../../SPEC.md); do not implement from this document.**
+>
+> This is the original specification, `0.1.0-draft` (2026-04-07), with an Episode-centric model. Superseded by the v2.x rewrite of `SPEC.md` (2.0.0-draft, 2026-04-09), which made `CognitiveNode` the protocol primitive, and by every version since.
+
 # Ariadne Protocol Specification
 
 **Version:** 0.1.0-draft

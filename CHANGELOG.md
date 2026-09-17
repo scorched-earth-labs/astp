@@ -1,10 +1,36 @@
 # Changelog
 
-All notable changes to the Ariadne protocol. Version numbering follows [VERSIONING.md](./VERSIONING.md).
+All notable changes to ASTP (the AI State Tree Protocol). Version numbering follows [VERSIONING.md](./VERSIONING.md).
 
 ## [Unreleased]
 
 The next change-set queues here.
+
+## [4.3.1] — 2026-09-17
+
+**PATCH (errata).** Editorial pass over `SPEC.md` and the companion documents ahead of public release. **No normative change:** no hash construction, governance rule, field, state or requirement is altered, and every 4.3.0-conformant implementation is 4.3.1-conformant unchanged.
+
+### Changed (editorial — `SPEC.md`)
+- **Header.** Replaced with the standard block (Version, Status, Authors, Date, Supersedes — now naming `SPEC-v3.md` as well as `SPEC-v1.md`). The version-by-version narrative that had accumulated in the `Status` field is removed; every release it described already has an entry in this file. The header now states the BCP 14 (RFC 2119, RFC 8174) reading of the requirement keywords, which the document had used without citing, and states plainly that the Episode of Record identifier for 4.0.0 is not yet published.
+- **§18 Version History** is now a pointer to this file. Details that existed only in that table were carried into the corresponding entries below (2.0.0–2.5.0-draft, 3.4.0, 4.0.0). §18's rows for 2.0.0–2.3.0 carried a `-draft` suffix that this file's headings omit; the dates agree.
+- **§22 References** lists the public standards the text relies on (FIPS 202, RFC 2119, RFC 8174, RFC 5869, RFC 8032, RFC 9562, SemVer 2.0.0) in place of a list of unpublished internal design documents. §5.1 cites FIPS 202 for SHA3-256. Two references to an unpublished proof-system label ("P2") in §5.4 and §9.2 now describe the property (position-binding) in words.
+- **§3.4** pointed at the former amendment document as "the authoritative reference" for Layer 3; it now points at §21 of this document, which is where that text has lived since 3.2.1.
+- **§2.5.2** said "Governance rules G-1 through G-16"; the range is G-1 through G-39.
+- **Cross-references corrected:** §5.6 "(§4.1 dual index)" → §3.3 and G-3; G-24 "§5 Step 8 of the build spec" (an unpublished document) → §19.3.3, where the three assertions are defined; §19.3.7 "§19.3.5 STEP 6" → §19.3.5 (that section has no numbered steps); §21 Appendix B "§13.2" → §13 item 2.
+- **Cross-references removed because no correct target exists:** "codicil (§4.9)" in §4.4.1 and G-1 — there is no §4.9; both now cite the registered `CODICIL_APPEND` operation (§12.4.1) instead. "(§7)" for the crystallization lock in §4.4.1 (§7 is Delta Records; the lock has no section of its own — the text now cites §4.6 and G-18 for the HITL guard). "(§8)" in §5.6 (§8 is the audit chain). "(§4.4)" for Segment `content_ref` in §4.7 (§4.4 is Episode). Defining the codicil, the crystallization lock and the Segment schema is left to a later release.
+- **Review residue removed from normative text** with the substance kept: internal review labels in §19 and §20 (gap numbers, review-round numbers, a decision number, a scenario label — including the label in the §20 §9 heading) and the names of internal reviewers. Cross-Episode ordering timestamps in §20 §11.5.3 and the §20 checklist, previously attributed to a named internal component, now read "timestamps assigned by a workspace-wide monotonic timestamp authority". The §20 §11.3.3 heading is now "Quarantine Escalation". A personal name in §20 §11.2.6 is generalized to "the ratifying human principal".
+- **§21.** The `WORKFLOW_CLOSED` trigger named a downstream product's tool; it now names the `close_workflow` operation of §21 §10. Normative text that named the downstream runtime now says "reference implementation", and the non-normative Appendix A says once what that runtime (Ignis OS) is. The provisional version numerals attached to two deferred items in §21 §13 (both numerals have since been used for other releases) are dropped; the items remain deferred to "a future amendment".
+- **Removed:** the stale "Amendment v3.0.0 — Working Draft … Pending ratification" footer at the end of §21; a doubled `## 13. Spine Tip Cache` heading.
+- **Removed (orphan paragraph):** a paragraph in §20 §11.3.1 on "Reverse delta for `SECTION_SUPERSESSION`". Neither `SECTION_SUPERSESSION` nor `supersedes_clause` is defined or used anywhere else in the specification or the reference implementation, so the paragraph's requirement could not be implemented or tested. It is retained in the historical amendment text under `docs/history/`.
+
+### Changed (editorial — other documents)
+- **Historical documents moved to `docs/history/`**, each with a uniform banner saying it is retained for provenance, what superseded it and when: `VISION.md`, `SPEC-v1.md`, `SPEC-v3.md`, `AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`, `AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`. `AMENDMENT-v3.0`'s status line said "Working Draft"; it now records that the amendment was published as SPEC 3.1.0 and folded into §21 at 3.2.1. `VERSIONING.md`'s retention rule names the new location.
+- **Headers.** `GLOSSARY.md`, `VERSIONING.md` and `IMPLEMENTATION-BFM.md` gain the standard header block. `IMPLEMENTATION-PHASE3.md`'s header said 1.0.0 / SPEC v2.3.0-draft while its footer said 1.1.0 / v2.4.0-draft; the header now agrees with the footer. `CONFORMANCE.md` and `IMPLEMENTATION-PHASE3.md` state that they were written against the 2.x drafts and have not yet been re-verified against 4.x.
+- **`GLOSSARY.md`** states which SPEC version it was last fully reconciled with (`2.5.0-draft`) and that reconciliation with 4.x is in progress. Its "Conformance Test Vectors" entry no longer says byte-level vectors live in `tests/`.
+- **`README.md`.** The Conformance Testing section described a three-layer framework in `astp.core.contracts` that adapters "must pass"; nothing in the package or the test suite uses that module. The section now describes what exists: the `CONFORMANCE*.md` requirement documents and the reference test suite, with machine-readable vectors planned and not shipped. Installation is `pip install -e ".[neo4j,dev]"` from a checkout (Python >= 3.11; distribution and import name are both `astp`). Copyright line and an explicit statement that specification text and code are both Apache-2.0.
+- **`CONFORMANCE.md`** no longer refers to a conformance registry at an unspecified location, or to a separate ASI conformance suite; neither exists. Reference values will be published as vector files in this repository in a later release.
+- Example identifiers in the implementation guides are neutral (`agent-a`, `human-1`); stale absolute test counts and notes-to-self are removed from the guides and from this file; review labels are removed from `CONFORMANCE-CROSS-EPISODE-LINKING.md` and `CONFORMANCE-BFM.md`.
+- **This file:** the 0.1.0-draft date now agrees with the document it describes (2026-04-07); a link to a non-public repository and references to downstream internals are removed.
 
 ### Changed (reference package — no protocol change)
 
@@ -53,7 +79,7 @@ but not CLOSED. No evidence of content tampering. Every item below is additive.
 - **README drift.** The README restated the protocol version (`3.2.2`, while SPEC was 4.2.1) and the governance range ("G-1 through G-9", while SPEC defines through G-39). Both now defer to `SPEC.md` instead of restating it. The package structure tree now shows the `protocol/` and `nodes/` layers and the namespace firewall.
 
 ### Clarified (errata — PATCH)
-- **Segment parentage vs. proof-chain parentage.** New §3.4.1 states explicitly that a Segment's `parent_node_id` is its **`EpisodeNode`** (an upward anchor), that segments order by `sequence_index` with no segment→segment edge, and that the canonical materialization is an ordered `(Episode)-[:CONTAINS {sequence_index}]->(Segment)` fan-out (derive next/prev at read time, don't persist a chain). A reciprocal note at §16.5.3 distinguishes this from the proof-chain rule `B.parent_node_id == A.node_id`, which links whole nodes causally (e.g. episode→episode). **No canonical-form change** — this clarifies existing semantics (G-2 reparenting prohibition; §5.2 leaf-hash preimage). Surfaced by a reference-implementation question ([ariadne-samples #1](https://github.com/scorched-earth-labs/ariadne-samples/issues/1)): an adapter graph showed a segment→segment containment chain instead of the canonical episode→segment fan-out.
+- **Segment parentage vs. proof-chain parentage.** New §3.4.1 states explicitly that a Segment's `parent_node_id` is its **`EpisodeNode`** (an upward anchor), that segments order by `sequence_index` with no segment→segment edge, and that the canonical materialization is an ordered `(Episode)-[:CONTAINS {sequence_index}]->(Segment)` fan-out (derive next/prev at read time, don't persist a chain). A reciprocal note at §16.5.3 distinguishes this from the proof-chain rule `B.parent_node_id == A.node_id`, which links whole nodes causally (e.g. episode→episode). **No canonical-form change** — this clarifies existing semantics (G-2 reparenting prohibition; §5.2 leaf-hash preimage). Surfaced by a reference-implementation question: an adapter graph showed a segment→segment containment chain instead of the canonical episode→segment fan-out.
 
 ## [4.2.1] — 2026-08-21
 
@@ -82,7 +108,7 @@ v3.5.0 removed the operation on the stated ground that "the protocol does not de
 
 Writes the node and **both** edges — `AMENDS` to the source, `PRODUCES` to the new Episode. The link is not symmetric: following provenance backwards wants the source, asking "what came of this" wants the amendment, and one edge would make the other direction a scan. G-1 is deliberately not enforced — the source is sealed *by definition*, which is the precondition for amending it, not an obstacle.
 
-**Known gap recorded, not closed:** `create_consultation`, `create_exchange_entry` and `create_consultation_participant` remain abstract with no implementation. v3.5.0 retired consultation from the protocol but removed only its WIL operations and `SegmentType` members — these three methods and the `ConsultationNode` / `ExchangeEntry` / `ConsultationParticipantNode` types survived, and appear nowhere in SPEC.md. Finishing that removal is a cross-repo migration (26 references downstream, including `bdi_bridge` importing `ExchangeEntry` from the protocol schema). Pinned by test so the gap cannot grow.
+**Known gap recorded, not closed:** `create_consultation`, `create_exchange_entry` and `create_consultation_participant` remain abstract with no implementation. v3.5.0 retired consultation from the protocol but removed only its WIL operations and `SegmentType` members — these three methods and the `ConsultationNode` / `ExchangeEntry` / `ConsultationParticipantNode` types survived, and appear nowhere in SPEC.md. Finishing that removal is a cross-repository migration, because downstream consumers import these types from the protocol schema. Pinned by test so the gap cannot grow.
 
 ## [4.1.0] — 2026-08-20
 
@@ -103,8 +129,9 @@ Writes the node and **both** edges — `AMENDS` to the source, `PRODUCES` to the
 - Scoped to operations *performed*: an implementation owes nothing for capabilities it does not implement.
 - Ledger writes MAY be best-effort with respect to availability, but a gap MUST be surfaced rather than absorbed — the distinction is between an implementation that cannot record and knows it, and one that does not record and cannot tell.
 - **Consequence:** a missing entry from a conforming implementation now means the operation did not occur. That inference was explicitly unavailable before. It remains unavailable for records written prior to this version, and an implementation MUST NOT retroactively assert coverage over a period it did not have it.
+- Tier 1 entries with `completed_at=null` past the provisional window continue to record an interrupted write — strictly more information than either a completed entry or none.
 
-**Breaking.** Every 3.x-conformant implementation that performs a registered operation without ledgering it becomes non-conformant. `SPEC.md` at 3.5.1 retained as `SPEC-v3.md`.
+**Breaking.** Every 3.x-conformant implementation that performs a registered operation without ledgering it becomes non-conformant. `SPEC.md` at 3.5.1 retained as `SPEC-v3.md` (now [`docs/history/SPEC-v3.md`](./docs/history/SPEC-v3.md)).
 
 ## [3.5.1] — 2026-08-20
 
@@ -118,7 +145,7 @@ Written 2026-04-09, two days *after* the enum it was describing already carried 
 
 **MINOR.** Retires `CONSULTATION_COMMIT` and `COLLABORATION_COMMIT` from the §12.4.1 register, and the never-used `SegmentType.CONSULTATION` / `COLLABORATION` members.
 
-Both describe multi-agent interaction patterns the protocol does not define; registering their operations extended the protocol's vocabulary to cover behaviour it does not specify. Implementations that ledger them namespace them (`sel:CONSULTATION_COMMIT`) under the §12.4.1 prefix rule. No conformant implementation affected — neither operation was ever emitted by the reference implementation, and the segment types had no writer and zero instances.
+Both describe multi-agent interaction patterns the protocol does not define; registering their operations extended the protocol's vocabulary to cover behaviour it does not specify. Implementations that ledger them namespace them (for example `vendor:CONSULTATION_COMMIT`) under the §12.4.1 prefix rule. No conformant implementation affected — neither operation was ever emitted by the reference implementation, and the segment types had no writer and zero instances.
 
 ## [3.4.0] — 2026-08-18
 
@@ -127,6 +154,8 @@ Both describe multi-agent interaction patterns the protocol does not define; reg
 §12 defined *how* a write intent is recorded but never *which* operations record one, so the vocabulary existed only as a Python enum documented nowhere normative. Adds the closed register of all operation values and the two entry forms: **Tier 1 coordinated write** (multi-store, full three-phase §12.2 protocol, `completed_at=null` past the provisional window is a recovery candidate) and **Tier 2 ledger record** (single authoritative store, one completed entry at commit, never a recovery candidate).
 
 New governance rules **G-37** and **G-38** constrain the *form* of an entry whenever one is written; neither compels an entry to exist. §12.4.2 deferred that obligation to 4.0.0.
+
+§12.4.1 closes the register against extension values that lack an implementation namespace prefix, and records that `SEGMENT_COMMIT` and `SIGNAL_COMMIT` are not interchangeable. §12.4.2 states that, while the obligation is deferred, a verifier MUST NOT infer from a missing entry that an operation did not occur.
 
 ## [3.3.0] — 2026-07-05
 
@@ -143,7 +172,7 @@ New governance rules **G-37** and **G-38** constrain the *form* of an entry when
 - **Detection cadence.** Whether/how often an implementation scans for orphans is operational hygiene, not protocol conformance. Only the shape of a conformant *recovery* (the node, the field mutations, the retroactive-write discipline) is normative.
 
 ### Tests
-`test_phase2_operations.py` — `TestForkOrphanRecovery` (6): marker hash determinism + satellite (no `parent_hash`), dedup-on-`fork_id`, Class-A append-only flag, Class-B retroactive append (backdated anchor + byte-identical hash), Class-B unanchored, Class-C status correction. Full protocol suite: **309 passing**.
+`test_phase2_operations.py` — `TestForkOrphanRecovery` (6): marker hash determinism + satellite (no `parent_hash`), dedup-on-`fork_id`, Class-A append-only flag, Class-B retroactive append (backdated anchor + byte-identical hash), Class-B unanchored, Class-C status correction.
 
 ## [3.2.2] — 2026-07-04
 
@@ -153,7 +182,7 @@ New governance rules **G-37** and **G-38** constrain the *form* of an entry when
 - **§20 hash algorithm.** `EpisodeLink.content_hash`, `MembershipRecord.content_hash`, and `ConformanceDeclaration.declaration_hash` are computed with **SHA3-256**, not SHA-256 — consistent with the §5 "all hashing uses SHA3-256, no exceptions" commitment and the `hash_canonical.py` implementation. The prose said "SHA-256".
 - **§20 MembershipRecord preimage.** The preimage binds `supersedes_record_id` and `succession_reason` in addition to the seven fields the prose listed (per `_MEMBERSHIP_HASH_PREIMAGE_FIELDS`).
 - **§20 EpisodeLink exclusions.** The preimage **includes** `health_state` and `health_checked_at`; it excludes only `quarantine_resolved_at` and `quarantine_resolution` (set after the hash, on quarantine exit). The prose had the exclusion list inverted.
-- **§21 Form-B attribution.** The Ignis reference implementation serializes in declared field order and hashes with SHA3-256 — not key-sorted JSON with SHA-256. §21 §8 still leaves the Layer-3 byte-form implementation-open; this only corrects the description of what the reference implementation does.
+- **§21 Form-B attribution.** The reference implementation serializes in declared field order and hashes with SHA3-256 — not key-sorted JSON with SHA-256. §21 §8 still leaves the Layer-3 byte-form implementation-open; this only corrects the description of what the reference implementation does.
 
 ## [3.2.1] — 2026-07-04
 
@@ -180,7 +209,7 @@ New governance rules **G-37** and **G-38** constrain the *form* of an entry when
 - **Governance G-30 through G-35** — the backdating integrity invariant (G-30: `spine_tip_hash_at_departure` == the fork Episode's `fork_origin_spine_tip_hash`), non-empty objective, trigger whitelist, `AGENT_ESCALATION` requires a trigger segment, return-requires-COMPLETED, one-return-per-fork.
 
 ### Tests
-`test_phase2_operations.py` — `TestCreateDepartureFork`, `TestDepartureForkFSM`. Full protocol suite: 298 passing.
+`test_phase2_operations.py` — `TestCreateDepartureFork`, `TestDepartureForkFSM`.
 
 ## [3.1.0] — 2026-06-07
 
@@ -192,7 +221,7 @@ New governance rules **G-37** and **G-38** constrain the *form* of an entry when
 - Three-Merkle-layer model formally specified in SPEC §3.4 Persistence Layer Model — Layer 1 Spine, Layer 2 episode content, Layer 3 Workflow & Execution DAG.
 - New `CognitiveDeltaType` variants in `branching.py` for Layer 3 delta records.
 - **Cognitive Implementation Authority (CIA)** — sole-writer pattern per workspace; wire-tier conformance principle. Only the designated CIA may write each Layer 3 node type.
-- 40 new unit tests across the protocol suite.
+- New unit tests across the protocol suite.
 
 ### Invariants
 - **Layer 3 is cryptographically isolated from Spine integrity.** Layer 3 nodes reference Layers 1/2 by ID only; they MUST NOT participate in Spine hash computation. No future Layer-3 change can retroactively force a MAJOR bump on Spine grounds — structural separation is the guarantee.
@@ -200,8 +229,7 @@ New governance rules **G-37** and **G-38** constrain the *form* of an entry when
 - Hash byte-form left open at protocol layer per amendment §3 — each conformant implementation may choose its serialization, provided the canonical form is consistent within that implementation.
 
 ### Notes
-- Layer 3 is the formal protocol surface for the autonomous-process audit trail; downstream consumers writing here include the Ignis Delegation Runner.
-- The amendment was previously held on a private branch under the Chinese Wall agreement; the wall was lifted 2026-06-07 and the surface is now public.
+- Layer 3 is the formal protocol surface for the autonomous-process audit trail.
 
 ## [3.0.0] — 2026-06-07
 
@@ -222,7 +250,6 @@ New governance rules **G-37** and **G-38** constrain the *form* of an entry when
 - Hash preimage changes on `EpisodeLink`, `MembershipRecord`, `ConformanceDeclaration`. Existing v2.x implementations are not wire-conformant against v3.0. See amendment Appendix A for the per-node breaking-change reference.
 
 ### Notes
-- The amendment was previously held on a private branch under the Chinese Wall agreement; the wall was lifted 2026-06-07 and the surface is now public.
 - v2.5.0-draft was never finalized as v2.5.0 — main moved directly to the v3.x line. v2.5.x is therefore not a maintenance line going forward; new work targets v3.x.
 
 ## [2.5.0-draft] — 2026-04-21
@@ -231,6 +258,8 @@ Working Draft. Phase 1-3 (node system) + Phase 4 (HITL) implemented; Branch/Fork
 
 ### Added
 - **Branch/Fork/Merge Taxonomy** — formal taxonomy of episode branching, forking, and merging events. SPEC §19. Includes prescriptive enforcement, resolution primitives (fork, merge, conflict surface), social/internal primitives (aside, soliloquy), and coherence-fingerprint write intercepts.
+- BranchPoint/BranchTerminus (§19.2); ForkPoint/MergePoint/BranchReturn with three-Merkle-root verification (§19.3); AsideSegment/SoliloquySegment with the HASH_PLACEHOLDER content policy (§19.4); CoherenceFingerprint write-intercept state machine and ConfirmationCache (§19.5).
+- Governance rules **G-19 through G-29**. Delta types `BRANCH_CREATED`/`ABANDONED`, `FORK_CREATED`/`RESOLVED`, `MERGE_EXECUTED`, `ASIDE_OPENED`/`CLOSED`, `SOLILOQUY_INITIATED`/`CONCLUDED`. AuditRecord chain integrity (`prior_audit_hash`), IntentRecord idempotency, derived lifecycle state (§19.2.4).
 - `CONFORMANCE-BFM.md` — conformance vectors for the BFM Taxonomy.
 - `IMPLEMENTATION-BFM.md` — implementation guide for BFM Taxonomy.
 - `list_episodes_for_user` query.
@@ -242,32 +271,34 @@ Working Draft. Phase 1-3 (node system) + Phase 4 (HITL) implemented; Branch/Fork
   - `HITLEventNode` — two-phase lifecycle (INVOKED → RESOLVED / TIMED_OUT). Participates in the Merkle spine as a causal anchor.
   - `PENDING_HITL` crystallization guard — blocks sealing during active human review.
   - Two-layer Ed25519 cryptographic attestation.
-  - HITL Merkle spine participation and advisory gates.
+  - HITL Merkle spine participation and advisory gates (`CONDITIONALLY_VALID`); `HITL_GATE` edges (BLOCKS / FOLLOWS); `pending_hitl_ref` segment tagging.
+  - Governance rules **G-17** (invocation before resolution) and **G-18** (crystallization block). Schema version 1.2.0. SPEC §4.6.
 - Implementation Guide updates to incorporate HITL guidance.
 
 ## [2.3.0] — 2026-04-12
 
 ### Added
-- **Phase 3 trust infrastructure** — keys, anchoring, witnesses, chain proofs.
-- **Protocol Boundary** documentation — clarifies what is normative protocol vs. implementation latitude.
+- **Phase 3 trust infrastructure** — node key hierarchy (§16.2), transparency log anchoring (§16.3), witness signatures (§16.4), cross-node chain proof (§16.5). Governance rules **G-11 through G-16**.
+- **Protocol Boundary** documentation (§2.5) — clarifies what is normative protocol vs. implementation latitude.
 
 ## [2.2.0] — 2026-04-12
 
 ### Added
-- **Phase 2 observability** — retrieval audit, `signal_versions_read` segment metadata.
-- Caching and rebalance events.
+- **Phase 2 observability** — retrieval audit records (§11.1), `signal_versions_read` segment metadata (§4.5).
+- Spine tip cache (§13) and rebalance events (§14).
 
 ## [2.1.0] — 2026-04-10
 
 ### Added
-- **Retrieval coordination protocol** — the cross-agent retrieval surface.
+- **Retrieval coordination protocol** — the cross-agent retrieval surface: snapshot isolation (§10.4), tail write advisory (§10.5), HITL re-validation gate (§10.6), side-effect contract (§11).
 
-## [2.0.0] — 2026-04 (pre-changelog history, inferred from `SPEC.md` introduction)
+## [2.0.0] — 2026-04-09 (pre-changelog history, inferred from `SPEC.md` introduction)
 
 ### Changed (BREAKING)
 - **Protocol primitive becomes `CognitiveNode`, not `Episode`.** Episodes are the first *parameterization* of the protocol, not a precondition of it. Future node types (signals, agents, artifacts) slot into the same framework with zero protocol-layer changes.
 - **Dual Index invariant**: `sequence_index` (immutable temporal position, hash-included) vs. `tree_leaf_index` (mutable structural position, hash-excluded). The epistemological core of the v2 line.
+- Position-binding leaf hash, the five-test gate, and the namespace firewall.
 
-## [0.1.0-draft] — 2026-04-08
+## [0.1.0-draft] — 2026-04-07
 
-Original spec. Episode-centric model. Retained as `SPEC-v1.md` for historical reference; superseded by the v2.x line.
+Original spec. Episode-centric model. Retained as [`docs/history/SPEC-v1.md`](./docs/history/SPEC-v1.md) for historical reference; superseded by the v2.x line.

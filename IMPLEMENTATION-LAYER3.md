@@ -3,14 +3,14 @@
 **Version:** 1.0.0
 **Status:** Stable
 **Authors:** Scorched Earth Labs
-**Date:** 2026-07-04
+**Date:** 2026-09-17
 **Applies To:** SPEC.md §21 (Layer 3 — Workflow & Execution DAG), v3.2.1
 
 ---
 
 ## 1. Purpose and Relationship to SPEC.md
 
-SPEC §21 defines the protocol surface of **Layer 3 — the Workflow & Execution DAG**: the forensic provenance record of *how* an Episode's cognition was carried out — which autonomous workflows were declared, which discrete execution steps ran, which skills were invoked, and where execution failed. It is the third cryptographic layer, cryptographically **isolated** from the Merkle Spine (Layers 1/2): it references them by `node_id` only and never participates in Spine hashing. This document describes **how Scorched Earth Labs implemented that surface** — the `astp.core.workflow_execution` protocol-type module and the Ignis OS reference storage adapter. It is not normative: another adapter (relational, document, graph) may differ in storage layout while remaining spec-conforming.
+SPEC §21 defines the protocol surface of **Layer 3 — the Workflow & Execution DAG**: the forensic provenance record of *how* an Episode's cognition was carried out — which autonomous workflows were declared, which discrete execution steps ran, which skills were invoked, and where execution failed. It is the third cryptographic layer, cryptographically **isolated** from the Merkle Spine (Layers 1/2): it references them by `node_id` only and never participates in Spine hashing. This document describes **how Scorched Earth Labs implemented that surface** — the `astp.core.workflow_execution` protocol-type module and the reference storage adapter in Ignis OS (Scorched Earth Labs' agent runtime, the first consumer of this protocol). It is not normative: another adapter (relational, document, graph) may differ in storage layout while remaining spec-conforming.
 
 What is normative from this file:
 
@@ -224,7 +224,7 @@ RETURN i, m, w, collect(e) AS executions
 
 ### 6.4 Reference CIA (§3, G-36)
 
-The Ignis reference designates a single MCP server — `ignis_mcp_server` — as the CIA for **all three** Layer 3 node types in the SEL workspace. Enforcement is layered:
+The Ignis reference designates a single MCP server — `ignis_mcp_server` — as the CIA for **all three** Layer 3 node types in its workspace. Enforcement is layered:
 
 - **Application-layer guard:** no other process holds Neo4j credentials with INSERT on the Layer 3 labels.
 - **MCP-tool surface:** the four write tools `ignis_declare_workflow`, `ignis_record_execution_step`, `ignis_record_skill_invocation`, `ignis_close_workflow` are the *only* authorized write paths.
@@ -269,13 +269,13 @@ Edge types: the seven of §6.1. Indexes: the eight of §6.2. All storage form is
 
 All Layer 3 protocol vectors run under `ARIADNE_ENABLED=true` against the pure-Python schema types (no live adapter — the reference adapter is exercised in the Ignis OS repo).
 
-| File | Count | Focus |
-|------|-------|-------|
-| `tests/unit/protocol/test_workflow_execution.py` | 40 | Enum surfaces (`WorkflowStatus`/`ExecutionStatus`/`SkillStatus`/`ErrorType`/`PrecedesEdgeType`), `LAYER_3_SCHEMA_VERSION`, the four `CognitiveDeltaType` additions, per-node instantiation, per-node hash (field inclusion/exclusion, mutation-surface hash-stability, `registry_id` backfill hash-stability), status-transition state machine, execution error consistency, delta-payload shapes |
+| File | Focus |
+|------|-------|
+| `tests/unit/protocol/test_workflow_execution.py` | Enum surfaces (`WorkflowStatus`/`ExecutionStatus`/`SkillStatus`/`ErrorType`/`PrecedesEdgeType`), `LAYER_3_SCHEMA_VERSION`, the four `CognitiveDeltaType` additions, per-node instantiation, per-node hash (field inclusion/exclusion, mutation-surface hash-stability, `registry_id` backfill hash-stability), status-transition state machine, execution error consistency, delta-payload shapes |
 
 Test classes: `TestWorkflowStatus`, `TestExecutionStatus`, `TestSkillStatus`, `TestErrorType`, `TestPrecedesEdgeType`, `TestSchemaVersion`, `TestCognitiveDeltaTypeAdditions`, `TestWorkflowDeclarationInstantiation`, `TestWorkflowDeclarationHash`, `TestExecutionNodeInstantiation`, `TestExecutionNodeHash`, `TestSkillInvocationInstantiation`, `TestSkillInvocationHash`, `TestWorkflowStatusTransitions`, `TestExecutionErrorConsistency`, `TestDeltaPayloads`.
 
-Combined with the full protocol test surface (namespace firewall, trust infrastructure, cross-episode, BFM, verification, etc.), `.venv/bin/python -m pytest tests/ -q` runs the complete suite green.
+Run the whole suite with `pytest`.
 
 ---
 
@@ -283,9 +283,9 @@ Combined with the full protocol test surface (namespace firewall, trust infrastr
 
 Deliberate scope limits, forward-compatible with future amendments (SPEC §21 §13):
 
-1. **Mandate — full protocol surface (§13.1).** `mandate_id` and the `SPAWNED_BY_MANDATE` edge are introduced, but the `Mandate` node type itself (fields, hash preimage, lifecycle, layer position) is unspecified. Conforming implementations MAY treat `Mandate` as an opaque reference. A future amendment (provisional **v3.1.0 — Mandate Codification**) will define it.
+1. **Mandate — full protocol surface (§13.1).** `mandate_id` and the `SPAWNED_BY_MANDATE` edge are introduced, but the `Mandate` node type itself (fields, hash preimage, lifecycle, layer position) is unspecified. Conforming implementations MAY treat `Mandate` as an opaque reference. A future amendment will define it.
 2. **Skill Registry (§13.2).** `SkillInvocation.registry_id` is reserved and MUST be left null. Its exclusion from `content_hash` is the enabling provision: when the Skill Registry amendment ships, a backfill MAY populate `registry_id` on existing records without invalidating their hashes.
-3. **SkillInvocation Spine promotion (§13.3).** SkillInvocation remains a Layer 3 node; this amendment declines to promote it into Spine hashing. A future major amendment (provisional **v4.0.0**) may revisit once production usage informs the design.
+3. **SkillInvocation Spine promotion (§13.3).** SkillInvocation remains a Layer 3 node; this amendment declines to promote it into Spine hashing. A future major amendment may revisit once production usage informs the design.
 4. **CIA designation change events.** SPEC §21 §3 reserves the `CIA_DESIGNATION_CHANGED` audit event type for a future amendment if/when CIA reassignment proves non-rare; the current surface treats the CIA as stable.
 
 ---

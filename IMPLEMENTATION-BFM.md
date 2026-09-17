@@ -1,7 +1,10 @@
 # ASTP — Branch/Fork/Merge Implementation Guide
 
 **Version:** 1.2.0
-**Date:** 2026-07-04
+**Status:** Stable
+**Authors:** Scorched Earth Labs
+**Date:** 2026-09-17
+**Applies To:** SPEC.md §19 (Branch / Fork / Merge / Departure Fork / Aside / Soliloquy / CoherenceFingerprint + Orphan Recovery), v3.3.0
 **Scope:** All four phases of the Branch/Fork/Merge taxonomy (SPEC §19), plus the **Phase D departure-fork lifecycle** (SPEC §19.3.5–19.3.7, added §5 — incl. orphan recovery §5.8)
 **Target audience:** Implementers extending a conforming ASTP instance with the BFM taxonomy.
 
@@ -368,7 +371,7 @@ soliloquy = create_soliloquy(
     driver,
     parent_episode_id, parent_segment_id,
     soliloquy_purpose, initiated_by_agent,
-    visibility_policy=None,      # dict; defaults enforce Decision 1
+    visibility_policy=None,      # dict; defaults enforce G-27 (human accessibility)
     deliberation_chain=None,
 ) -> Optional[SoliloquyResult]
 
@@ -497,7 +500,7 @@ The recommendation anchors at the last NOMINAL segment — before drift began �
 
 ```python
 cache = ConfirmationCache()
-cache.record(action_description="declare branch for drift", confirmed_by="devin",
+cache.record(action_description="declare branch for drift", confirmed_by="human-1",
              current_turn=current, valid_for_turns=10)
 ...
 if not cache.is_confirmed(action_description, current_turn=now):
@@ -546,17 +549,16 @@ derivation queries. Full list in `adapters/neo4j/writer.py`
 All tests pass under `ARIADNE_ENABLED=true` with a mocked Neo4j driver
 (`tests/unit/protocol/test_phase*_{schema,operations,intercept}.py`).
 
-| File | Count | Focus |
-|------|-------|-------|
-| `test_phase2_schema.py` | 16 | Fork/merge schema, hash domain separation, conflict manifest |
-| `test_phase2_operations.py` | 34 | Fork N-way, resolve, merge clean/conflict/resolved paths, integrity; **Phase D** `TestCreateDepartureFork` + `TestDepartureForkFSM` (11) + producer-hardening (5: idempotent re-drive, two-phase anchor, full-result replay) + `TestForkOrphanRecovery` (6): marker self-hash/satellite/dedup, Class-A/B/C recovery incl. retroactive append |
-| `test_phase3_schema.py` | 24 | Aside/soliloquy schema, HASH_PLACEHOLDER independence from chain, governance |
-| `test_phase3_operations.py` | 17 | Aside close + reference scan, soliloquy conclude, chain stays in soliloquy |
-| `test_phase4_schema.py` | 22 | State machine transitions, thresholds, confirmation cache, write-time guard |
-| `test_phase4_intercept.py` | 8 | Intercept progression NOMINAL→MATERIALIZED, drift reset, objective/INTRODUCE overrides |
-| **Total** | **121** | |
+| File | Focus |
+|------|-------|
+| `test_phase2_schema.py` | Fork/merge schema, hash domain separation, conflict manifest |
+| `test_phase2_operations.py` | Fork N-way, resolve, merge clean/conflict/resolved paths, integrity; **Phase D** `TestCreateDepartureFork` + `TestDepartureForkFSM` + producer-hardening (idempotent re-drive, two-phase anchor, full-result replay) + `TestForkOrphanRecovery`: marker self-hash/satellite/dedup, Class-A/B/C recovery incl. retroactive append |
+| `test_phase3_schema.py` | Aside/soliloquy schema, HASH_PLACEHOLDER independence from chain, governance |
+| `test_phase3_operations.py` | Aside close + reference scan, soliloquy conclude, chain stays in soliloquy |
+| `test_phase4_schema.py` | State machine transitions, thresholds, confirmation cache, write-time guard |
+| `test_phase4_intercept.py` | Intercept progression NOMINAL→MATERIALIZED, drift reset, objective/INTRODUCE overrides |
 
-The Phase D vectors are colocated in `test_phase2_operations.py` (the departure fork is part of the fork family). Combined with the full protocol test surface (namespace firewall, trust-infrastructure conformance, cross-episode, Layer 3, verification, etc.), `poetry`-less `.venv/bin/python -m pytest tests/ -q` currently runs **309/309 passing**.
+The Phase D vectors are colocated in `test_phase2_operations.py` (the departure fork is part of the fork family). Run the whole suite with `pytest`.
 
 ---
 
