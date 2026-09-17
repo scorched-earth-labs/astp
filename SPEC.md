@@ -1,6 +1,6 @@
 # ASTP — AI State Tree Protocol Specification
 
-**Version:** 4.4.1
+**Version:** 4.5.0
 **Status:** Stable
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-17
@@ -520,6 +520,19 @@ only cause a genuine one to fail. A record that lacks them was written before
 unless the implementation's history says otherwise — the reference
 implementation's own seals before 2026-04-01 are version `0`.
 
+#### 5.8.1 `resolved_signal_order` (annotation)
+
+A seal made under `ordering_version` 1 may depend on an order of same-timestamp Signals that no stored node records (above). An implementation that has established that order — typically by search, during a verification run — MAY record it on the `CrystallizationDelta` as `resolved_signal_order`: the `content_hash` values of the Episode's SPINE-placed Signals, in the order that reproduces `sealed_chain_root`.
+
+This is an **annotation**, not a version identifier. An identifier names a construction; the annotation supplies an input that the named construction left undetermined. The rules that make it safe:
+
+- **Outside every preimage.** It is not hashed, not signed and not part of any root. It cannot change what a seal proves.
+- **Written by a verification run, never by a re-seal.** It records an observation about a seal that already exists.
+- **Checked, never trusted.** A verifier MUST NOT use a `resolved_signal_order` unless (a) the listed hashes are exactly the Episode's stored SPINE-placed Signal hashes, in some order, and (b) recomputing the spine under the seal's §5.8 identifiers with that order reproduces `sealed_chain_root`. An annotation that fails either test MUST be ignored; the verifier proceeds as if none were present. A false annotation therefore cannot make a root verify — it can only fail to help.
+- **`ordering_version` 1 only.** Under `ordering_version` 2 Signals are not spine leaves, so the annotation has no meaning: a verifier MUST ignore one found on such a seal.
+- **No inference from absence.** The annotation saves a search; it adds no strength. A seal whose order is found by search is reproduced to exactly the same root as one whose order is recorded. A seal that reproduces under *no* order is a different matter — that is a root that cannot be rebuilt (§9.3), and no annotation can or should repair it.
+- **Not for publication alongside roots alone.** The listed values are unsalted content hashes (§5.6). An exported proof that withholds the leaf list MUST withhold this annotation too.
+
 Conforming implementations MUST write these fields on every new seal and MAY
 backfill them on historical records from a verification run; a backfill is an
 annotation, never a re-seal (a re-seal would itself be a post-closure mutation).
@@ -692,8 +705,9 @@ obligation: a root that cannot be rebuilt cannot be tested.
 
 This holds for every seal made under `ordering_version` 2. For a seal made under
 `ordering_version` 1 it holds only up to the order of same-timestamp Signals, which
-no stored node records (§5.8): a verifier may have to search those orderings, and a
-seal whose tied groups are too large to search cannot be reproduced at all.
+no stored node records (§5.8): a verifier may have to search those orderings — or use a
+`resolved_signal_order` annotation, after checking it (§5.8.1) — and a seal whose tied groups
+are too large to search, and which carries no admissible annotation, cannot be reproduced at all.
 
 An endpoint or tool that returns a *stored* root is an anchor lookup, not a
 verification, and MUST NOT be described as one.
