@@ -95,3 +95,39 @@ def compute_leaf_hash_from_node(node) -> str:
         sealed_at=node.sealed_at,
         parent_node_id=node.parent_node_id,
     )
+
+
+# ── hash_version 2 (DRAFT for SPEC 5.0.0; not yet ratified) ─────────────────────
+
+LEAF_HASH_V2_PREFIX = b"LEAF_HASH:v2:"
+
+
+def compute_leaf_hash_v2(
+    node_id: UUID,
+    node_type: str,
+    schema_version: str,
+    sequence_index: int,
+    content_hash: str,
+    parent_node_id: Optional[UUID] = None,
+) -> str:
+    """Position-binding leaf hash, ``hash_version`` 2.
+
+    The version 1 fields without ``sealed_at``. A leaf hash is computed once, when
+    the node is created, and a node is unsealed at creation — so a value that only
+    exists later cannot belong in it (under version 1 it made every sealed node
+    fail content verification). Sealing is bound by the seal record instead.
+
+    Encoded with the canonical field encoding under its own domain prefix; an
+    absent parent is NULL, not sixteen zero bytes, so it cannot be confused with
+    the nil UUID.
+    """
+    from astp.protocol.encoding import HASH, STRING, UINT, UUID_, hash_fields
+
+    return hash_fields(LEAF_HASH_V2_PREFIX, [
+        (UUID_, node_id),
+        (STRING, node_type),
+        (STRING, schema_version),
+        (UINT, sequence_index),
+        (HASH, content_hash),
+        (UUID_, parent_node_id),
+    ])

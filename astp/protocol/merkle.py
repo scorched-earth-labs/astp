@@ -222,3 +222,30 @@ class MerkleTree:
                 current = _domain_node(sibling, current)
 
         return current == proof.spine_root
+
+
+# ── spine_algorithm_version 2 (DRAFT for SPEC 5.0.0; not yet ratified) ──────────
+
+TREE_LEAF_V2_PREFIX = b"TREE_LEAF:v2:"
+TREE_NODE_V2_PREFIX = b"TREE_NODE:v2:"
+
+
+def compute_merkle_root_v2(leaf_inputs: List[str]) -> str:
+    """Merkle root over 32-byte inputs, hashed as **raw bytes**.
+
+    The tree is the one SPEC §5.4 has always described — pair from the left, carry
+    an unpaired node up unchanged, refuse an empty list — and differs from
+    versions 0 and 1 only in encoding: a hash value enters as its 32 raw bytes,
+    not as 64 ASCII hex characters, under prefixes of its own.
+    """
+    import hashlib
+
+    if not leaf_inputs:
+        raise ValueError("the root of an empty leaf list is undefined")
+    level = [hashlib.sha3_256(TREE_LEAF_V2_PREFIX + bytes.fromhex(x)).digest() for x in leaf_inputs]
+    while len(level) > 1:
+        level = [
+            hashlib.sha3_256(TREE_NODE_V2_PREFIX + level[i] + level[i + 1]).digest() if i + 1 < len(level) else level[i]
+            for i in range(0, len(level), 2)
+        ]
+    return level[0].hex()

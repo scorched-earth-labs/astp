@@ -9,3 +9,4 @@ include IMPLEMENTATION*.md
 graft docs
 graft tests
 global-exclude *.py[cod]
+recursive-include vectors *.json
