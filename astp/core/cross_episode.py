@@ -207,7 +207,7 @@ def enforce_link_mutual_exclusivity(
             raise LinkGovernanceError(
                 f"Link type {new_link_type.value} cannot coexist with "
                 f"{existing.value} on the same (source, target) pair "
-                f"(Amendment v2.0 §3 mutual exclusivity)."
+                f"(SPEC §20 →3 mutual exclusivity)."
             )
 
 

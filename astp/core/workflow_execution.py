@@ -325,7 +325,7 @@ def enforce_workflow_status_transition(
     if target not in permitted[current]:
         raise Layer3GovernanceError(
             f"Workflow status transition {current.value} → {target.value} is "
-            f"not permitted by Amendment v3.0 §10 state machine."
+            f"not permitted by the SPEC §21 §10 state machine."
         )
 
 
@@ -346,14 +346,14 @@ def enforce_execution_error_consistency(node: ExecutionNode) -> None:
         if node.error_type is not None or node.error_detail is not None:
             raise Layer3GovernanceError(
                 "ExecutionNode with status=COMPLETED must have null "
-                "error_type and error_detail (Amendment v3.0 §5)."
+                "error_type and error_detail (SPEC §21 §5)."
             )
     else:
         # FAILED or INTERRUPTED
         if node.error_type is None:
             raise Layer3GovernanceError(
                 f"ExecutionNode with status={node.status.value} must have "
-                f"error_type set (Amendment v3.0 §5)."
+                f"error_type set (SPEC §21 §5)."
             )
 
 

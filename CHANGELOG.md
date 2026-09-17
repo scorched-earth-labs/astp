@@ -36,6 +36,11 @@ The next change-set queues here.
 
 - The Python import package is renamed `ariadne` → `astp`, matching the distribution name (package version 0.2.0). `from ariadne.…` becomes `from astp.…`; nothing else about the API moves.
 - **Not renamed, deliberately:** the HKDF `info` strings (`ariadne.workspace.v1`, `ariadne.node.v1:{node_type}`, `ariadne.seal.v1`), the coordinator key prefix (`ariadne::`), the graph labels (`Ariadne*`), the `ARIADNE_ENABLED` flag, and the `Ariadne*` class names. The first three are inputs to derived keys or names of stored data; `tests/unit/protocol/test_wire_constants.py` pins them.
+- `astp.PROTOCOL_VERSION` names the `SPEC.md` version the package implements; a test compares its MAJOR.MINOR with this specification's `Version:` field. `astp.__version__` remains the package's own version.
+- `sha3_256` is defined in `astp.protocol.hashing` (still importable from `astp.core.schema`), so that `astp.protocol` imports nothing from `astp.core` or `astp.adapters`. The test suite now enforces that as well as the `astp.nodes` firewall, including relative and dynamic imports.
+- Importing `astp.nodes` registers both shipped node types (`episode`, `segment`); previously `segment` was registered only when its subpackage was imported directly.
+- Removed the unused module `astp.core.contracts`. Added `py.typed`, PEP 639 licence metadata and a `MANIFEST.in`; the sdist now carries the specification, the companion documents and the tests.
+- Every test file passes when run on its own; CI checks this.
 
 ## [4.3.0] — 2026-09-13
 
