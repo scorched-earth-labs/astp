@@ -3,7 +3,7 @@
 **Version:** 1.0.0
 **Status:** Stable
 **Authors:** Scorched Earth Labs
-**Date:** 2026-07-04
+**Date:** 2026-09-17
 **Applies To:** SPEC.md §20 (Cross-Episode Linking & Grouping), v3.2.1
 
 ---
@@ -105,7 +105,7 @@ from astp.core.cross_episode import (
 link = EpisodeLink(
     source_episode=src_uuid,
     target_episode=tgt_uuid,
-    created_by="odysseus",
+    created_by="agent-a",
     link_type=LinkType.CONTINUES_FROM,
     link_strength=0.87,
     is_inferred=False,
@@ -125,13 +125,13 @@ Phase-2 discovery emits **audit-only** events (no `EpisodeLink` node created):
 audit_id = propose_link_candidate(driver, source_episode=..., target_episode=...,
     proposed_link_type=LinkType.INFORMED_BY, composite_score=0.81,
     inference_signals=[...], discovery_threshold=0.75, auto_accept_threshold=0.90,
-    proposing_agent="metis")                             # → LINK_PROPOSED (score in [DISCOVERY, AUTO_ACCEPT))
+    proposing_agent="agent-b")                             # → LINK_PROPOSED (score in [DISCOVERY, AUTO_ACCEPT))
 
 record_candidate_rejection(driver, ..., composite_score=0.62,
-    discovery_threshold=0.75, detecting_agent="metis")  # → CANDIDATE_REJECTED (score < DISCOVERY)
+    discovery_threshold=0.75, detecting_agent="agent-b")  # → CANDIDATE_REJECTED (score < DISCOVERY)
 
 record_link_rejection(driver, proposed_audit_event_id=audit_id, ...,
-    rejecting_agent="devin", rejection_reason=RejectionReason.NOT_RELATED)  # → LINK_REJECTED
+    rejecting_agent="human-1", rejection_reason=RejectionReason.NOT_RELATED)  # → LINK_REJECTED
 ```
 
 ### 4.2 Content-Hash Preimage (wire-tier — `compute_episode_link_content_hash`)
@@ -199,7 +199,7 @@ from astp.core.grouping import (
 
 record = MembershipRecord(
     episode_id=ep_uuid, group_id="col-42", group_system="sel-thermyt:Collection",
-    asserted_by="clio", membership_role=MembershipRole.PRIMARY,
+    asserted_by="agent-c", membership_role=MembershipRole.PRIMARY,
     supersedes_record_id=None, succession_reason=None,
 )
 record = assert_membership_record(driver, record, explicit_reason="...")
@@ -214,7 +214,7 @@ record_id, episode_id, group_id, group_system, asserted_at,
 asserted_by, membership_role, supersedes_record_id, succession_reason
 ```
 
-**Included** per §20 →7 (Gap 6): `membership_role` — role is a content characterization, so a role change requires a **new** record via succession, not an in-place edit. `supersedes_record_id` is included as the record's commitment to its predecessor in the chain. **Excluded** per §20 →10 (forward-pointer exclusion): `superseded_by_record_id` — it is set by a *later* succession and would invalidate a sealed record's hash.
+**Included** per §20 →7: `membership_role` — role is a content characterization, so a role change requires a **new** record via succession, not an in-place edit. `supersedes_record_id` is included as the record's commitment to its predecessor in the chain. **Excluded** per §20 →10 (forward-pointer exclusion): `superseded_by_record_id` — it is set by a *later* succession and would invalidate a sealed record's hash.
 
 > Note: SPEC §20 →7's prose enumerates a shorter set (`record_id + episode_id + group_id + group_system + asserted_at + asserted_by + membership_role`). The implementation additionally binds `supersedes_record_id` and `succession_reason` so the record cryptographically commits to *which* predecessor it supersedes and *why*. This is the ground-truth preimage; see flagged discrepancy in §10.
 
@@ -244,7 +244,7 @@ from astp.core.grouping import (
 )
 
 decl = ConformanceDeclaration(
-    group_id="col-42", group_system="sel-thermyt:Collection", declared_by="atlas",
+    group_id="col-42", group_system="sel-thermyt:Collection", declared_by="agent-d",
     declaration_version="1.0.0",
     capabilities=[Capability(capability_id="supports_archival")],
 )

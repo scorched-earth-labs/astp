@@ -3,7 +3,7 @@
 **Version:** 1.0.0
 **Status:** Stable
 **Authors:** Scorched Earth Labs
-**Date:** 2026-07-04
+**Date:** 2026-09-17
 **Applies To:** SPEC.md §20 (Cross-Episode Linking & Grouping), v3.2.1
 
 ---
@@ -95,13 +95,13 @@ All hex values lowercase. All string fields UTF-8. Datetimes UTC-normalized ISO 
 
 **LH-003** — Per-Episode quarantine queue
 - **Class:** REQUIRED
-- **Spec Reference:** §20 →11.1.4 (Redis schema, pushback #3)
+- **Spec Reference:** §20 →11.1.4 (Redis schema, quarantine queue scope)
 - **Description:** The quarantine queue MUST be keyed per-Episode: `ariadne:quarantine:queue:{episode_id}` (a ZSET scored by deadline). A single global queue across all Episodes is non-conforming.
 - **Failure Condition:** A global quarantine key is used, causing a quarantine event in one Episode to be processed in another's context.
 
 **LH-004** — Quarantine escalation event
 - **Class:** REQUIRED
-- **Spec Reference:** §20 →11.3.3 (Chronos addition)
+- **Spec Reference:** §20 →11.3.3 (quarantine escalation)
 - **Description:** On TTL breach a `QUARANTINE_ESCALATED` audit event MUST fire carrying `link_id`, `episode_id`, `quarantined_at`, `ttl_deadline`, `escalated_at`, `escalation_reason ∈ {TTL_EXCEEDED, INTEGRITY_UNRESOLVABLE, HUMAN_REQUIRED}`. The link remains `QUARANTINED`.
 
 ---
@@ -127,7 +127,7 @@ All hex values lowercase. All string fields UTF-8. Datetimes UTC-normalized ISO 
 
 **SG-004** — `LINK_REJECTED` proposal correlation
 - **Class:** REQUIRED
-- **Spec Reference:** §20 →5 (Gap 5), `RejectionReason` enum
+- **Spec Reference:** §20 →5, `RejectionReason` enum
 - **Description:** `record_link_rejection()` MUST emit `LINK_REJECTED` carrying `proposed_audit_event_id` (the `LINK_PROPOSED` it rejects) and `rejection_reason ∈ {LOW_CONFIDENCE, WRONG_RELATIONSHIP_TYPE, NOT_RELATED, DUPLICATE_OF_EXISTING}`. Rejection is a new forward event (append-only) — it MUST NOT mutate or delete the prior proposal record.
 - **Failure Condition:** A rejection that overwrites the proposal, or omits the `proposed_audit_event_id` linkage.
 
@@ -139,8 +139,8 @@ All hex values lowercase. All string fields UTF-8. Datetimes UTC-normalized ISO 
 
 **MR-001** — `MembershipRecord` content hash
 - **Class:** REQUIRED
-- **Spec Reference:** §20 →7 (Gap 6), §20 →10 (forward-pointer exclusion)
-- **Description:** `compute_membership_record_content_hash()` canonicalizes, in order (from `_MEMBERSHIP_HASH_PREIMAGE_FIELDS`): `record_id`, `episode_id`, `group_id`, `group_system`, `asserted_at`, `asserted_by`, `membership_role`, `supersedes_record_id`, `succession_reason`. Same §3-canonicalizer (SHA3-256, `sort_keys=False`) as CEL-001. `membership_role` is INCLUDED (Gap 6): role is content, so a role change requires a new record via succession.
+- **Spec Reference:** §20 →7, §20 →10 (forward-pointer exclusion)
+- **Description:** `compute_membership_record_content_hash()` canonicalizes, in order (from `_MEMBERSHIP_HASH_PREIMAGE_FIELDS`): `record_id`, `episode_id`, `group_id`, `group_system`, `asserted_at`, `asserted_by`, `membership_role`, `supersedes_record_id`, `succession_reason`. Same §3-canonicalizer (SHA3-256, `sort_keys=False`) as CEL-001. `membership_role` is INCLUDED: role is content, so a role change requires a new record via succession.
 - **Verification Protocol:** Cross-implementation consistency check. Two conforming implementations MUST produce identical bytes for the same input tuple.
 - **Failure Condition:** `membership_role` omitted from the preimage (would let a role edit go uncommitted), or `superseded_by_record_id` included (would invalidate a sealed record's hash on later succession).
 
@@ -185,7 +185,7 @@ All hex values lowercase. All string fields UTF-8. Datetimes UTC-normalized ISO 
 
 **CD-002** — SemVer format enforcement
 - **Class:** REQUIRED
-- **Spec Reference:** §20 →8 (Gap 7)
+- **Spec Reference:** §20 →8
 - **Description:** `enforce_semver_format()` MUST reject any `declaration_version` that is not a strict `major.minor.patch` non-negative triplet (pre-release / build-metadata suffixes rejected), raising `GroupingGovernanceError`.
 
 **CD-003** — Version-bump classification

@@ -53,8 +53,7 @@ astp/
 │   ├── wil.py               # Write Intent Log state machine
 │   ├── branching.py         # Branch / fork / merge primitives
 │   ├── workflow_execution.py# Layer 3 — Workflow & Execution DAG
-│   ├── hash_canonical.py    # Reference canonicalizer for content hashes
-│   └── contracts.py         # Conformance benchmark framework
+│   └── hash_canonical.py    # Reference canonicalizer for content hashes
 └── adapters/
     ├── base.py              # AriadneAdapter abstract interface (ASI)
     └── neo4j/               # Reference implementation
@@ -125,30 +124,28 @@ The Neo4j adapter in `astp/adapters/neo4j/` is the reference implementation. See
 
 ## Conformance Testing
 
-The `astp.core.contracts` module provides a three-layer conformance framework:
+What exists today:
 
-| Layer | Verifies |
-|-------|----------|
-| **Structural** | Hash chain integrity, governance rule enforcement, Merkle root consistency |
-| **Contextual** | Segment ordering, signal placement, consultation hash chains |
-| **Experiential** | End-to-end episode lifecycle: create → populate → seal → verify → archive |
+- **Conformance requirement documents** — the `CONFORMANCE*.md` files listed under **Specification Documents** below. Each vector states its inputs and the property a conforming implementation must exhibit, by requirement class (REQUIRED / RECOMMENDED).
+- **The reference test suite** — `tests/`, run with `pytest`. It exercises the reference implementation against those documents and guards the spec-to-code agreements (operation register, lifecycle states, namespace firewall, wire constants).
 
-A conforming adapter must pass all structural layer checks.
+What does not exist yet: machine-readable vector files with pinned expected digests, and an adapter-parameterized harness that a third-party implementation can run. Both are planned; neither is shipped. Until they are, conformance is demonstrated by showing the properties the `CONFORMANCE*.md` documents require.
 
 ---
 
 ## Installation
 
+Requires Python >= 3.11. The distribution name and the import name are both `astp`.
+
+The package is not yet published to a package index. Install from a checkout:
+
 ```bash
-pip install astp        # once published to PyPI
+pip install -e ".[neo4j,dev]"   # editable install with the Neo4j reference adapter and test dependencies
+pytest                          # run the reference test suite
 ```
 
-For local development against the reference implementation:
-
-```toml
-# pyproject.toml
-[tool.poetry.dependencies]
-astp = {path = "../ariadne-protocol"}
+```python
+import astp
 ```
 
 ---
@@ -157,18 +154,18 @@ astp = {path = "../ariadne-protocol"}
 
 **Alpha.** The protocol core and Neo4j reference adapter are extracted and stable. Active development continues on branching, forking, merging, and agent tool-call retrieval interfaces. The protocol specification is in `SPEC.md`.
 
-Not recommended for production use outside of the Ignis OS environment until the first stable release.
+The first consumer of this protocol is Ignis OS, Scorched Earth Labs' agent runtime, and integration tests for the reference adapter run there rather than in this repository. Not recommended for production use elsewhere until the first stable release.
 
 ---
 
 ## Amendments
 
-Protocol amendments are ratified in a designated Episode of Record and reference the Episode's spine hash for provenance. The Episode of Record is the cryptographic anchor; the document is the human-readable artifact. As of the **v3.2.1 integration pass**, both prior amendments are folded into the SPEC body — the amendment documents are retained for provenance only and are no longer normative. Amendment documents retain their authoring numerals; the canonical SPEC version per [`VERSIONING.md`](./VERSIONING.md) is shown alongside.
+Protocol amendments are ratified in a designated Episode of Record and reference the Episode's spine hash for provenance. The Episode of Record is the cryptographic anchor; the document is the human-readable artifact. Episode of Record identifiers and spine hashes for the MAJOR releases to date are not yet published. As of the **v3.2.1 integration pass**, both prior amendments are folded into the SPEC body — the amendment documents are retained for provenance only and are no longer normative. Amendment documents retain their authoring numerals; the canonical SPEC version per [`VERSIONING.md`](./VERSIONING.md) is shown alongside.
 
 | Amendment | SPEC version | Status | Now in SPEC | Document (historical) |
 |-----------|--------------|--------|-------------|-----------------------|
-| v2.0 — Cross-Episode Linking & Grouping Interface | v3.0.0 | Integrated into SPEC body (v3.2.1) | [§20](./SPEC.md) | [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) |
-| v3.0 — Layer 3 Workflow & Execution DAG Codification | v3.1.0 | Integrated into SPEC body (v3.2.1) | [§21](./SPEC.md) | [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) |
+| v2.0 — Cross-Episode Linking & Grouping Interface | v3.0.0 | Integrated into SPEC body (v3.2.1) | [§20](./SPEC.md) | [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./docs/history/AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) |
+| v3.0 — Layer 3 Workflow & Execution DAG Codification | v3.1.0 | Integrated into SPEC body (v3.2.1) | [§21](./SPEC.md) | [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./docs/history/AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) |
 
 **SPEC v3.0.0 (cross-episode linking, MAJOR)** introduces typed cross-episode links, an EpisodeGrouping interface (with `MembershipRecord` as the protocol-owned artifact), succession-chain governance for `MembershipRecord` and `ConformanceDeclaration`, audit-the-decision pattern for behavioral-tier implementation choices (§12), and a three-tier conformance taxonomy (wire / state / behavioral). Breaking hash preimage changes on three node types — see Appendix A of the amendment for the full breaking-change reference.
 
@@ -180,7 +177,7 @@ The SPEC integration pass landed in **v3.2.1**: this material is now normatively
 
 ## Specification Documents
 
-The protocol is one normative document (`SPEC.md`) plus, per feature surface, a non-normative implementation guide (reference Neo4j adapter) and a conformance-vector document (cross-implementation test vectors).
+The protocol is one normative document (`SPEC.md`) plus, per feature surface, a non-normative implementation guide (reference Neo4j adapter) and a conformance document (test vectors stated as inputs and required properties; pinned expected digests are not yet published).
 
 | Surface | SPEC | Implementation guide | Conformance vectors |
 |---------|------|----------------------|---------------------|
@@ -190,7 +187,9 @@ The protocol is one normative document (`SPEC.md`) plus, per feature surface, a 
 | Reproducibility — spine leaf set, episode root, version identifiers | §5.6–§5.8, §9.3, G-1 | — | [`CONFORMANCE-REPRODUCIBILITY.md`](./CONFORMANCE-REPRODUCIBILITY.md) |
 | Trust Infrastructure (Phase 3) | §16 | [`IMPLEMENTATION-PHASE3.md`](./IMPLEMENTATION-PHASE3.md) | [`CONFORMANCE.md`](./CONFORMANCE.md) |
 
-Supporting: [`VERSIONING.md`](./VERSIONING.md) (canonical version policy), [`GLOSSARY.md`](./GLOSSARY.md), [`VISION.md`](./VISION.md).
+Supporting: [`VERSIONING.md`](./VERSIONING.md) (canonical version policy), [`GLOSSARY.md`](./GLOSSARY.md), [`CHANGELOG.md`](./CHANGELOG.md).
+
+Historical, retained for provenance only and not to be implemented from: [`docs/history/`](./docs/history/) — prior major-version specifications (`SPEC-v1.md`, `SPEC-v3.md`), the two former amendment documents, and the original architecture vision (`VISION.md`).
 
 ---
 
@@ -210,7 +209,9 @@ Full policy: [`VERSIONING.md`](./VERSIONING.md). Change history: [`CHANGELOG.md`
 
 ## License
 
-Apache-2.0
+Apache-2.0. Copyright 2026 Scorched Earth Labs, LLC.
+
+The specification text and the code in this repository are both licensed under Apache-2.0; see [`LICENSE.txt`](./LICENSE.txt).
 
 The Apache license was chosen deliberately: it includes a patent grant clause, which matters for a protocol with novel cryptographic data structures at its core.
 

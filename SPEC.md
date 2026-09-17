@@ -1,10 +1,21 @@
 # ASTP — AI State Tree Protocol Specification
 
-**Version:** 4.3.0
-**Status:** Stable. The full normative protocol is defined in this document's body. (v4.3.0 defines the **Episode spine leaf set** — segments only, in `sequence_index` order — publishes the three-component **Episode root** (§5.7) with an order-independent signal manifest, adds **algorithm and ordering version identifiers** to nodes and seal records (§5.8), states a **reproducibility obligation** (§9.3) with its own conformance family (`RP-*`), and clarifies G-1 to cover appends from `CLOSING_PENDING_SEAL` onward. All additive; motivated by the first corpus-scale re-verification of sealed Episodes, which found seals that could not be reconstructed from stored nodes alone. v4.2.0 restores `CONSULTATION_COMMIT` to the §12.4.1 register and corrects a contradiction: v3.5.0 removed it on the stated ground that the protocol does not define consultation, while **G-8 and G-9 have governed consultation since v1**. §12.4.1 and the governance section now agree, and §12.4 states that an operation's tier turns on whether an interruption leaves recoverable work, not on store count. (v4.1.0 adds **§4.7 AttachmentNode** — external content injected into an Episode, recorded so the injection is verifiable — and registers `ATTACHMENT_COMMIT`. Additive; kind is a `media_type` property rather than a node type per §1. (**v4.0.0 is a MAJOR release.** §12.4.2 now states the ledgering obligations deferred since 3.4.0: **G-39** — an implementation MUST record a ledger entry for every registered operation it performs. This is conformance-breaking by construction and requires a ratifying **Episode of Record** per [`VERSIONING.md`](./VERSIONING.md). It also makes a missing entry mean something: from a conforming implementation, the operation did not occur. v3.5.1 is **errata**: §4.4.1 now states the Episode lifecycle states the protocol actually defines. The prior one-line list named four states no implementation has ever had and omitted seven that exist, including the entire closure workflow. No semantic change — the states were always these. v3.5.0 removes `CONSULTATION_COMMIT` and `COLLABORATION_COMMIT` from the §12.4.1 operation register, and the unused `SegmentType.CONSULTATION` / `COLLABORATION` members, as multi-agent interaction patterns the protocol does not define; implementations that ledger them namespace them per the §12.4.1 prefix rule. v3.4.0 added **§12.4 Ledgered Operations** — the closed register of WIL operation values and the Tier 1 / Tier 2 entry forms, with G-37 and G-38 governing the *form* of an entry whenever one is written; **which operations an implementation MUST ledger remains deferred to 4.0.0** per §12.4.2.) v3.3.0 added the departure-fork **orphan-recovery** surface at §19.3.7 — the `ForkOrphanMarker` node, per-class recovery field mutations, and the one permitted retroactive spine write — additively; no existing canonical form changes, so every v3.2.x-conformant implementation remains conformant. Detection cadence is non-normative.) The Phase D departure-fork lifecycle (v3.2.0) is at §19.3.5–19.3.7; cross-episode linking + grouping (v3.0.0) at §20; the Layer 3 Workflow & Execution DAG (v3.1.0) at §21. The v3.2.1 integration pass folded the former standalone amendments into the SPEC body — editorial only, no normative change. The historical amendment documents ([`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md) → §20, [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md) → §21) are retained for provenance only. Amendment filenames retain their authoring numerals; under the canonical SPEC versioning policy ([`VERSIONING.md`](./VERSIONING.md)) they correspond to SPEC v3.0.0 and v3.1.0 respectively.
+**Version:** 4.3.1
+**Status:** Stable
 **Authors:** Scorched Earth Labs
-**Date:** 2026-06-07
-**Supersedes:** SPEC-v1.md (0.1.0-draft)
+**Date:** 2026-09-17
+**Supersedes:** [`SPEC-v3.md`](./docs/history/SPEC-v3.md) (3.5.1); earlier, [`SPEC-v1.md`](./docs/history/SPEC-v1.md) (0.1.0-draft)
+**Change history:** [`CHANGELOG.md`](./CHANGELOG.md)
+**Versioning policy:** [`VERSIONING.md`](./VERSIONING.md)
+**Term definitions:** [`GLOSSARY.md`](./GLOSSARY.md)
+
+The full normative protocol is defined in this document's body. The `Version` field above is the protocol version; what changed in each release is recorded in `CHANGELOG.md` and is not restated here.
+
+**Former amendment documents.** Cross-episode linking and grouping, and the Layer 3 Workflow & Execution DAG, were first written as standalone amendments and were folded into this document at 3.2.1 as §20 and §21. §20 and §21 are normative. The amendment documents ([`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./docs/history/AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md), [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./docs/history/AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md)) are retained under `docs/history/` for provenance only; do not implement from them. Their filenames keep their authoring numerals; under `VERSIONING.md` they correspond to SPEC 3.0.0 and 3.1.0 respectively.
+
+**Episode of Record.** `VERSIONING.md` requires a ratifying Episode of Record for each MAJOR release. The record identifier for the 4.0.0 release is not yet published.
+
+**Conventions.** The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 [RFC 2119] [RFC 8174] when, and only when, they appear in all capitals, as shown here.
 
 ## 1. Abstract
 
@@ -57,7 +68,7 @@ The protocol surface is the set of primitives, invariants, and interfaces where 
 | Spine Merkle algorithm | SHA3-256 binary Merkle tree with domain separation (LEAF:/NODE:) and deterministic leaf ordering by `sequence_index`. |
 | `spine_root` semantics | The Merkle root of all domain-separated leaf hashes in `sequence_index` order. |
 | `ContentDelta` / `StructuralDelta` structure | Core fields (`pre_root`, `post_root`, `delta_type`) are fixed. |
-| Governance rules G-1 through G-16 | All conforming implementations enforce all protocol-mandatory governance rules. |
+| Governance rules G-1 through G-39 | All conforming implementations enforce all protocol-mandatory governance rules. |
 | Dual Index semantics | `sequence_index` is immutable and in the leaf hash. `tree_leaf_index` is mutable and NOT in the leaf hash. |
 | Namespace Firewall | Protocol layer never imports from node-type layers. |
 
@@ -127,9 +138,9 @@ The protocol defines three **persistence layers** — distinct from the code-arc
 |-------|----------|-------|-------------------|
 | **Layer 1 — Merkle Spine** | EpisodeNode, IntentionNode, BeliefNode, SignalNode, and other cognitive primitives | Protocol kernel | Hash-chained, witness-signable, authoritative cognitive record |
 | **Layer 2 — Episode Content** | Segments, BranchPoints, HITLEventNodes; Adaptive Merkle Tree under the Spine | Protocol kernel | Anchored to Layer 1 via parent references |
-| **Layer 3 — Workflow & Execution DAG** | WorkflowDeclaration, ExecutionNode, SkillInvocation | Cognitive Implementation Authority (per workspace, per node type — see Amendment v3.0 §3) | **Isolated**: Layer 3 nodes do NOT participate in Spine hash computation. Cross-layer references are by ID only. |
+| **Layer 3 — Workflow & Execution DAG** | WorkflowDeclaration, ExecutionNode, SkillInvocation | Cognitive Implementation Authority (per workspace, per node type — see §21 §3) | **Isolated**: Layer 3 nodes do NOT participate in Spine hash computation. Cross-layer references are by ID only. |
 
-**Layer 3 was introduced by Amendment v3.0 — Workflow & Execution DAG Codification.** The full Layer 3 surface — node schemas, hash preimage rules, immutability invariants, state machine, sole-writer principle (Cognitive Implementation Authority), and audit event types (`WORKFLOW_DECLARED`, `EXECUTION_RECORDED`, `SKILL_INVOKED`, `WORKFLOW_CLOSED`) — is normatively specified in `AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`. This section names Layer 3's existence and position in the persistence model; the amendment is the authoritative reference for its semantics.
+**Layer 3 is specified in §21 of this document.** The full Layer 3 surface — node schemas, hash preimage rules, immutability invariants, state machine, sole-writer principle (Cognitive Implementation Authority), and audit event types (`WORKFLOW_DECLARED`, `EXECUTION_RECORDED`, `SKILL_INVOKED`, `WORKFLOW_CLOSED`) — is normatively specified there. This section names Layer 3's existence and position in the persistence model; §21 is the authoritative reference for its semantics.
 
 The two three-layer models — code-architecture (§3.1) and persistence (§3.4) — are **orthogonal**. The code-architecture layering governs what can import what (Protocol → Instantiation → Node Type, never reverse). The persistence layering governs what participates in which cryptographic structure. A given node type (e.g., `WorkflowDeclaration`) sits in the Node Type code-architecture layer AND in Persistence Layer 3 simultaneously; the two memberships describe different properties.
 
@@ -209,8 +220,8 @@ implementation MUST NOT persist an `episode_status` outside it.
 | `PENDING_HITL` | A blocking human-in-the-loop gate is unresolved (§4.6). Advisory gates do not enter this state. |
 | `CLOSING` | Closure initiated; final contributions still permitted. |
 | `CLOSING_PENDING_SEAL` | All contributions in; grace period active before the record is fixed. |
-| `CLOSED` | Closure recorded. Further content is admissible only as a codicil (§4.9). |
-| `CRYSTALLIZATION_PENDING` | The crystallization lock is held (§7). A transient state, not a resting one. |
+| `CLOSED` | Closure recorded. Further content is admissible only as a codicil (`CODICIL_APPEND`, §12.4.1). |
+| `CRYSTALLIZATION_PENDING` | The crystallization lock is held. A transient state, not a resting one. |
 | `CRYSTALLIZED` | A crystallization completed and the episode was left in this state. |
 | `SEALING` | Seal in progress. |
 | `SEALED` | Sealed; the record is cryptographically fixed. |
@@ -226,8 +237,8 @@ which is the correct behaviour when crystallizing mid-closure — an episode
 being sealed must return to `CLOSING`, not to `CRYSTALLIZED`.
 
 `CRYSTALLIZATION_PENDING` is the one state that blocks all content writes
-without being a closure state; see §7 for the lock and §4.6 for the HITL guard
-that refuses to enter it.
+without being a closure state; see §4.6 and G-18 for the HITL guard that refuses
+to enter it.
 
 
 ### 4.5 Segment Metadata: signal_versions_read
@@ -354,7 +365,7 @@ it would prove the extraction unchanged while leaving the PDF unverified.
 Implementations that store an extraction MUST keep it separate from the hashed
 content.
 
-**`content_ref` is implementation-defined**, exactly as on a Segment (§4.4).
+**`content_ref` is implementation-defined**, exactly as on a Segment.
 The protocol does not constrain locator schemes and MUST NOT be read as
 endorsing any particular storage or vendor.
 
@@ -369,7 +380,7 @@ Attaching produces an `ATTACHMENT_COMMIT` ledger entry (§12.4.1).
 
 ### 5.1 Hash Algorithm
 
-All hashing uses **SHA3-256** (Keccak). No exceptions. This is a protocol-level commitment: changing the hash algorithm requires a major version bump.
+All hashing uses **SHA3-256** (FIPS 202). No exceptions. This is a protocol-level commitment: changing the hash algorithm requires a major version bump.
 
 ### 5.2 Position-Binding Leaf Hash
 
@@ -408,7 +419,7 @@ To prevent second-preimage attacks across tree levels:
 A binary Merkle tree over domain-separated leaf hashes. Supports:
 - Full construction from leaf set
 - Incremental append (O(log n))
-- Inclusion proof generation (P2 — position-binding)
+- Inclusion proof generation (position-binding — the proof commits to the leaf's `sequence_index`, not only its content; §9.2)
 - Inclusion proof verification
 
 The tree is node-type-agnostic — it operates on hash strings only.
@@ -426,12 +437,12 @@ non-ephemeral Segments, ordered by `sequence_index`. Nothing else is a spine lea
   decisions, evaluation metadata) are **not** leaves; their content hashes enter
   the exclusion set (§5.7) so that what was left out is itself committed.
 - **Signals are not spine leaves.** A signal is cross-episode linkage, not spine
-  content (§8); it commits through the signal manifest (§5.7). Implementations
+  content; it commits through the signal manifest (§5.7). Implementations
   that previously folded SPINE-placed signals into the leaf set, ordered by
   arrival time, produced roots that are not reproducible from stored nodes when
   arrival timestamps collide — see §5.8 `ordering_version` 1.
 - `sequence_index` is the **only** ordering key. It is unique per Episode by
-  construction (§4.1 dual index), so the leaf order is total and needs no
+  construction (§3.3 dual index; G-3), so the leaf order is total and needs no
   tiebreak.
 
 A verifier MUST be able to rebuild the spine root from the stored Segment nodes
@@ -494,10 +505,10 @@ No modifications to sealed nodes, **and no new children appended to them.** A
 node with non-null `sealed_at` is frozen. For an Episode the record is fixed from
 `CLOSING_PENDING_SEAL` onward (§4.4.1): an implementation MUST refuse a Segment
 or Signal commit against an Episode in `CLOSING_PENDING_SEAL`, `CLOSED`,
-`CRYSTALLIZATION_PENDING`, `SEALING`, `SEALED` or `ARCHIVED`. The codicil (§4.9)
-is the sole sanctioned post-closure append and uses its own path. A refused
-commit is a governance event; if the implementation ledgers refusals it does so
-outside the §12.4 register.
+`CRYSTALLIZATION_PENDING`, `SEALING`, `SEALED` or `ARCHIVED`. The codicil
+(`CODICIL_APPEND`, §12.4.1) is the sole sanctioned post-closure append and uses
+its own path. A refused commit is a governance event; if the implementation
+ledgers refusals it does so outside the §12.4 register.
 
 ### G-2: Reparenting Prohibition
 
@@ -626,7 +637,7 @@ Any conforming implementation MUST detect all five classes of tampering:
 
 A verifier catching only test 1 is a *content* integrity verifier. Tests 2-5 are required for *temporal* integrity. All five must pass.
 
-### 9.2 Inclusion Proof (P2)
+### 9.2 Inclusion Proof
 
 A position-binding Merkle inclusion proof proves a node exists at a specific position:
 
@@ -922,7 +933,7 @@ interrupted write, not a missing one. It is evidence the operation was
 attempted and that its outcome is unknown — which is strictly more than either
 a completed entry or no entry conveys, and is why Tier 1 exists.
 
-## 13. Spine Tip Cache## 13. Spine Tip Cache
+## 13. Spine Tip Cache
 
 Segment append and snapshot capture both need to know the current `max(sequence_index)` for an Episode. Without caching, every such operation requires a database traversal.
 
@@ -1239,30 +1250,7 @@ This test should be run bidirectionally (A→B and B→A).
 
 ## 18. Version History
 
-| Version | Date | Changes |
-|---------|------|---------|
-| 0.1.0-draft | 2026-04-07 | Initial extraction. Episode-centric. See SPEC-v1.md. |
-| 2.0.0-draft | 2026-04-09 | CognitiveNode foundation. Dual-index. Position-binding leaf hash. Five-test gate. Namespace firewall. |
-| 2.1.0-draft | 2026-04-10 | Retrieval coordination protocol: snapshot isolation (10.4), tail write advisory (10.5), HITL re-validation gate (10.6), side-effect contract (11). |
-| 2.2.0-draft | 2026-04-12 | Phase 2 observability: signal_versions_read (4.5), retrieval audit records (11.1), spine tip cache (13), rebalance events (14). |
-| 2.3.0-draft | 2026-04-12 | Phase 3 trust infrastructure: Protocol vs. Implementation Boundary (2.5), node key hierarchy (16.2), transparency log anchoring (16.3), witness signatures (16.4), cross-node chain proof (16.5), G-11 through G-16. |
-| 2.4.0-draft | 2026-04-16 | Phase 4 HITL: HITLEventNode first-class node type (4.6), two-phase lifecycle (INVOKED→RESOLVED), HITL_GATE edges (BLOCKS/FOLLOWS), Merkle spine participation as causal anchors, PENDING_HITL crystallization guard, two-layer Ed25519 signing (agent invocation + human resolution), CONDITIONALLY_VALID advisory gates, pending_hitl_ref segment tagging, G-17 (invocation before resolution), G-18 (crystallization block). Schema version 1.2.0. |
-| 2.5.0-draft | 2026-04-21 | Branch/Fork/Merge Taxonomy §19 covering BFM Phases 1–4: BranchPoint/BranchTerminus (§19.2), ForkPoint/MergePoint/BranchReturn with three-Merkle-root verification (§19.3), AsideSegment/SoliloquySegment with HASH_PLACEHOLDER content policy and Decision 1 visibility (§19.4), CoherenceFingerprint write-intercept state machine and ConfirmationCache (§19.5). New governance rules G-19 through G-29. New delta types BRANCH_CREATED/ABANDONED, FORK_CREATED/RESOLVED, MERGE_EXECUTED, ASIDE_OPENED/CLOSED, SOLILOQUY_INITIATED/CONCLUDED. AuditRecord chain integrity (`prior_audit_hash`), IntentRecord idempotency, derived lifecycle state (§19.2.4). |
-| 3.0.0 | 2026-06-07 | **MAJOR** — Cross-episode linking + grouping. Source: [`AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`](./AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md). Typed `EpisodeLink` with `LinkType`, `LinkHealthState`, `Signal`/`SignalType` machinery. `EpisodeGrouping` interface (`MembershipRecord` as protocol-owned artifact; `ConformanceDeclaration` for downstream conformance). Succession-chain governance for membership/conformance. Audit-the-decision pattern for behavioral-tier implementation choices (§12). Three-tier conformance taxonomy: wire / state / behavioral. **Breaking hash preimage changes on `EpisodeLink`, `MembershipRecord`, `ConformanceDeclaration`** — see amendment Appendix A for the full breaking-change reference. `LINK_*` audit events + `assert_episode_link` operation. Phase 2 discovery primitives (link proposals + calibration loop). Audit-chain + canonical-hash helpers lifted into shared core modules. |
-| 3.1.0 | 2026-06-07 | **MINOR** — Layer 3 Workflow & Execution DAG. Source: [`AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`](./AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md). New node types: `WorkflowDeclaration`, `ExecutionNode`, `SkillInvocation`. Three-Merkle-layer model formalized: Layer 1 Spine, Layer 2 episode content, Layer 3 Workflow & Execution DAG. **Layer 3 is cryptographically isolated from Spine integrity** — references Layers 1/2 by ID only; never hash-linked into the Spine; no future Layer-3 change can force a MAJOR bump on Spine grounds. Cognitive Implementation Authority (CIA) — sole-writer guarantee as wire-tier conformance principle. New `CognitiveDeltaType` variants. `ExecutionNode` and `SkillInvocationNode` immutable after creation; only mutable Layer 3 field is `WorkflowDeclaration.status` (and `status_updated_at`). Hash byte-form left open at protocol layer per amendment §3. |
-| 3.2.0 | 2026-07-04 | **MINOR** — Phase D departure-fork lifecycle, defined in-body (§19.3.5–19.3.6). `create_departure_fork()`: a single directional departure into a new (continuing) Episode, distinct from the speculative `create_fork()`. New nodes `DepartureForkPointNode` (domain `DEPARTURE_FORK_POINT:`) and `ForkReturnNode` (domain `FORK_RETURN:`). Backdating integrity invariant (G-30): `spine_tip_hash_at_departure` == the fork Episode's `fork_origin_spine_tip_hash`. Lifecycle FSM `ACTIVE → COMPLETED \| ABANDONED` (`complete_departure_fork` / `abandon_departure_fork` / `declare_fork_return`); resumption is a non-event. **Declarative** return (`INCORPORATED`/`ACKNOWLEDGED`/`SUPERSEDED`), never the branch's structural merge. Immutable Episode fork provenance (§19.3.6). New `CognitiveDeltaType` variants `DEPARTURE_FORK_CREATED`/`_COMPLETED`/`_ABANDONED`/`_RETURNED`; new edges `FORK_RETURN`, `RETURNED_FROM`. Governance G-30 through G-35. **Additive — no breaking changes.** |
-| 3.2.1 | 2026-07-04 | **PATCH** — SPEC integration pass. Folded the two former standalone amendments into this document's body: cross-episode linking + grouping (was `AMENDMENT-v2.0-CROSS-EPISODE-LINKING.md`) → **§20**; Layer 3 Workflow & Execution DAG (was `AMENDMENT-v3.0-WORKFLOW-EXECUTION-DAG.md`) → **§21**; References moved to §22. The amendment's CIA conformance rule was renumbered from its authoring numeral G-19 (which collided with BFM's G-19) to **G-36**. Amendment files retained for provenance only (historical-reference banners). **Editorial only — no normative change.** |
-| 3.3.0 | 2026-07-05 | **MINOR** — Departure-fork orphan recovery (§19.3.7). New non-chained diagnostic satellite node `ForkOrphanMarker` (domain `FORK_ORPHAN_MARKER:`, self-hashed, excluded from the spine Merkle chain and from departure-registry queries, deduplicated one-per-orphaned-fork). Four orphan classes (A dangling point / B unanchored episode / C return-status mismatch / D stale ACTIVE). Class-B recovery defines the **one permitted retroactive `DepartureForkPointNode` write** (append + backdated anchor + cross-verify gate, byte-identical to an on-time write; escalate-don't-write on hash mismatch). New diagnostic fields on the fork point (`orphaned`, `retroactive`, `orphan_recovery_timestamp`) and the fork episode (`fork_orphaned`, `fork_orphan_class=UNANCHORED`, `status_corrected_by_orphan_recovery`, `status_corrected_at`). **Detection cadence is non-normative** (operational hygiene). **Additive — no breaking changes.** |
-| 3.4.0 | 2026-08-18 | **MINOR** — Write Intent Log operation register (§12.4). Registers all 21 WIL operation values and classifies each into one of two entry forms: **Tier 1 coordinated write** (multi-store; full three-phase §12.2 protocol; `completed_at=null` past the provisional window is a recovery candidate) and **Tier 2 ledger record** (single authoritative store; one completed entry at commit; never a recovery candidate). New governance rules **G-37** and **G-38** constrain the form of an entry whenever one is written, and compel no entry to exist. §12.4.1 closes the register against extension values lacking an implementation namespace prefix, and records that `SEGMENT_COMMIT` and `SIGNAL_COMMIT` are not interchangeable. §12.4.2 **defers ledgering obligations — which operations MUST be ledgered — to 4.0.0**, since each is conformance-breaking and therefore MAJOR under [`VERSIONING.md`](./VERSIONING.md), requiring a ratifying Episode of Record; and states that a verifier MUST NOT infer from a missing entry that an operation did not occur. **Additive — no breaking changes.** |
-| 3.5.0 | 2026-08-19 | **MINOR** — Retires `CONSULTATION_COMMIT` and `COLLABORATION_COMMIT` from the §12.4.1 operation register, and the never-used `SegmentType.CONSULTATION` / `COLLABORATION` members. Both describe multi-agent interaction patterns the protocol does not define; registering their operations extended the protocol's vocabulary to cover behaviour it does not specify. Implementations that ledger such operations namespace them (`sel:CONSULTATION_COMMIT`) under the §12.4.1 prefix rule. **No conformant implementation is affected:** the reference implementation never emitted either operation, the segment types have no writer and zero instances in any known deployment, and the only downstream writer migrated to namespaced values before this release. |
-| 3.5.1 | 2026-08-20 | **PATCH (errata)** — §4.4.1 Episode Lifecycle States. The prior text read "ACTIVE, REBALANCING, SEALING, SEALED, SEALING_FAILED, REBALANCE_FAILED, ARCHIVED, EXPIRED". Four of those (`REBALANCING`, `SEALING_FAILED`, `REBALANCE_FAILED`, `EXPIRED`) have never existed in any implementation; seven real states were missing (`CREATED`, `PENDING_HITL`, `CLOSING`, `CLOSING_PENDING_SEAL`, `CLOSED`, `CRYSTALLIZATION_PENDING`, `CRYSTALLIZED`). Replaced with the closed set as a table, plus the clarification that **crystallization is a fact recorded by a `CrystallizationDelta`, not a state** — an implementation MUST NOT infer it from `episode_status`, and MAY restore the pre-lock status after crystallizing, which is required for correctness mid-closure. **Errata, not a semantic change:** the states were always these, and no conformant implementation could have used the four fictional ones. |
-| 4.0.0 | 2026-08-20 | **MAJOR** — Ledgering obligations (§12.4.2), deferred since 3.4.0. New governance rule **G-39**: an implementation MUST record a ledger entry for every §12.4.1 operation it performs; performing one without an entry is a conformance violation, not a degraded mode. The obligation is scoped to operations *performed*, so an implementation owes nothing for capabilities it does not implement. Ledger writes MAY be best-effort with respect to availability, but an implementation MUST surface a gap rather than absorb it — the distinction is between one that cannot record and knows it, and one that does not record and cannot tell. **Consequence:** a missing entry from a conforming implementation now means the operation did not occur; that inference was explicitly unavailable before. It remains unavailable for records written before this version, and an implementation MUST NOT retroactively assert coverage over a period it did not have it. Tier 1 entries with `completed_at=null` past the provisional window continue to record an interrupted write — strictly more information than either a completed entry or none. **Breaking:** every 3.x-conformant implementation that performs a registered operation without ledgering it becomes non-conformant. Requires a ratifying Episode of Record. |
-| 4.1.0 | 2026-08-20 | **MINOR** — §4.7 `AttachmentNode`: external content injected into an Episode's context, recorded so the injection is verifiable after the fact. Narrow by design — episode, content hash, media type, locator, who and when. **Kind is a property, not a node type**: a document, an image and an audio file are one node distinguished by `media_type`, since separate types per artifact kind would contradict §1 and force a protocol revision per format. `content_hash` is over the content **as received**, never an extraction of it. `ATTACHMENT_COMMIT` registered (Tier 1). **Additive** — no existing node, operation or conformance requirement changes. `DocumentNode` remains in the reference implementation as legacy; its docstring claimed protocol status the specification never conferred, and its `drive_url` / `content_text` / `char_count` fields are why that claim was untrue. |
-| 4.1.1 | 2026-08-20 | **PATCH** — reference-implementation completeness: `create_amendment_link_node`, the last abstract adapter method with no Neo4j implementation. No normative change. |
-| 4.2.0 | 2026-08-21 | **MINOR** — Restores `CONSULTATION_COMMIT` to the §12.4.1 register (Tier 1) and corrects the contradiction v3.5.0 introduced: that release removed the operation on the stated ground that "the protocol does not define" consultation, while **G-8 and G-9 have governed consultation since v1** and `compute_consultation_node_hash` / `compute_exchange_chain_hash` are protocol hash functions. §12.4.1 and the governance section now agree. One operation covers the consultation node, its ordered exchange entries and the consulted agent's participation record, because they commit together. **Collaboration gets no separate operation** — it is a `ConsultationType`, so a collaborative session commits as a consultation and the type distinguishes it. §12.4 additionally clarifies that an operation's **tier turns on whether an interruption leaves recoverable work, not on store count**: a multi-record write to a single store is Tier 1 when a partial write leaves a chain that stops mid-sequence. Reference implementation gains `create_consultation_node`, `create_exchange_entry_node`, `create_consultation_participant_node` and `execute_consultation_commit` — the last abstract adapter methods without implementations, which were only ever unimplemented because of the same mistaken premise. **Additive.** |
-| 4.3.0 | 2026-09-13 | **MINOR** — §5.6 **Episode spine leaf set**: non-ephemeral Segments in `sequence_index` order and nothing else; signals are not leaves. §5.7 **Episode root** published: `SHA3-256("NODE:" ‖ spine_root ‖ signal_manifest_hash ‖ exclusion_hash)` with the manifest and exclusion set defined as order-independent sets. §5.8 **version identifiers** `hash_version` / `spine_algorithm_version` / `ordering_version`, outside every preimage. §9.3 **reproducibility obligation** + `RP-*` conformance family. **G-1** now states that appends are refused from `CLOSING_PENDING_SEAL` onward, including `CLOSED`; the reference guard had covered only SEALING/SEALED/ARCHIVED. Motivation: the 2026-09-13 corpus-scale re-verification of 62 sealed Episodes — 45 rebuilt, 8 rebuildable only under the pre-2026-04-01 tree, 4 only by searching same-timestamp signal orderings, 1 post-closure append. **Additive**: no existing preimage, serialization or required field changes; the `ordering_version` 1 functions remain callable for historical seals. |
-| 4.2.1 | 2026-08-21 | **PATCH** — reference implementation gains `write_attachment_node_sync`, a sync variant of `create_attachment_node` for non-async callers. Writes the same node and edge. No normative change. |
-| 3.2.2 | 2026-07-04 | **PATCH** — prose errata. Corrected the §20 hash-preimage descriptions to match the reference implementation: `EpisodeLink.content_hash`, `MembershipRecord.content_hash`, `ConformanceDeclaration.declaration_hash` are **SHA3-256** (not SHA-256), per the §5 protocol commitment; `MembershipRecord` binds `supersedes_record_id` + `succession_reason` (the prose omitted them); `EpisodeLink` excludes only `quarantine_resolved_at` / `quarantine_resolution` (the prose wrongly listed `health_state` / `health_checked_at` as excluded — they ARE hashed). Corrected the §21 Form-B attribution (the Ignis reference implementation uses SHA3-256 + declared field order, not SHA-256 + key-sorting). **The canonical hash form is unchanged — prose-only; every v3.2.1 implementation remains conformant.** |
+The change history of this specification is maintained in [`CHANGELOG.md`](./CHANGELOG.md), one entry per released version, under the policy in [`VERSIONING.md`](./VERSIONING.md). It is not restated here, so the two cannot drift. The text of prior MAJOR versions is retained under [`docs/history/`](./docs/history/).
 
 ## 19. Branch/Fork/Merge Taxonomy
 
@@ -1338,7 +1326,7 @@ access is denied and a denial is written to the audit chain.
 
 #### 19.1.4 IntentRecord
 
-Prevents concurrent duplicate creation (Harmonia Scenario A). Idempotency
+Prevents concurrent duplicate creation. Idempotency
 key: `SHA3-256("INTENT:" + source_episode_id + source_segment_id + intent_hash)`.
 An `acquire_intent_sync` lookup with a COMPLETE status returns the prior
 result; a PENDING status short-circuits; a new intent is written
@@ -1433,7 +1421,7 @@ NO merge records. The manifest carries `source_merkle_root`,
 `target_merkle_root_pre`, the common ancestor, and all conflict
 segments; callers must re-invoke with resolutions.
 
-**G-24.** The three integrity assertions in §5 Step 8 of the build spec
+**G-24.** The three integrity assertions of §19.3.3
 must pass before `MergePointNode` is written. On failure the merge is
 aborted and a SYSTEM-caught failure audit record is written.
 
@@ -1539,7 +1527,7 @@ normative** (it is operational hygiene); only the shape of a *conformant recover
 | **C** — Return/status mismatch | A `ForkReturnNode` exists for a `fork_id` whose fork Episode is not `COMPLETED`. | Medium |
 | **D** — Stale ACTIVE fork | An `ACTIVE` fork with no spine activity past an implementation-defined staleness threshold. | Low |
 
-A **non-null `fork_anchor_index` with no corresponding `DepartureForkPointNode`** is the defining corruption signature of Class B (the producer patches `fork_anchor_index` only *after* the point write — §19.3.5 STEP 6).
+A **non-null `fork_anchor_index` with no corresponding `DepartureForkPointNode`** is the defining corruption signature of Class B (the producer patches `fork_anchor_index` only *after* the point write — §19.3.5).
 
 **`ForkOrphanMarker`** — a **non-chained diagnostic satellite** recording a detection
 event. Written to the origin spine (linked by an `ORPHAN_MARKER` edge from the origin
@@ -1603,7 +1591,7 @@ Agent-initiated private deliberation. Domain prefix
 `SOLILOQUY_PLACEHOLDER:` or `SOLILOQUY_FULL:` depending on the
 `content_hash_policy` field (see §19.4.3).
 
-**G-27 (Soliloquy Human Accessibility Invariant — Decision 1).** Humans
+**G-27 (Soliloquy Human Accessibility Invariant).** Humans
 ALWAYS have read access. `SoliloquyVisibilityPolicy.human_accessible`
 defaulting or being set to `false` raises `AriadneGovernanceError`.
 Deliberation content can be private to other agents, never private to
@@ -1779,7 +1767,7 @@ EpisodeLink {
   created_at:            Timestamp
   created_by:            AgentID
 
-  // Semantic characterization — GAP 1
+  // Semantic characterization
   link_type:             LinkType              // see §3
   link_strength:         Float [0.0, 1.0]      // semantic similarity score; 0.0 = no semantic relationship, 1.0 = near-identical
   is_inferred:           Boolean               // true = system-generated candidate; false = human-asserted
@@ -1795,7 +1783,7 @@ EpisodeLink {
   source_version:        SemVer                // version of source episode at link creation
   target_version:        SemVer                // version of target episode at link creation
 
-  // Quarantine — GAP 4
+  // Quarantine
   quarantine_reason:     Optional<String>
   quarantined_at:        Optional<Timestamp>
   quarantine_resolved_at:    Optional<Timestamp>    // set when quarantine exits
@@ -1850,12 +1838,12 @@ Signal {
 AuditEventType (linking):
   LINK_PROPOSED          // inference candidate surfaced; score >= DISCOVERY_THRESHOLD
   LINK_ACCEPTED          // human-confirmed or auto-accepted (score >= AUTO_ACCEPT_THRESHOLD)
-  LINK_REJECTED          // human-rejected candidate — GAP 5
-  CANDIDATE_REJECTED     // inference candidate below threshold, not surfaced — GAP 5
+  LINK_REJECTED          // human-rejected candidate
+  CANDIDATE_REJECTED     // inference candidate below threshold, not surfaced
   LINK_HEALTH_CHANGED    // health state transition recorded
-  LINK_QUARANTINED       // link moved to QUARANTINED state — GAP 4
-  LINK_QUARANTINE_RESOLVED   // quarantine exited (CONFIRMED | DISSOLVED | ESCALATED) — GAP 4
-  QUARANTINE_ESCALATED   // quarantine escalated to human review after TTL — Chronos §11.3.3
+  LINK_QUARANTINED       // link moved to QUARANTINED state
+  LINK_QUARANTINE_RESOLVED   // quarantine exited (CONFIRMED | DISSOLVED | ESCALATED)
+  QUARANTINE_ESCALATED   // quarantine escalated to human review after TTL — §11.3.3
 ```
 
 **`CANDIDATE_REJECTED` note:** This event fires when an inference candidate is computed but falls below `DISCOVERY_THRESHOLD` and is therefore not surfaced for human review. Recording it enables retrospective analysis of the threshold calibration — if known-good links were suppressed, the threshold was too high.
@@ -1870,7 +1858,7 @@ LinkHealthState:
   STALE        // target episode has advanced by minor/patch version since link creation
   FROZEN       // target episode is crystallized; link is permanently anchored to crystallized version
   BROKEN       // target episode unreachable or deleted
-  QUARANTINED  // link flagged for integrity review; excluded from active traversal — GAP 4
+  QUARANTINED  // link flagged for integrity review; excluded from active traversal
 ```
 
 **State transitions:**
@@ -1906,10 +1894,10 @@ MembershipRecord {
   asserted_at:           Timestamp
   asserted_by:           AgentID
 
-  // Membership characterization — GAP 6; included in content_hash
+  // Membership characterization — included in content_hash
   membership_role:       MembershipRole   // PRIMARY | SUPPORTING | REFERENCE | ARCHIVED
 
-  // Succession — GAP 6
+  // Succession
   supersedes_record_id:  Optional<UUID>   // prior MembershipRecord this record replaces
   succession_reason:     Optional<String> // why this record supersedes the prior
 
@@ -1933,13 +1921,13 @@ ConformanceDeclaration {
   declared_at:           Timestamp
   declared_by:           AgentID
 
-  // Versioning — GAP 7
+  // Versioning
   declaration_version:   SemVer           // major.minor.patch
 
   // Capabilities — included in content_hash
   capabilities:          Capability[]
 
-  // Succession — GAP 7; excluded from content_hash
+  // Succession — excluded from content_hash
   superseded_by:         Optional<UUID>   // declaration_id of successor
 
   // Integrity
@@ -1947,7 +1935,7 @@ ConformanceDeclaration {
 }
 ```
 
-**Version semantics — GAP 7:**
+**Version semantics:**
 
 | Change type | Version bump | Effect |
 |-------------|-------------|--------|
@@ -1959,7 +1947,7 @@ ConformanceDeclaration {
 
 ---
 
-#### §9 Phase Label Scoping — GAP 8
+#### §9 Phase Label Scoping
 
 Phase labels in this amendment are scoped to their document. There is no global phase namespace.
 
@@ -2001,27 +1989,27 @@ New node types and relationships introduced in Amendment v2.0:
 // Node types
 (:EpisodeLink {
   link_id,
-  link_strength,              // Float [0.0, 1.0] — Gap 1
-  is_inferred,                // Boolean — Gap 1
-  health_state,               // LinkHealthState enum — Gap 4
+  link_strength,              // Float [0.0, 1.0]
+  is_inferred,                // Boolean
+  health_state,               // LinkHealthState enum
   quarantine_reason,          // Optional<String>
   quarantined_at,             // Optional<Timestamp>
-  quarantine_resolved_at,     // Optional<Timestamp> — Gap 4 closure
-  quarantine_resolution       // Optional<QuarantineResolution> — Gap 4 closure
+  quarantine_resolved_at,     // Optional<Timestamp>
+  quarantine_resolution       // Optional<QuarantineResolution>
 })
 
 (:MembershipRecord {
   record_id,
-  membership_role,            // included in content_hash — Gap 6
+  membership_role,            // included in content_hash
   content_hash,
-  supersedes_record_id        // Optional — Gap 6 succession
+  supersedes_record_id        // Optional — succession
 })
 
 (:ConformanceDeclaration {
   declaration_id,
-  declaration_version,        // SemVer — Gap 7
+  declaration_version,        // SemVer
   declaration_hash,
-  superseded_by               // Optional — Gap 7 succession; excluded from hash
+  superseded_by               // Optional — succession; excluded from hash
 })
 
 // Relationships
@@ -2037,7 +2025,7 @@ New node types and relationships introduced in Amendment v2.0:
 
 **Collection: `episode_content_vectors`**
 
-> **Naming note (§11 pushback #1):** This collection was previously named `episode_link_candidates`. That name was a misnomer — candidates are the result of a similarity query, not stored objects. The collection stores per-episode content vectors; candidates emerge at query time.
+> **Naming note:** This collection was previously named `episode_link_candidates`. That name was a misnomer — candidates are the result of a similarity query, not stored objects. The collection stores per-episode content vectors; candidates emerge at query time.
 
 ```json
 {
@@ -2071,7 +2059,7 @@ New node types and relationships introduced in Amendment v2.0:
 }
 ```
 
-**Vector dimension note (§11 pushback #2):** `episode_content_vectors` uses 1536 dimensions (text-embedding-3-large or equivalent); `participant_context_vectors` uses 768 dimensions. The asymmetry is intentional — participant identity signals occupy a smaller semantic space than full episode content, and a reduced-dimension model is appropriate. Implementations MUST NOT mix embeddings from different model families within the same collection.
+**Vector dimension note:** `episode_content_vectors` uses 1536 dimensions (text-embedding-3-large or equivalent); `participant_context_vectors` uses 768 dimensions. The asymmetry is intentional — participant identity signals occupy a smaller semantic space than full episode content, and a reduced-dimension model is appropriate. Implementations MUST NOT mix embeddings from different model families within the same collection.
 
 ##### 11.1.4 Redis Schema (Working State)
 
@@ -2088,7 +2076,7 @@ ariadne:calibration:history:{date}       LIST  // daily calibration snapshots
 ariadne:link:health:{link_id}            HASH  // cached health_state + checked_at; always reconstructable from Neo4j
 ```
 
-**Quarantine queue scope (§11 pushback #3):** The quarantine queue is keyed per-Episode (`ariadne:quarantine:queue:{episode_id}`). A single global queue across all Episodes would create scaling problems and scope confusion — a quarantine event in one Episode would be processed in the context of another. Implementations using a global key are non-conforming.
+**Quarantine queue scope:** The quarantine queue is keyed per-Episode (`ariadne:quarantine:queue:{episode_id}`). A single global queue across all Episodes would create scaling problems and scope confusion — a quarantine event in one Episode would be processed in the context of another. Implementations using a global key are non-conforming.
 
 **Redis is always reconstructable.** All Redis state can be rebuilt from Neo4j and Blob. Redis failure does not constitute data loss; it constitutes a consistency window until reconstruction completes.
 
@@ -2107,7 +2095,7 @@ Four proof types are defined for this amendment. A fifth (non-existence proof) i
 | `DECLARATION_COMPATIBILITY` | Version transition is compatible (minor/patch) or breaking (major) | Neo4j |
 | `AUDIT_COMPLETENESS` | All required audit events are present for a lifecycle | Blob |
 
-**Known gap — non-existence proof (§11 pushback #4):** Proof that no `EpisodeLink` exists between Episode A and Episode B is not specified in this amendment. This is a meaningful proof type — "we never connected these two episodes" is an auditable claim — but specifying it requires additional Merkle commitments not introduced here. Implementations requiring negative-space proofs should treat this as a future amendment item.
+**Known gap — non-existence proof:** Proof that no `EpisodeLink` exists between Episode A and Episode B is not specified in this amendment. This is a meaningful proof type — "we never connected these two episodes" is an auditable claim — but specifying it requires additional Merkle commitments not introduced here. Implementations requiring negative-space proofs should treat this as a future amendment item.
 
 ##### 11.2.2 `LINK_INTEGRITY` Proof
 
@@ -2180,7 +2168,7 @@ Proof {
 
 Human ratification of a link or membership record is verified against the crystallization chain entry in the Episode of Record.
 
-**Session record definition:** The session record is the crystallization chain entry in the Episode of Record — the sealed spine position produced by the ratifying agent's ratification commit, verifiable against the Episode's Merkle root. For Devin's approvals within this amendment's Episode, the session record is the sealed spine position at the crystallization event, counter-signed by Devin's approval key.
+**Session record definition:** The session record is the crystallization chain entry in the Episode of Record — the sealed spine position produced by the ratifying agent's ratification commit, verifiable against the Episode's Merkle root. For approvals by the ratifying human principal within the Episode of Record, the session record is the sealed spine position at the crystallization event, counter-signed by the ratifying human principal's approval key.
 
 ##### 11.2.7 Encryption at Rest
 
@@ -2209,8 +2197,6 @@ Quarantine escalation (TTL exceeded — §11.3.3):
   ESCALATED:  health_state remains QUARANTINED; QUARANTINE_ESCALATED audit event; human review required
 ```
 
-**Reverse delta for `SECTION_SUPERSESSION` (§11 pushback #7):** Forward deltas are stored as diffs from the prior version. Reverse delta derivation for `SECTION_SUPERSESSION` requires the prior section text — this cannot be derived from the `supersedes_clause` identifier alone. The prior section text is stored at the superseded version's Blob path. The `supersedes_clause` identifies the path; the content is retrieved from Blob, not recomputed. Implementations MUST store prior section content in Blob before recording a supersession.
-
 ##### 11.3.2 MembershipRecord Succession Lifecycle
 
 ```
@@ -2223,7 +2209,7 @@ Succession entry:
 Succession is irreversible. Prior records are never deleted.
 ```
 
-##### 11.3.3 Quarantine Escalation — Chronos Addition
+##### 11.3.3 Quarantine Escalation
 
 ```
 AuditEvent: QUARANTINE_ESCALATED {
@@ -2276,7 +2262,7 @@ All audit events are append-only and stored in Blob. Audit events are never modi
 
 Steps 1 and 2 are atomic from the protocol's perspective. A write that succeeds in Neo4j but fails in Blob is a partial write and MUST be retried or rolled back.
 
-##### 11.5.2 Consistency Window SLA (§11 pushback #9)
+##### 11.5.2 Consistency Window SLA
 
 Implementations MUST define a maximum consistency window for QDrant and Redis propagation.
 
@@ -2286,12 +2272,12 @@ Implementations MUST define a maximum consistency window for QDrant and Redis pr
 
 Implementations exceeding the maximum propagation window without a documented exception are non-conforming at the state tier (§12). Implementations MUST expose a consistency status endpoint or mechanism that allows callers to determine whether QDrant/Redis state is within the consistency window.
 
-##### 11.5.3 Sequence Numbers and Timestamps (§11 pushback #8)
+##### 11.5.3 Sequence Numbers and Timestamps
 
 Two ordering mechanisms are used in this amendment. They are complementary, not redundant:
 
 - **Sequence numbers** are scoped per-Episode and are the basis for completeness proofs within an Episode. A sequence gap within an Episode's audit log indicates a missing event.
-- **Chronos-assigned timestamps** are the basis for ordering across Episodes. Cross-Episode temporal ordering uses timestamps, not sequence numbers, because sequence scopes do not extend across Episode boundaries.
+- **Timestamps assigned by a workspace-wide monotonic timestamp authority** are the basis for ordering across Episodes. Cross-Episode temporal ordering uses timestamps, not sequence numbers, because sequence scopes do not extend across Episode boundaries.
 
 Implementations MUST NOT use sequence numbers for cross-Episode ordering. Implementations MUST NOT use timestamps as the sole basis for within-Episode completeness proofs.
 
@@ -2380,7 +2366,7 @@ An implementation claiming conformance with Amendment v2.0 MUST:
 - [ ] Implement quarantine lifecycle including TTL and escalation (§11.3.1, §11.3.3)
 - [ ] Key Redis quarantine queue per-Episode: `ariadne:quarantine:queue:{episode_id}`
 - [ ] Define and publish consistency window SLA within bounds specified in §11.5.2
-- [ ] Use sequence numbers for within-Episode completeness proofs; Chronos timestamps for cross-Episode ordering
+- [ ] Use sequence numbers for within-Episode completeness proofs; timestamps assigned by a workspace-wide monotonic timestamp authority for cross-Episode ordering
 
 **Behavioral tier (sovereign — no conformance requirement):**
 - Signal combination algorithm
@@ -2452,7 +2438,7 @@ A second invariant governs **who** may write Layer 3:
 
 A CIA is a protocol-level role, not a specific implementation technology. The CIA for `WorkflowDeclaration` in a workspace may be:
 
-- An MCP server (the Ignis reference implementation),
+- An MCP server (as in the reference implementation — Appendix A.4),
 - An in-process module of a single-process implementation,
 - A network-attached daemon with cryptographic identity,
 - Any other entity that the workspace's `ConformanceDeclaration` names.
@@ -2657,7 +2643,7 @@ preimage = (
 content_hash = SHA3-256(preimage).hex()
 ```
 
-**Form B — Ordered JSON, used by the Ignis reference implementation (with SHA3-256):**
+**Form B — Ordered JSON, used by the reference implementation (with SHA3-256):**
 
 ```
 payload = {field: value for each immutable field, in the declared preimage order}
@@ -2725,9 +2711,9 @@ Layer 3 writes are anchored to the protocol's audit chain by four new `Cognitive
 | `WORKFLOW_DECLARED` | `WorkflowDeclaration` creation | `workflow_id`, `episode_id`, `intention_id` (nullable), `mandate_id` (nullable), `declared_by`, `declared_at`, `content_hash`, `cia_identifier` | Blob, append-only |
 | `EXECUTION_RECORDED` | `ExecutionNode` creation | `execution_node_id`, `workflow_id`, `episode_id`, `sequence_index`, `agent_id`, `status`, `executed_at`, `content_hash`, `cia_identifier` | Blob, append-only |
 | `SKILL_INVOKED` | `SkillInvocation` creation | `skill_invocation_id`, `execution_node_id`, `workflow_id`, `episode_id`, `skill_id`, `skill_source`, `invoked_by`, `invoked_at`, `status`, `content_hash`, `cia_identifier` | Blob, append-only |
-| `WORKFLOW_CLOSED` | `ignis_close_workflow`-equivalent operation | `workflow_id`, `final_status`, `status_updated_at`, `error_detail` (nullable), `cia_identifier` | Blob, append-only |
+| `WORKFLOW_CLOSED` | `close_workflow` operation (§10) | `workflow_id`, `final_status`, `status_updated_at`, `error_detail` (nullable), `cia_identifier` | Blob, append-only |
 
-**Audit chain integrity.** Each Layer 3 audit event is hash-chained per the existing protocol convention: each record carries `prev_audit_hash` pointing at the preceding record in its chain, and records form an append-only sequence per workspace (or per chain-key as the implementation declares). The chain key for Layer 3 events MAY be the `episode_id` (Ignis reference choice) or any other declared key, provided the implementation documents the choice in its `ConformanceDeclaration` and is consistent within a workspace.
+**Audit chain integrity.** Each Layer 3 audit event is hash-chained per the existing protocol convention: each record carries `prev_audit_hash` pointing at the preceding record in its chain, and records form an append-only sequence per workspace (or per chain-key as the implementation declares). The chain key for Layer 3 events MAY be the `episode_id` (reference implementation choice) or any other declared key, provided the implementation documents the choice in its `ConformanceDeclaration` and is consistent within a workspace.
 
 **`cia_identifier` is mandatory in every Layer 3 audit event.** The principal that performed the write — the workspace's designated CIA for that node type — MUST be recorded. This is what makes the sole-writer principle (§3) verifiable: a verifier walking the audit chain can confirm that every L3 write was performed by the declared CIA, and that no other principal contributed.
 
@@ -2762,17 +2748,17 @@ This amendment slots into the conformance taxonomy established by Amendment v2.0
 
 Three protocol surfaces touched by this amendment are explicitly deferred to future amendments:
 
-1. **Mandate — full protocol surface.** This amendment introduces `mandate_id` as an optional, immutable, hash-included field on `WorkflowDeclaration`, and the `SPAWNED_BY_MANDATE` edge to a `Mandate` node. The `Mandate` node type itself — its fields, its hash preimage, its lifecycle, its position in the layer hierarchy (Mandate is most naturally a Layer 1 or Layer 2 cognitive primitive, not Layer 3) — is **not specified by this amendment**. Conforming implementations MAY treat `Mandate` as an opaque reference for the purposes of Layer 3 conformance. A future amendment (provisional designation: **v3.1.0 — Mandate Codification**) will define the full Mandate surface.
+1. **Mandate — full protocol surface.** This amendment introduces `mandate_id` as an optional, immutable, hash-included field on `WorkflowDeclaration`, and the `SPAWNED_BY_MANDATE` edge to a `Mandate` node. The `Mandate` node type itself — its fields, its hash preimage, its lifecycle, its position in the layer hierarchy (Mandate is most naturally a Layer 1 or Layer 2 cognitive primitive, not Layer 3) — is **not specified by this amendment**. Conforming implementations MAY treat `Mandate` as an opaque reference for the purposes of Layer 3 conformance. A future amendment will define the full Mandate surface.
 
 2. **Skill Registry.** The `SkillInvocation.registry_id` field is reserved for a future protocol surface that catalogues skills as first-class addressable entities. Until that surface is defined, conforming implementations MUST leave `registry_id` null. The field's exclusion from `content_hash` is a deliberate forward-compatibility provision: when the Skill Registry amendment ships, a backfill operation MAY populate `registry_id` on existing `SkillInvocation` records without invalidating their content hashes.
 
-3. **SkillInvocation as Spine-resident node.** Some implementations may eventually want SkillInvocation to participate in Spine hashing — turning skill invocation into a cryptographically-anchored cognitive primitive for ecosystems where agent cognition is substantially composed of skill chains rather than native reasoning. This amendment **declines** that promotion: SkillInvocation remains a Layer 3 node. A future major amendment (provisional designation: **v4.0.0 — SkillInvocation Spine Promotion**) may revisit this decision once production usage of Layer 3 has informed the design.
+3. **SkillInvocation as Spine-resident node.** Some implementations may eventually want SkillInvocation to participate in Spine hashing — turning skill invocation into a cryptographically-anchored cognitive primitive for ecosystems where agent cognition is substantially composed of skill chains rather than native reasoning. This amendment **declines** that promotion: SkillInvocation remains a Layer 3 node. A future major amendment may revisit this decision once production usage of Layer 3 has informed the design.
 
 ---
 
 ### Appendix A — Reference Adapter Notes (Non-Normative)
 
-The following notes derive from the reference implementation in the Ignis OS. They are non-normative: conforming implementations need not adopt them. They are included to illustrate one complete adapter path and to inform implementers considering similar designs.
+The following notes derive from the Layer 3 reference implementation in Ignis OS, Scorched Earth Labs' agent runtime and the first consumer of this protocol. They are non-normative: conforming implementations need not adopt them. They are included to illustrate one complete adapter path and to inform implementers considering similar designs.
 
 #### A.1 Neo4j edge vocabulary
 
@@ -2827,7 +2813,7 @@ RETURN i, m, w, collect(e) AS executions
 
 #### A.4 Reference CIA implementation
 
-The Ignis reference implementation designates a single MCP server (the `ignis_mcp_server`) as the CIA for all three Layer 3 node types in the SEL workspace. Enforcement is achieved through:
+The reference implementation designates a single MCP server (the `ignis_mcp_server`) as the CIA for all three Layer 3 node types in its workspace. Enforcement is achieved through:
 
 - **Application-layer guard:** no other process holds Neo4j credentials with INSERT privileges on the Layer 3 labels.
 - **MCP-tool surface:** the four write tools (`ignis_declare_workflow`, `ignis_record_execution_step`, `ignis_record_skill_invocation`, `ignis_close_workflow`) are the only authorized write paths.
@@ -2850,7 +2836,7 @@ A conforming Layer 3 implementation MUST:
 - [ ] Designate, in its `ConformanceDeclaration`, exactly one Cognitive Implementation Authority per Layer 3 node type, identify the enforcement mechanism, and demonstrate enforcement at the wire tier (§3, §12).
 - [ ] Document its chosen hash byte serialization in sufficient detail that an independent verifier can reproduce any Layer 3 node's hash from its field values (§8, W-L3-3).
 - [ ] Document its `skill_source` vocabulary, its audit chain-key dimension, and its CIA enforcement mechanism in its `ConformanceDeclaration` (§12, audit-the-decision pattern).
-- [ ] Leave `SkillInvocation.registry_id` null pending the future Skill Registry amendment (§13.2).
+- [ ] Leave `SkillInvocation.registry_id` null pending the future Skill Registry amendment (§13 item 2).
 
 A conforming Layer 3 implementation MUST NOT:
 
@@ -2859,23 +2845,21 @@ A conforming Layer 3 implementation MUST NOT:
 - [ ] Mutate any field of a `WorkflowDeclaration` other than the three permitted (§9, L3-I4).
 - [ ] Provide a "retry" surface that updates a prior `ExecutionNode` (§9, L3-I5).
 - [ ] Admit Layer 3 writes from any principal other than the designated CIA for the relevant node type (§3, L3-I2).
-- [ ] Populate `SkillInvocation.registry_id` until the future Skill Registry amendment defines its semantics (§13.2).
-
----
-
-*Amendment v3.0.0 — Working Draft. Episode of Record: `615b41e2-33cf-49e4-8491-b8a3f2e4cd75` (Autonomous Agentic Workflows and Skills). Pending ratification in a sealing episode.*
+- [ ] Populate `SkillInvocation.registry_id` until the future Skill Registry amendment defines its semantics (§13 item 2).
 
 ## 22. References
 
-Internal Scorched Earth Labs design documents that informed the protocol:
+Public standards this document relies on:
 
-| Reference | Decision |
-|-----------|----------|
-| v2 Synthesis | Position-binding, dual-index, delta records, proof system P1-P13 |
-| Node-Generic Architecture (Revised) | CognitiveNode as primitive, namespace firewall, reparenting prohibition |
-| CLO-CONSOLIDATED-1.1 | Phase 1 architecture synthesis |
-| OQ-D01 | Write ordering and provisional state invariants |
-| OQ-D02 | Crystallization as state transition |
+| Reference | Title | Used in |
+|-----------|-------|---------|
+| FIPS 202 | *SHA-3 Standard: Permutation-Based Hash and Extendable-Output Functions*, NIST, August 2015 | SHA3-256, all hashing (§5.1) |
+| RFC 2119 | *Key words for use in RFCs to Indicate Requirement Levels*, BCP 14, March 1997 | Requirement keywords (Conventions) |
+| RFC 8174 | *Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words*, BCP 14, May 2017 | Requirement keywords (Conventions) |
+| RFC 5869 | *HMAC-based Extract-and-Expand Key Derivation Function (HKDF)*, May 2010 | Node key hierarchy (§16.2) |
+| RFC 8032 | *Edwards-Curve Digital Signature Algorithm (EdDSA)*, January 2017 | Ed25519 signatures on HITL events (§4.6) |
+| RFC 9562 | *Universally Unique IDentifiers (UUIDs)*, May 2024 (obsoletes RFC 4122) | `node_id` and other UUID-typed identifiers (§4.1, §5.2) |
+| SemVer 2.0.0 | *Semantic Versioning 2.0.0*, https://semver.org/ | Protocol and declaration version numbers ([`VERSIONING.md`](./VERSIONING.md), §20) |
 
 ---
 

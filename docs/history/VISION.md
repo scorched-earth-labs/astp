@@ -1,9 +1,12 @@
+> **HISTORICAL — retained for provenance. Superseded by [`SPEC.md`](../../SPEC.md); do not implement from this document.**
+>
+> Architecture vision written 2026-04-08 against the `0.1.0-draft` design. It describes an earlier design that differs from the published protocol in its hash function, leaf construction, Episode root, lifecycle states and write ordering. Superseded by the v2.x rewrite of `SPEC.md` (2.0.0-draft, 2026-04-09) and every version since.
+
 # ASTP — AI State Tree Protocol
 ## Unified Architecture Vision
 **Version:** 0.1.0-draft synthesis  
 **Date:** April 8, 2026  
-**Prepared by:** Clotho, Suite Lead — product_ariadne  
-**Contributors:** Daedalus, Aletheia, Chronos, Mnemosyne, Harmonia
+**Authors:** Scorched Earth Labs
 
 ---
 
