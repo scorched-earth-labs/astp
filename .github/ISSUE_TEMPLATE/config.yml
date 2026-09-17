@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/scorched-earth-labs/astp/security/advisories/new
+    about: Integrity flaws in the specification or the reference implementation. Please report privately — see SECURITY.md.
