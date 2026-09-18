@@ -67,6 +67,9 @@ def test_float_encoding_is_ieee754_big_endian_and_negative_zero_is_zero():
             encode_field(FLOAT, bad)
     with pytest.raises(TypeError):
         encode_field(FLOAT, True)
+    # subnormals are admitted bit-faithfully; -0 -> +0 is the only normalization
+    assert encode_field(FLOAT, 5e-324) == b"\x09" + struct.pack(">d", 5e-324)
+    assert encode_field(FLOAT, -5e-324) == b"\x09" + struct.pack(">d", -5e-324)
 
 
 def test_aside():

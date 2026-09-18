@@ -1,6 +1,6 @@
 # ASTP 5.0.0 — Seal Constructions (Draft)
 
-**Version:** 5.0.0-draft.8
+**Version:** 5.0.0-draft.9
 **Status:** Draft for review — **not ratified, not normative.** Nothing here applies to any existing seal.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-18
@@ -37,7 +37,7 @@ A construction built from named fields is `SHA3-256(prefix ‖ enc(f₁) ‖ …
 | `0x06` | HASH | 32 bytes — a SHA3-256 value, raw, never its hex text |
 | `0x07` | LIST | `u32be(count)` ‖ the items in order, each encoded as a field of the one type the construction states for the list |
 | `0x08` | BOOL | one byte: `0x00` false, `0x01` true |
-| `0x09` | FLOAT | 8 bytes: IEEE 754 binary64, big-endian; NaN and infinities refused; negative zero encoded as positive zero |
+| `0x09` | FLOAT | 8 bytes: IEEE 754 binary64, big-endian. The admissible set is exhaustive: NaN and ±∞ are refused before encoding (so no NaN payload ever enters a preimage), subnormals are encoded as-is, and −0 → +0 is the *only* normalization performed; the encoding is otherwise bit-faithful |
 
 A TIMESTAMP MUST be computed from a timezone-aware instant, converted to UTC, in integer arithmetic; a value with no timezone MUST be refused. Sub-millisecond precision is truncated. A field count is fixed by its construction, every field is self-delimiting, and no prefix in §7 is a prefix of another, so distinct inputs cannot encode to the same bytes.
 
@@ -115,7 +115,7 @@ structural_manifest_hash = set( "STRUCTURAL_MANIFEST:v1:", member hashes — §6
 
 ## 6. Structural manifest
 
-**Membership rule.** A structural node is a member if and only if removing it would let a verifier be deceived about the Episode's branch, fork, merge or termination structure. The same rule decides fields: a field that makes a structural claim is in a member's preimage; commentary is not. `spine_merkle_snapshot` binds a divergence to the history it left from, and `merge_type` says how two histories combined — both are in. A `branch_label`, a `merge_summary` or a `synthesis_summary` is commentary: binding it would make an honest edit break a seal while proving nothing. Who initiated a branch, fork or merge, and who returned a fork, is provenance: binding actor identity is the audit chain's job, and the manifest binding it for some nodes and not others, as 4.x did, has no principled defence. All of these are out. The *nodes* remain members; it is only these fields that a member's preimage no longer carries. 4.x seals that bound them remain reproducible under 4.x. A `ForkOrphanMarker` is a diagnostic satellite and is not a member.
+**Membership rule.** A structural node is a member if and only if removing it would let a verifier be deceived about the Episode's branch, fork, merge or termination structure. The same rule decides fields: a field that makes a structural claim is in a member's preimage; commentary is not. `spine_merkle_snapshot` binds a divergence to the history it left from, and `merge_type` says how two histories combined — both are in. A `branch_label`, a `merge_summary` or a `synthesis_summary` is commentary: binding it would make an honest edit break a seal while proving nothing. Who initiated a branch, fork or merge, and who returned a fork, is provenance: binding actor identity is the audit chain's job, and the manifest binding it for some nodes and not others, as 4.x did, has no principled defence. All of these are out. **Named exception:** actor identity is bound where the actor constitutes the construction's defining claim rather than the provenance of an operation on a structure that exists without them — the aside binds both of its parties (G-25 makes the human's presence its defining claim) and the soliloquy binds `initiated_by_agent` (§13). A later reader tightening this rule must not strip those: doing so hashes a weaker claim than the node makes. The *nodes* remain members; it is only these fields that a member's preimage no longer carries. 4.x seals that bound them remain reproducible under 4.x. A `ForkOrphanMarker` is a diagnostic satellite and is not a member.
 
 Members, each under its own prefix (so the set needs no per-member type tag):
 
@@ -271,8 +271,6 @@ link_hash = SHA3-256( "EPISODE_LINK:v2:" ‖ UUID(link_id) ‖ UUID(source_episo
 
 `CoherenceFingerprint` is a diagnostic satellite in the sense of §6: it records a detector's reading (topic vector, drift, detection state) and never enters a seal or a chain. 4.x defined a `FINGERPRINT:` prefix over six of its fields; the reference implementation never called it and the node carries no hash field. It is retired with no successor. A fingerprint that needs to be attested is attested by the audit record of the transition it triggered.
 
-### 13.5 Open for the design Episode
+### 13.5 Rulings
 
-1. Binding the aside's two parties, against the §6 actor rule, with the reason stated in §13.1.
-2. `source_episode_root` / `target_episode_root` as the answer to "what does a link bind on each end", with the sealed-end-NULL-is-nonconformant rule and the `retroactive ⇒ source root present` consequence.
-3. FLOAT as a field type: exact IEEE 754 binary64 rather than a decimal text form, so `link_strength` and the signals are bound to the number the writer held, not to a printing of it.
+Ruled in design Episode `4b9a779e…`, segment 40: the aside's two parties and the soliloquy's agent are bound as a named exception to §6 (the parties constitute the construction; a channel with its ends removed is a different, weaker claim); a link binds each end's identifier always and its Episode root when that end was sealed at link creation, NULL otherwise, with sealed-end-NULL nonconformant and `retroactive ⇒ source root present` following from that rule; FLOAT is exact binary64 — bind the number the writer held, not a printing of it — with the admissible set stated exhaustively in §2.

@@ -32,8 +32,8 @@ preimages of 4.x lack.
     0x06  HASH        32 bytes (a SHA3-256 value, raw — never its hex text)
     0x07  LIST        u32be(count) ‖ the items, each encoded as a field of one stated kind
     0x08  BOOL        one byte, 0x00 or 0x01
-    0x09  FLOAT       8 bytes: IEEE 754 binary64, big-endian; NaN and infinities refused;
-                      negative zero encoded as positive zero
+    0x09  FLOAT       8 bytes: IEEE 754 binary64, big-endian. NaN and ±inf are refused before
+                      encoding; subnormals are encoded as-is; -0 -> +0 is the only normalization
 """
 
 import struct
