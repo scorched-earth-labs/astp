@@ -1,6 +1,6 @@
 # ASTP 5.0.0 — Seal Constructions (Draft)
 
-**Version:** 5.0.0-draft.4
+**Version:** 5.0.0-draft.5
 **Status:** Draft for review — **not ratified, not normative.** Nothing here applies to any existing seal.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-17
@@ -88,6 +88,10 @@ InclusionProof {
 **The prover does not state the path's shape.** From `leaf_index` and `leaf_count` a verifier derives, level by level, whether the node has a sibling (it has none exactly when it is the unpaired last node of its level, which is carried up unchanged) and on which side that sibling sits (a node at an even position is the left child). The verifier then: rejects the proof if `leaf_index` is out of range or the number of siblings is not the number the shape requires; hashes the leaf under `TREE_LEAF:v2:`; and at each level with a sibling computes `TREE_NODE:v2:` over left ‖ right in the derived order. The proof is valid if and only if the result equals `spine_root`.
 
 **What a proof commits to.** The leaf, and its position: a sibling list verifies at no position other than the one the tree gave it, and no sibling can be altered. It does not commit to the tree's size — a `leaf_count` that yields the same path shape verifies too — so the number of leaves in a sealed spine is a claim of the seal record, not of any proof. A proof carries no content and no identifiers; it is safe to publish wherever the leaf hash it proves is.
+
+It does not commit to the size for a reason: the seal record already makes that claim, reproducibly, and two mechanisms binding one fact can disagree — a verifier would then have to decide which is authoritative. Binding the count into the leaf hash would also make every leaf hash depend on the tree's eventual size, so no leaf hash could be final when its Segment was written; incremental append is a property of the spine, not a convenience. Each mechanism makes exactly one claim: the proof, that this leaf sits at this position under this root; the seal record, how many leaves there are.
+
+**Two proof forms, selected by `spine_algorithm_version`.** A proof over a version 0 or 1 tree is the 4.x form of §9.2 — hex-ASCII values, `LEAF:` and `NODE:`, the Episode-identifier leaf, and explicit `path_directions` — frozen, and never re-issued in this form. The two are different formats because they make different claims: a version 2 proof proves position in the sealed spine, while a 4.x proof proves position in a proof tree that was a separate structure from the spine the seal recorded. Re-issuing a 4.x proof in the version 2 form would claim a guarantee the 4.x seal never made. The version identifier therefore selects which claim a proof makes, not merely how it is encoded; and a verifier of a 4.x proof MUST use its stated directions rather than derive them, because the derivation rule is earned by the version 2 tree's discipline and was never stated for the 4.x tree.
 
 `leaf_index` is not `sequence_index`: ephemeral Segments have a `sequence_index` but are not leaves. The leaf hash binds `sequence_index`; the path binds `leaf_index`; a verifier holding the Segment checks both.
 
