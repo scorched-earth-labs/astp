@@ -1,11 +1,11 @@
 # ASTP 5.0.0 — Seal Constructions (Draft)
 
-**Version:** 5.0.0-draft.3
+**Version:** 5.0.0-draft.5
 **Status:** Draft for review — **not ratified, not normative.** Nothing here applies to any existing seal.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-17
-**Applies To:** proposed replacement text for `SPEC.md` §5.2–§5.8 in 5.0.0
-**Vectors:** [`vectors/5.0.0-draft/seal-constructions.json`](../../vectors/5.0.0-draft/seal-constructions.json) (regenerate with `generate.py`, never by hand) · **Reference code:** `astp/protocol/encoding.py`, `compute_leaf_hash_v2`, `compute_merkle_root_v2`, `astp/core/seal_v2.py` · **Tests:** `tests/conformance/test_seal_constructions_v2_vectors.py`
+**Applies To:** proposed replacement text for `SPEC.md` §5.2–§5.8 and §9.2 in 5.0.0
+**Vectors:** [`vectors/5.0.0-draft/seal-constructions.json`](../../vectors/5.0.0-draft/seal-constructions.json) (regenerate with `generate.py`, never by hand) · **Reference code:** `astp/protocol/encoding.py`, `compute_leaf_hash_v2`, `compute_merkle_root_v2`, `generate_inclusion_proof_v2` / `verify_inclusion_proof_v2`, `astp/core/seal_v2.py` · **Tests:** `tests/conformance/test_seal_constructions_v2_vectors.py`
 
 This is one unit of the 5.0.0 amendment: how an Episode's roots are built. Draft 3 incorporates the rulings of design Episode `4b9a779e-be46-4d61-872e-fd76545aa901`, segments 29 and 31 (§9). It is a MAJOR change under [`VERSIONING.md`](../../VERSIONING.md) and requires an Episode of Record. Every construction below is **new and versioned**. Seals made under `spine_algorithm_version` 0 and 1 remain defined by SPEC 4.5.0 §5.3–§5.8 and remain reproducible; 5.0.0 retains that text as the definition of those versions.
 
@@ -71,6 +71,37 @@ A verifier MUST derive the encoding from the identifier: hex text under `spine_a
 
 The spine and the tree of §9 (five-test gate) and §16.5 (inclusion proofs) are now **the same tree over the same inputs**. A position-binding inclusion proof therefore proves position in the sealed spine, which under 4.x it did not.
 
+## 4a. Inclusion proof over the version 2 tree (replaces §9.2)
+
+The spine and the proof tree are now one tree, so a position-binding inclusion proof proves position *in the sealed spine* — which under 4.x it did not.
+
+```
+InclusionProof {
+  leaf_index    UINT     position of the leaf in the spine's leaf list
+  leaf_count    UINT     number of leaves in that list
+  leaf_hash     HASH     the hash_version 2 leaf hash being proven
+  siblings      HASH[]   the sibling at each level where one exists, leaf level first
+  spine_root    HASH     the root being proven against
+}
+```
+
+**The prover does not state the path's shape.** From `leaf_index` and `leaf_count` a verifier derives, level by level, whether the node has a sibling (it has none exactly when it is the unpaired last node of its level, which is carried up unchanged) and on which side that sibling sits (a node at an even position is the left child). The verifier then: rejects the proof if `leaf_index` is out of range or the number of siblings is not the number the shape requires; hashes the leaf under `TREE_LEAF:v2:`; and at each level with a sibling computes `TREE_NODE:v2:` over left ‖ right in the derived order. The proof is valid if and only if the result equals `spine_root`.
+
+**What a proof commits to.** The leaf, and its position: a sibling list verifies at no position other than the one the tree gave it, and no sibling can be altered. It does not commit to the tree's size — a `leaf_count` that yields the same path shape verifies too — so the number of leaves in a sealed spine is a claim of the seal record, not of any proof. A proof carries no content and no identifiers; it is safe to publish wherever the leaf hash it proves is.
+
+It does not commit to the size for a reason: the seal record already makes that claim, reproducibly, and two mechanisms binding one fact can disagree — a verifier would then have to decide which is authoritative. Binding the count into the leaf hash would also make every leaf hash depend on the tree's eventual size, so no leaf hash could be final when its Segment was written; incremental append is a property of the spine, not a convenience. Each mechanism makes exactly one claim: the proof, that this leaf sits at this position under this root; the seal record, how many leaves there are.
+
+**Two proof forms, selected by `spine_algorithm_version`.** A proof over a version 0 or 1 tree is the 4.x form of §9.2 — hex-ASCII values, `LEAF:` and `NODE:`, the Episode-identifier leaf, and explicit `path_directions` — frozen, and never re-issued in this form. The two are different formats because they make different claims: a version 2 proof proves position in the sealed spine, while a 4.x proof proves position in a proof tree that was a separate structure from the spine the seal recorded. Re-issuing a 4.x proof in the version 2 form would claim a guarantee the 4.x seal never made. The version identifier therefore selects which claim a proof makes, not merely how it is encoded; and a verifier of a 4.x proof MUST use its stated directions rather than derive them, because the derivation rule is earned by the version 2 tree's discipline and was never stated for the 4.x tree.
+
+`leaf_index` is not `sequence_index`: ephemeral Segments have a `sequence_index` but are not leaves. The leaf hash binds `sequence_index`; the path binds `leaf_index`; a verifier holding the Segment checks both.
+
+Vectors (over the seven leaves of §8): leaf 3 of 7 carries 3 siblings; leaf 6 of 7 carries 2 (unpaired at the leaf level, then paired twice); the single leaf of a one-leaf tree carries none.
+
+```
+leaf 3 of 7, sibling 0    8c5558dd9cf6dbbfb7d5c64757d4c2640fabc5b1105404a77c6fd5120fce9889
+leaf 6 of 7, sibling 0    62bb7692435aef7234c85f8dec29fb8b13b140211713889b899c14eead95fbf1
+```
+
 ## 5. Sets
 
 ```
@@ -123,7 +154,7 @@ episode_root_hash (v2), seven structural members, five signals, empty exclusion
                                              f0511b4d1be172554b9f87ec64d400d24a1409f1742ad72f628bf5ab7b7d33f0
 ```
 
-The file also fixes each field type's bytes, NFC equivalence, UTC normalization of a timestamp given at −08:00, spine roots for n = 1, 2, 3, 7, both manifests empty and populated, each structural member, the structural manifest with a BranchTerminus removed, the Episode root with an empty structural manifest, and a pre-5.0.0 Segment's leaf hash computed from its fields.
+The file also fixes each field type's bytes, NFC equivalence, UTC normalization of a timestamp given at −08:00, spine roots for n = 1, 2, 3, 7, both manifests empty and populated, each structural member, the structural manifest with a BranchTerminus removed, the Episode root with an empty structural manifest, a pre-5.0.0 Segment's leaf hash computed from its fields, and three inclusion proofs with their sibling counts.
 
 ## 9. Rulings incorporated, and what remains open
 
@@ -137,4 +168,4 @@ Consequences outside this text:
 
 ## 10. Not in this unit
 
-The remaining 5.0.0 items — the other §19 content hashes (terminus, fork return, aside, soliloquy, fingerprint), the audit record schema and preimage, witness commitment and witness validity (G-11/G-12), anchor commitment, `EpisodeLink.content_hash`, canonical JSON, the single hashing statement, role-named store values, the sealed-requires-a-record rule and the late-seal wording, and the inclusion-proof format over this tree — follow in further units, each with vectors.
+The remaining 5.0.0 items — the other §19 content hashes (aside, soliloquy, fingerprint), the audit record schema and preimage, witness commitment and witness validity (G-11/G-12), anchor commitment, `EpisodeLink.content_hash`, canonical JSON, the single hashing statement, role-named store values, and the sealed-requires-a-record rule with the late-seal wording — follow in further units, each with vectors.

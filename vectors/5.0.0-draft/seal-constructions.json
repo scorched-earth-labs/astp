@@ -101,6 +101,47 @@
     "stored_leaf_hash_v1": "4409ff6552f902805d198bdcaddb7b21a2539ab359f8d99d53a8474bbbb6ebeb",
     "leaf_hash_v2_from_fields": "5d6d7378c5a4ee7fdcb66718ff917915206f7dfbabe72f7ae2dbf767a698019e"
   },
+  "inclusion_proofs_v2": {
+    "rule": "leaf_index and leaf_count fix the path shape; the verifier derives at which levels a sibling exists and on which side. A proof binds the leaf and its position, not the tree's size.",
+    "tree": "the seven leaf_hash_v2 values above, in order",
+    "leaf_3_of_7": {
+      "leaf_index": 3,
+      "leaf_count": 7,
+      "leaf_hash": "c4d8a309d6a8f03bba276fbd1127e8b2c22b07a1c7346c317486b43634466225",
+      "siblings": [
+        "8c5558dd9cf6dbbfb7d5c64757d4c2640fabc5b1105404a77c6fd5120fce9889",
+        "4961d0711f8ad12e0795faaa578e410477b88d08c21c0f318a7ccacfc80102fb",
+        "97af5a57298eddaca96c76e7747566a9cc353bb5243985133a0534d2dc8dda2b"
+      ],
+      "spine_root": "4420e38a22409317822ac14e3d5bc8069e6556c0fc08928290f76d23396daa01"
+    },
+    "leaf_6_of_7_unpaired_path": {
+      "leaf_index": 6,
+      "leaf_count": 7,
+      "leaf_hash": "1f2556934a29b56ea2e633081379ad2c92d9116d98da4f74c6c236dbdaca11b1",
+      "siblings": [
+        "62bb7692435aef7234c85f8dec29fb8b13b140211713889b899c14eead95fbf1",
+        "64803b5de46b8dd67284bc2edafd90f71a642d80e63615347e548b62b3c5fe96"
+      ],
+      "spine_root": "4420e38a22409317822ac14e3d5bc8069e6556c0fc08928290f76d23396daa01"
+    },
+    "leaf_0_of_1": {
+      "leaf_index": 0,
+      "leaf_count": 1,
+      "leaf_hash": "25b617f0d7ac09871f88ce7e2851cc8f50b48305dee51d081b62a5f21ed84935",
+      "siblings": [],
+      "spine_root": "5e06ac5629faf452aa18836dcf3f33565db0cd2d8749b482c65365b9273b576e"
+    },
+    "expected_sibling_counts_for_7_leaves": [
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      2
+    ]
+  },
   "signals": [
     "854926724cdda7832666b640fe92f340fc955dcc7374ccf35313bf40bc4e2336",
     "29f91bc68ba3dfc98e6d6e257a659428af383748d7856e8ab949a7ede3623b70",

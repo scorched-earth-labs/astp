@@ -249,3 +249,96 @@ def compute_merkle_root_v2(leaf_inputs: List[str]) -> str:
             for i in range(0, len(level), 2)
         ]
     return level[0].hex()
+
+
+def _tree_v2_levels(leaf_inputs: List[str]) -> List[List[bytes]]:
+    """Every level of the version 2 tree, leaf level first, as raw bytes."""
+    import hashlib
+
+    if not leaf_inputs:
+        raise ValueError("the root of an empty leaf list is undefined")
+    level = [hashlib.sha3_256(TREE_LEAF_V2_PREFIX + bytes.fromhex(x)).digest() for x in leaf_inputs]
+    levels = [level]
+    while len(level) > 1:
+        level = [
+            hashlib.sha3_256(TREE_NODE_V2_PREFIX + level[i] + level[i + 1]).digest() if i + 1 < len(level) else level[i]
+            for i in range(0, len(level), 2)
+        ]
+        levels.append(level)
+    return levels
+
+
+def expected_sibling_count_v2(leaf_index: int, leaf_count: int) -> int:
+    """How many siblings a proof for ``leaf_index`` in a tree of ``leaf_count``
+    leaves must carry. Derived from the shape of the tree alone: at each level a
+    node has a sibling unless it is the unpaired last node, which is carried up
+    without hashing."""
+    if not 0 <= leaf_index < leaf_count:
+        raise ValueError("leaf_index out of range")
+    n, pos, siblings = leaf_count, leaf_index, 0
+    while n > 1:
+        if not (pos % 2 == 0 and pos == n - 1):      # unpaired last node: no sibling at this level
+            siblings += 1
+        pos, n = pos // 2, (n + 1) // 2
+    return siblings
+
+
+class InclusionProofV2(BaseModel):
+    """Position-binding inclusion proof over the version 2 tree (DRAFT, 5.0.0).
+
+    The path shape is not stated by the prover: a verifier derives, from
+    ``leaf_index`` and ``leaf_count``, at which levels a sibling exists and on
+    which side it sits. A proof therefore commits to the leaf and to its
+    position: no sibling list verifies at any position other than the one the
+    tree gave it. It does not commit to the tree's size — a ``leaf_count`` that
+    yields the same path shape verifies too — so the size of a sealed spine is
+    a claim of the seal record, never of a proof. ``leaf_hash`` is a
+    ``hash_version`` 2 leaf hash, which itself binds the node's
+    ``sequence_index``; ``leaf_index`` is the leaf's position in the spine's leaf
+    list (ephemeral Segments are not leaves, so the two numbers differ once any
+    have been excluded).
+    """
+    leaf_index: int
+    leaf_count: int
+    leaf_hash: str
+    siblings: List[str]      # raw-bytes tree siblings, leaf level first, hex here; only where one exists
+    spine_root: str
+
+
+def generate_inclusion_proof_v2(leaf_inputs: List[str], leaf_index: int) -> InclusionProofV2:
+    levels = _tree_v2_levels(leaf_inputs)
+    if not 0 <= leaf_index < len(leaf_inputs):
+        raise IndexError(f"leaf index {leaf_index} out of range (have {len(leaf_inputs)})")
+    siblings, pos = [], leaf_index
+    for level in levels[:-1]:
+        if pos % 2 == 0:
+            if pos + 1 < len(level):
+                siblings.append(level[pos + 1].hex())
+        else:
+            siblings.append(level[pos - 1].hex())
+        pos //= 2
+    return InclusionProofV2(leaf_index=leaf_index, leaf_count=len(leaf_inputs), leaf_hash=leaf_inputs[leaf_index],
+                            siblings=siblings, spine_root=levels[-1][0].hex())
+
+
+def verify_inclusion_proof_v2(proof: InclusionProofV2) -> bool:
+    """Recompute the root from the leaf and the siblings, placing each sibling on
+    the side the leaf's position dictates, and compare with ``spine_root``. A
+    proof with the wrong number of siblings for its stated position is invalid
+    before any hashing is done."""
+    import hashlib
+
+    try:
+        expected = expected_sibling_count_v2(proof.leaf_index, proof.leaf_count)
+    except ValueError:
+        return False
+    if len(proof.siblings) != expected:
+        return False
+    current = hashlib.sha3_256(TREE_LEAF_V2_PREFIX + bytes.fromhex(proof.leaf_hash)).digest()
+    n, pos, k = proof.leaf_count, proof.leaf_index, 0
+    while n > 1:
+        if not (pos % 2 == 0 and pos == n - 1):
+            sibling = bytes.fromhex(proof.siblings[k]); k += 1
+            current = hashlib.sha3_256(TREE_NODE_V2_PREFIX + (current + sibling if pos % 2 == 0 else sibling + current)).digest()
+        pos, n = pos // 2, (n + 1) // 2
+    return current.hex() == proof.spine_root
