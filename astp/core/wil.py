@@ -110,6 +110,40 @@ class StoreLayer(str, Enum):
     QDRANT = "qdrant"  # Semantic search index — written last; degradation is recoverable
 
 
+class StoreRole(str, Enum):
+    """Role-named store values (DRAFT for SPEC 5.0.0 §16; not yet ratified).
+
+    5.0.0 names the four storage roles of SPEC §12.1 by role. Ledger entries
+    written under 4.x carry the reference deployment's provider names in
+    ``stores_involved``; ``store_role_of`` reads either form, so a 4.x ledger
+    stays readable without rewriting stored data.
+    """
+    DURABLE_CONTENT = "durable_content"                  # written first
+    AUTHORITATIVE_STRUCTURAL = "authoritative_structural"  # written second
+    EPHEMERAL_COORDINATOR = "ephemeral_coordinator"      # concurrently with the structural store
+    SEMANTIC_INDEX = "semantic_index"                    # written last; degradation is recoverable
+
+
+_LEGACY_STORE_ROLES = {
+    StoreLayer.BLOB.value: StoreRole.DURABLE_CONTENT,
+    StoreLayer.NEO4J.value: StoreRole.AUTHORITATIVE_STRUCTURAL,
+    StoreLayer.REDIS.value: StoreRole.EPHEMERAL_COORDINATOR,
+    StoreLayer.QDRANT.value: StoreRole.SEMANTIC_INDEX,
+}
+
+
+def store_role_of(value: str) -> StoreRole:
+    """The role a stored ``stores_involved`` value names: a 5.0.0 role name, or
+    a 4.x provider name of the reference deployment. Anything else is refused."""
+    try:
+        return StoreRole(value)
+    except ValueError:
+        pass
+    if value in _LEGACY_STORE_ROLES:
+        return _LEGACY_STORE_ROLES[value]
+    raise ValueError(f"unknown store value {value!r}")
+
+
 class WritePhase(str, Enum):
     """Three-phase write protocol (SPEC §12.2)."""
     INTENT_DECLARED = "INTENT_DECLARED"

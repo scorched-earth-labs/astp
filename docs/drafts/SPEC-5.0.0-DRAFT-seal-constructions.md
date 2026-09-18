@@ -1,13 +1,13 @@
 # ASTP 5.0.0 — Seal Constructions (Draft)
 
-**Version:** 5.0.0-draft.11
+**Version:** 5.0.0-draft.12
 **Status:** Draft for review — **not ratified, not normative.** Nothing here applies to any existing seal.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-18
-**Applies To:** proposed replacement text for `SPEC.md` §5.2–§5.8, §8, §9.2, §16.3–§16.4, §19.1.1, §19.4 and §20 →2, and G-11/G-12, in 5.0.0
-**Vectors:** [`vectors/5.0.0-draft/seal-constructions.json`](../../vectors/5.0.0-draft/seal-constructions.json) (regenerate with `generate.py`, never by hand) · **Reference code:** `astp/protocol/encoding.py`, `compute_leaf_hash_v2`, `compute_merkle_root_v2`, `generate_inclusion_proof_v2` / `verify_inclusion_proof_v2`, `astp/core/seal_v2.py`, `astp/protocol/canonical_json.py`, `astp/protocol/audit_v2.py`, `astp/core/content_hash_v2.py`, `astp/protocol/witness_v2.py`, `astp/protocol/anchor_v2.py` · **Tests:** `tests/conformance/test_seal_constructions_v2_vectors.py`, `tests/conformance/test_audit_record_v2_vectors.py`, `tests/conformance/test_content_hashes_v2_vectors.py`, `tests/conformance/test_witness_anchor_v2_vectors.py`
+**Applies To:** proposed replacement text for `SPEC.md` §5.2–§5.8, §8, §9.2, §16.3–§16.4, §19.1.1, §19.3.7, §19.4 and §20 →2, G-1, G-11/G-12, and §2.2/§12.1 wording, in 5.0.0
+**Vectors:** [`vectors/5.0.0-draft/seal-constructions.json`](../../vectors/5.0.0-draft/seal-constructions.json) (regenerate with `generate.py`, never by hand) · **Reference code:** `astp/protocol/encoding.py`, `compute_leaf_hash_v2`, `compute_merkle_root_v2`, `generate_inclusion_proof_v2` / `verify_inclusion_proof_v2`, `astp/core/seal_v2.py`, `astp/protocol/canonical_json.py`, `astp/protocol/audit_v2.py`, `astp/core/content_hash_v2.py`, `astp/protocol/witness_v2.py`, `astp/protocol/anchor_v2.py`, `StoreRole` / `check_seal_record` · **Tests:** `tests/conformance/test_seal_constructions_v2_vectors.py`, `tests/conformance/test_audit_record_v2_vectors.py`, `tests/conformance/test_content_hashes_v2_vectors.py`, `tests/conformance/test_witness_anchor_v2_vectors.py`, `tests/unit/core/test_prose_unit_v2.py`
 
-This is the first four units of the 5.0.0 amendment: how an Episode's roots are built (§2–§7), inclusion proofs over the version 2 tree (§4a), canonical JSON with the audit record (§11–§12), the side-channel and cross-Episode content hashes (§13), and witness and anchor commitments (§14). Draft 3 incorporates the rulings of design Episode `4b9a779e-be46-4d61-872e-fd76545aa901`, segments 29 and 31 (§9). It is a MAJOR change under [`VERSIONING.md`](../../VERSIONING.md) and requires an Episode of Record. Every construction below is **new and versioned**. Seals made under `spine_algorithm_version` 0 and 1 remain defined by SPEC 4.5.0 §5.3–§5.8 and remain reproducible; 5.0.0 retains that text as the definition of those versions.
+This is the first four units of the 5.0.0 amendment: how an Episode's roots are built (§2–§7), inclusion proofs over the version 2 tree (§4a), canonical JSON with the audit record (§11–§12), the side-channel and cross-Episode content hashes (§13), witness and anchor commitments (§14), and the closing prose (§15–§19). Draft 3 incorporates the rulings of design Episode `4b9a779e-be46-4d61-872e-fd76545aa901`, segments 29 and 31 (§9). It is a MAJOR change under [`VERSIONING.md`](../../VERSIONING.md) and requires an Episode of Record. Every construction below is **new and versioned**. Seals made under `spine_algorithm_version` 0 and 1 remain defined by SPEC 4.5.0 §5.3–§5.8 and remain reproducible; 5.0.0 retains that text as the definition of those versions.
 
 ---
 
@@ -169,9 +169,9 @@ Consequences outside this text:
 2. **The write boundary.** An Episode identifier that is not a UUID MUST be refused where Episodes are created, not merely be unrepresentable in the root. The reference deployment holds one Episode created with a string identifier; 286 immutable Layer 3 nodes carry that string inside their content hashes, so it cannot be renamed. It is a well-formed `spine_algorithm_version` 1 Episode — version 1 hashes the identifier as text — and is to be closed and sealed under version 1 before the deployment adopts version 2.
 3. **What the seal path must now read** — six fields per Segment rather than one — is an implementation note for the consuming runtime, to be written with the adapter work.
 
-## 10. Not in these units
+## 10. Coverage
 
-The remaining 5.0.0 items — the single hashing statement, role-named store values, and the sealed-requires-a-record rule with the late-seal wording — follow in further units, each with vectors.
+With §15–§19 the 5.0.0 construction list is closed end to end. What remains before ratification is editorial: folding this draft into `SPEC.md` as 5.0.0 text with the 4.x constructions retained as the definitions of their versions, the CHANGELOG entry, the GLOSSARY entries for the terms introduced here, and the Episode of Record.
 
 ## 11. Canonical JSON (replaces every "canonical JSON" and "sorted keys" reference)
 
@@ -315,3 +315,30 @@ What is submitted to a transparency log at crystallization (G-14): that this nod
 ### 14.5 Rulings
 
 Ruled in design Episode `4b9a779e…`, segment 42: `root` is the outermost sealed commitment, defined by construction, bound with `root_version`; Ed25519 over the raw commitment is the one registered scheme, an extensible registry with one entry, with key-to-identity binding outside the preimage; author-distinctness is a G-12 validity condition (a self-witness is not an attestation, not merely an uncounted one) and G-11's count is a maximum bipartite matching. The load-bearing negative vectors of this unit are the copied record and the empty signature: because `witness_id` is in the commitment, a record copied under a second name with its commitment recomputed fails *signature verification* — the copy is cryptographically invalid, not merely uncounted.
+
+## 15. One hash function (replaces every per-section algorithm statement)
+
+Every digest in this protocol is **SHA3-256** (FIPS 202): 32 bytes. In a preimage a digest is its 32 raw bytes (§2, HASH); in text — a stored `content_hash`, a seal record, a proof file — it is 64 lowercase hexadecimal characters, and a reader that meets uppercase normalizes before comparing. There is no other hash function, no truncation, no keyed variant, and no per-construction choice: a construction differs from another only by its domain prefix and its fields. The two non-digest primitives are named where they are used and nowhere else — HKDF-SHA3-256 for key derivation (§16.2) and Ed25519 over 32 raw digest bytes for every signature (§4.6, §14). §2.2's "signing algorithm is implementation-defined (subject to minimum security requirements)" is withdrawn: a rule no verifier can act on is not a rule.
+
+## 16. Storage roles are named by role (replaces the provider names in §12)
+
+The four storage roles of §12.1 — **durable content store**, **authoritative structural store**, **ephemeral coordinator**, **semantic search index** — are the protocol's vocabulary, and the write ordering across them is the invariant. 5.0.0 gives the roles the values `durable_content`, `authoritative_structural`, `ephemeral_coordinator`, `semantic_index` wherever a role is recorded (a WIL entry's `stores_involved`, a conformance declaration). A provider is a deployment's choice and is never named in normative text. Ledger entries written under 4.x carry the reference deployment's provider names; they are stored data and are not rewritten. A reader maps them to roles by the fixed correspondence the reference implementation publishes (`store_role_of`), and refuses any other value.
+
+## 17. Sealed requires a record; a late seal is ordinary lifecycle (amends G-1 and §4.4)
+
+**Outcome-state invariant.** A node whose `sealed_at` is non-null MUST have a crystallization record bound to it: the delta from which its roots reproduce under its recorded §5.8 version identifiers. A `sealed_at` with no bound record is not a seal — it is a claim of fixity with nothing fixed — and a verifier reports it as `NO_CRYSTAL`, never as sealed. This is stated as an invariant on the stored outcome, not on a code path, because the case that produced it in the reference deployment was application code swallowing a failed crystallization after the seal flag had been written: the conformance check asserts the state, whatever path wrote it.
+
+**Late seal.** A seal MAY be established at any time at or after close. `closed_at` records when the Episode was closed; `sealed_at` records when fixity was computed and is never back-dated; `sealed_at ≥ closed_at` is the only ordering constraint. A non-zero gap is valid and carries no adverse inference: the record was fixed later, and says so. An Episode closed with no Segments and no Signals is closed and unsealed, with nothing to fix.
+
+## 18. §19.3.7 cross-reference — a structural node written after a seal
+
+The one permitted retroactive spine write of §19.3.7 (orphan recovery's point write) and, generally, any structural node created for an Episode after that Episode has been sealed, is **committed by the next crystallization** of that Episode and MUST reference the earlier seal it post-dates (its `episode_root_hash` and `sealed_at`). It is never an unbound phantom between two seals: before the next crystallization it is a node the current seal does not commit and says nothing about; after it, it is a member of the successor's structural manifest (§6). §19.3.7's guarantee (b) — "a diagnostic write never alters an Episode's cryptographic fingerprint" — is unchanged: the `ForkOrphanMarker` is not a member; the recovered point is.
+
+## 19. Two implementation consequences, carried to the adapter work
+
+Both were ruled in this Episode (segments 29 and 31) and belong to the 4.6.0 adapter change rather than to the text, because each alters runtime behaviour the consuming deployment relies on:
+
+1. **`ESCALATED` is terminal for its gate.** The reference implementation's `HITLNodeStatus.ESCALATED` is described as "awaiting higher-authority resolution" and its resolution writer records every decision other than a timeout as `resolved`, so an escalation does not survive as a status. Under 5.0.0 an escalated gate is closed with status `escalated`, is a structural-manifest member as such (§6), and any continuation is a new gate that references it.
+2. **Non-UUID Episode identifiers are refused where Episodes are created.** The write boundary accepted a string against a model declaring `UUID`. The one such Episode in the reference deployment is to be closed and sealed under `spine_algorithm_version` 1 before the refusal lands (§9, consequence 2).
+
+Two names are also settled here so no naming question survives into ratification: `mnemosyne_countersignature` on the seal record becomes `countersignature` (the counter-signing party is named by the record's `sealed_by`/witness records, not by a product), and the illustrative `GroupingSystem` values are removed from the enum — any string identifier is valid, as the enum's own docstring says, and a protocol enum is not the place to list vendors.
