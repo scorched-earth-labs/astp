@@ -1,6 +1,6 @@
 # ASTP 5.0.0 — Seal Constructions (Draft)
 
-**Version:** 5.0.0-draft.10
+**Version:** 5.0.0-draft.11
 **Status:** Draft for review — **not ratified, not normative.** Nothing here applies to any existing seal.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-18
@@ -288,11 +288,11 @@ witness_commitment = SHA3-256( "WITNESS_COMMITMENT:v2:" ‖ STRING(witness_id) �
                                ‖ STRING(role) ‖ STRING(role_detail) | NULL )
 ```
 
-`root` is the node's outermost sealed commitment — the Episode root for an Episode; the spine root for a node type that has no manifests — and `root_version` is the version of the construction that produced it, so a verifier knows what kind of object the witnessed digest is before it compares. `sequence_index` and `logical_clock` are the node's position claims at the moment of witnessing, as 4.x had them. `role_detail` is bound so that a `CUSTOM` role says what it was.
+`root` is defined by construction, not by enumeration: **the node's outermost sealed commitment** — whatever construction commits everything under the node's seal. For an Episode that is the Episode root (which commits the spine and both manifests); for a node type with no manifests it is the spine root; a future node type with manifests inherits the right binding without being added to a list. `root_version` is the version of the construction that produced it, so a verifier knows what kind of object the witnessed digest is before it compares — an Episode root is never compared against a spine root and the mismatch called a forgery. `sequence_index` and `logical_clock` are the node's position claims at the moment of witnessing, as 4.x had them. `role_detail` is bound so that a `CUSTOM` role says what it was.
 
 4.x bound the node, the root and the role, and not the witness or the time. Every witness of a root therefore shared one commitment, and a record could be copied under a second `witness_id` and count again toward the threshold; and a record whose `signature` was empty passed G-12, so the threshold could be met by writing unsigned rows. Both are closed here: the commitment names its witness, and validity requires a signature that verifies.
 
-**Signature.** Ed25519 over the 32 raw bytes of the commitment — `Sign(sk, bytes.fromhex(commitment_hash))`, the same form §4.6 fixes for HITL signatures — carried with the 32-byte public key and `public_key_fingerprint = SHA3-256(public_key)`. `ed25519` is the one registered `signature_scheme`; a record naming another is not valid. The protocol verifies that a record was signed by the key it names; whether that key belongs to the named `witness_id` is the workspace key registry's question, outside the preimage and outside this rule.
+**Signature.** Ed25519 over the 32 raw bytes of the commitment — `Sign(sk, bytes.fromhex(commitment_hash))`, the same form §4.6 fixes for HITL signatures — carried with the 32-byte public key and `public_key_fingerprint = SHA3-256(public_key)`. `ed25519` is the one registered `signature_scheme`; a record naming an unregistered scheme is not valid. This is a registry with one entry, not a hardcoding: the commitment is scheme-independent — the signature is *over* it — so a later scheme enters as a new registered name that a verifier dispatches on, and `WITNESS_COMMITMENT:v2:` is unchanged. The protocol verifies that a record was signed by the key it names; whether that key belongs to the named `witness_id` is the workspace key registry's question, outside the preimage and outside this rule.
 
 ### 14.2 Witness validity — G-12, version 2
 
@@ -300,7 +300,7 @@ A record is **valid** if and only if all of: its `commitment_hash` recomputes fr
 
 ### 14.3 Witness threshold — G-11, version 2
 
-A node meets a workspace threshold *n* when at least *n* valid records exist with pairwise-distinct `witness_id` **and** pairwise-distinct `public_key_fingerprint`: one key cannot count twice under two names, and one name cannot count twice under two keys. The count is the size of the largest such set — each valid record is an edge between a name and a key, and the count is a maximum matching, not a greedy pass (A under k₁, A under k₂ and B under k₁ admit two witnesses, A/k₂ and B/k₁; a greedy pass that takes A/k₁ first finds one). The threshold value itself remains workspace configuration, as §16.4.5 says.
+A node meets a workspace threshold *n* when at least *n* valid records exist with pairwise-distinct `witness_id` **and** pairwise-distinct `public_key_fingerprint`: one key cannot count twice under two names, and one name cannot count twice under two keys. **The count is the size of a maximum bipartite matching between `witness_id`s and keys over the valid records** — not a deduplication of names, not a deduplication of keys, not a greedy pass, each of which under-counts and (for a greedy pass) depends on record order. Each valid record is an edge between a name and a key (A under k₁, A under k₂ and B under k₁ admit two witnesses, A/k₂ and B/k₁; a greedy pass that takes A/k₁ first finds one). The threshold value itself remains workspace configuration, as §16.4.5 says.
 
 ### 14.4 Anchor commitment
 
@@ -312,8 +312,6 @@ anchor_commitment = SHA3-256( "ANCHOR_COMMITMENT:v2:" ‖ UUID(node_id) ‖ STRI
 
 What is submitted to a transparency log at crystallization (G-14): that this node, in this workspace, had this root at this sequence and clock, at this time; no payload internals, as §16.3.2 requires. `root` and `root_version` are as in §14.1. 4.x hashed a sorted-JSON document carrying a `protocol_version` string that defaulted to the literal `"2.3.0"` and a timestamp truncated to the second; neither is a claim about the node, and both are gone. The receipt (`AnchorReceipt`) is the log's artifact and is unchanged.
 
-### 14.5 Open for the design Episode
+### 14.5 Rulings
 
-1. `root` as "the node's outermost sealed commitment" with `root_version` naming its construction, rather than the bare spine root 4.x named — so a witness of a 5.0.0 Episode attests the Episode root, which commits the spine and both manifests.
-2. Ed25519 as the one registered scheme for witness signatures, matching §4.6, rather than "implementation-defined subject to minimum security requirements" (§2.2), which no verifier can act on.
-3. Author-distinctness as a validity condition (a party cannot witness its own claim), and the double-distinctness threshold count.
+Ruled in design Episode `4b9a779e…`, segment 42: `root` is the outermost sealed commitment, defined by construction, bound with `root_version`; Ed25519 over the raw commitment is the one registered scheme, an extensible registry with one entry, with key-to-identity binding outside the preimage; author-distinctness is a G-12 validity condition (a self-witness is not an attestation, not merely an uncounted one) and G-11's count is a maximum bipartite matching. The load-bearing negative vectors of this unit are the copied record and the empty signature: because `witness_id` is in the commitment, a record copied under a second name with its commitment recomputed fails *signature verification* — the copy is cryptographically invalid, not merely uncounted.

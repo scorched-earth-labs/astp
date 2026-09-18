@@ -78,18 +78,33 @@ def test_witness_commitment_and_signature_match_the_independent_reference(i):
     check_witness_record_v2(rec, node_author="author")
 
 
+def test_copied_record_and_empty_signature_are_invalid():
+    """The load-bearing negatives of this unit: the two cases 4.x admitted."""
+    w1 = _load(V["witness_records"][0])
+    # A record copied under a second name, with the commitment recomputed for the new name so that
+    # the recompute check passes: the signature was made over the original commitment, which named
+    # the original witness, so it no longer verifies. Binding witness_id into the commitment is what
+    # makes the copy cryptographically invalid rather than merely uncounted.
+    copy = w1.model_copy(update={"witness_id": "someone-else"})
+    copy = copy.model_copy(update={"commitment_hash": compute_witness_commitment_v2(**copy.commitment_fields())})
+    with pytest.raises(WitnessInvalid, match="signature does not verify"):
+        check_witness_record_v2(copy, "author")
+    # A copy that does not even recompute the commitment fails earlier, at the recompute check.
+    with pytest.raises(WitnessInvalid, match="does not recompute"):
+        check_witness_record_v2(w1.model_copy(update={"witness_id": "someone-else"}), "author")
+    # An empty signature is invalid, not valid.
+    with pytest.raises(WitnessInvalid, match="signature does not verify"):
+        check_witness_record_v2(w1.model_copy(update={"signature": b""}), "author")
+
+
 def test_every_g12_condition_is_checked():
     w1 = _load(V["witness_records"][0])
     with pytest.raises(WitnessInvalid, match="author"):
         check_witness_record_v2(w1, node_author="witness-1")
     with pytest.raises(WitnessInvalid, match="does not recompute"):
-        check_witness_record_v2(w1.model_copy(update={"witness_id": "someone-else"}), "author")   # copied under a new name
-    with pytest.raises(WitnessInvalid, match="does not recompute"):
         check_witness_record_v2(w1.model_copy(update={"witnessed_at": w1.witnessed_at + timedelta(seconds=1)}), "author")
     with pytest.raises(WitnessInvalid, match="signature does not verify"):
         check_witness_record_v2(w1.model_copy(update={"signature": b"\x00" * 64}), "author")
-    with pytest.raises(WitnessInvalid, match="signature does not verify"):
-        check_witness_record_v2(w1.model_copy(update={"signature": b""}), "author")               # 4.x let this count
     other = SK2.public_key().public_bytes_raw()
     with pytest.raises(WitnessInvalid, match="fingerprint"):
         check_witness_record_v2(w1.model_copy(update={"public_key": other}), "author")
