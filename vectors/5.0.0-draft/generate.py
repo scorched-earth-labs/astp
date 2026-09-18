@@ -29,6 +29,7 @@ from uuid import UUID
 from astp.core import seal_v2 as S
 from astp.protocol import encoding as E
 from astp.protocol.leaf_hash import compute_leaf_hash, compute_leaf_hash_v2
+from astp.protocol.merkle import generate_inclusion_proof_v2
 
 OUT = Path(__file__).with_name("seal-constructions.json")
 
@@ -98,6 +99,15 @@ def build() -> dict:
             "fields": {k: old[k] for k in ("node_id", "node_type", "schema_version", "sequence_index", "content_hash", "parent_node_id")},
             "stored_leaf_hash_v1": v1_leaf,
             "leaf_hash_v2_from_fields": old["leaf_hash_v2"],
+        },
+        "inclusion_proofs_v2": {
+            "rule": "leaf_index and leaf_count fix the path shape; the verifier derives at which levels a sibling exists "
+                    "and on which side. A proof binds the leaf and its position, not the tree's size.",
+            "tree": "the seven leaf_hash_v2 values above, in order",
+            "leaf_3_of_7": generate_inclusion_proof_v2(leaves, 3).model_dump(),
+            "leaf_6_of_7_unpaired_path": generate_inclusion_proof_v2(leaves, 6).model_dump(),
+            "leaf_0_of_1": generate_inclusion_proof_v2(leaves[:1], 0).model_dump(),
+            "expected_sibling_counts_for_7_leaves": [__import__("astp.protocol.merkle", fromlist=["x"]).expected_sibling_count_v2(i, 7) for i in range(7)],
         },
         "signals": signals,
         "signal_manifest_v2": {"five_members_any_order": sm, "empty": S.compute_signal_manifest_hash_v2([])},

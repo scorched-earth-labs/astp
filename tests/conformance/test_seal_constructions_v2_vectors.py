@@ -32,7 +32,8 @@ import pytest
 from astp.core import seal_v2
 from astp.protocol import encoding
 from astp.protocol.leaf_hash import compute_leaf_hash_v2
-from astp.protocol.merkle import compute_merkle_root_v2
+from astp.protocol.merkle import (InclusionProofV2, compute_merkle_root_v2, expected_sibling_count_v2,
+                                  generate_inclusion_proof_v2, verify_inclusion_proof_v2)
 
 VECTORS = json.loads(
     (Path(__file__).resolve().parents[2] / "vectors" / "5.0.0-draft" / "seal-constructions.json").read_text(encoding="utf-8")
@@ -278,3 +279,69 @@ def test_every_prefix_in_the_registry_is_distinct_and_none_is_a_4x_prefix():
     assert len(prefixes) == len(set(prefixes)) == 16
     assert not any(p in (b"LEAF:", b"NODE:") or p.startswith((b"LEAF:", b"NODE:")) for p in prefixes)
     assert not any(a != b and a.startswith(b) for a in prefixes for b in prefixes)      # no prefix is a prefix of another
+
+
+# ── inclusion proofs over the version 2 tree ───────────────────────────────────
+
+def _ref_verify(proof: dict) -> bool:
+    """Verifier written from the draft text: derive the path shape from
+    (leaf_index, leaf_count); place each sibling by the leaf's parity."""
+    n, pos, k = proof["leaf_count"], proof["leaf_index"], 0
+    if not 0 <= pos < n:
+        return False
+    cur = _sha3(b"TREE_LEAF:v2:" + bytes.fromhex(proof["leaf_hash"]))
+    sib = [bytes.fromhex(h) for h in proof["siblings"]]
+    while n > 1:
+        if not (pos % 2 == 0 and pos == n - 1):
+            if k >= len(sib):
+                return False
+            cur = _sha3(b"TREE_NODE:v2:" + (cur + sib[k] if pos % 2 == 0 else sib[k] + cur)); k += 1
+        pos, n = pos // 2, (n + 1) // 2
+    return k == len(sib) and cur.hex() == proof["spine_root"]
+
+
+@pytest.mark.parametrize("key,index,leaves", [("leaf_3_of_7", 3, 7), ("leaf_6_of_7_unpaired_path", 6, 7), ("leaf_0_of_1", 0, 1)])
+def test_inclusion_proof_vectors(key, index, leaves):
+    want = VECTORS["inclusion_proofs_v2"][key]
+    got = generate_inclusion_proof_v2(LEAVES[:leaves], index).model_dump()
+    assert got == want
+    assert verify_inclusion_proof_v2(InclusionProofV2(**want)) and _ref_verify(want)
+    assert want["spine_root"] == VECTORS["spine_root_sav2"][str(leaves)]
+    assert len(want["siblings"]) == expected_sibling_count_v2(index, leaves)
+
+
+def test_sibling_counts_for_seven_leaves():
+    assert [expected_sibling_count_v2(i, 7) for i in range(7)] == VECTORS["inclusion_proofs_v2"]["expected_sibling_counts_for_7_leaves"]
+    assert expected_sibling_count_v2(6, 7) == 2      # leaf 6 is unpaired at the leaf level (carried up), then paired at both upper levels
+    assert expected_sibling_count_v2(0, 1) == 0
+
+
+def test_a_proof_binds_the_leaf_its_position_every_sibling_and_the_root():
+    p = InclusionProofV2(**VECTORS["inclusion_proofs_v2"]["leaf_3_of_7"])
+    assert verify_inclusion_proof_v2(p)
+    for j in range(7):
+        if j != 3:
+            assert not verify_inclusion_proof_v2(p.model_copy(update={"leaf_index": j})), j
+    assert not verify_inclusion_proof_v2(p.model_copy(update={"leaf_hash": LEAVES[4]}))
+    for k in range(len(p.siblings)):
+        bad = p.siblings[:k] + [hashlib.sha3_256(b"evil").hexdigest()] + p.siblings[k + 1:]
+        assert not verify_inclusion_proof_v2(p.model_copy(update={"siblings": bad})), k
+    assert not verify_inclusion_proof_v2(p.model_copy(update={"spine_root": VECTORS["spine_root_sav2"]["3"]}))
+    assert not verify_inclusion_proof_v2(p.model_copy(update={"siblings": p.siblings + [p.siblings[0]]}))   # wrong shape
+    assert not verify_inclusion_proof_v2(p.model_copy(update={"leaf_index": 7}))                             # out of range
+
+
+def test_a_proof_does_not_commit_to_the_tree_size():
+    # stated, not hidden: a leaf_count giving the same path shape verifies — size is the seal record's claim
+    p = InclusionProofV2(**VECTORS["inclusion_proofs_v2"]["leaf_3_of_7"])
+    assert verify_inclusion_proof_v2(p.model_copy(update={"leaf_count": 8}))
+    assert not verify_inclusion_proof_v2(p.model_copy(update={"leaf_count": 9}))   # different shape: refused
+
+
+@pytest.mark.parametrize("n", range(1, 24))
+def test_every_position_verifies_and_no_other_position_does(n):
+    leaves = [hashlib.sha3_256(f"y{i}".encode()).hexdigest() for i in range(n)]
+    for i in range(n):
+        p = generate_inclusion_proof_v2(leaves, i)
+        assert verify_inclusion_proof_v2(p) and _ref_verify(p.model_dump())
+        assert all(not verify_inclusion_proof_v2(p.model_copy(update={"leaf_index": j})) for j in range(n) if j != i)
