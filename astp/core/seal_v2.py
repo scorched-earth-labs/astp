@@ -227,3 +227,24 @@ def compute_hitl_node_hash_v2(context_hash: str, resolution_hash: str) -> str:
     """The structural-manifest member for a human-in-the-loop event. Under 4.x this
     hash shared the ``NODE:`` prefix with Merkle interior nodes; it has its own."""
     return hash_fields(HITL_NODE_V2, [(HASH, context_hash), (HASH, resolution_hash)])
+
+
+# ── Sealed-requires-a-record (DRAFT §17) ────────────────────────────────────────
+
+class SealWithoutRecord(ValueError):
+    """A node claims to be sealed and no crystallization record is bound to it,
+    or its times contradict each other."""
+
+
+def check_seal_record(*, sealed_at: Optional[datetime], closed_at: Optional[datetime], has_crystallization_record: bool) -> None:
+    """The outcome-state invariant a seal must satisfy, independent of the code
+    path that produced it: a non-null ``sealed_at`` MUST have a crystallization
+    record bound to it, and ``sealed_at >= closed_at``. A seal MAY be established
+    at any time at or after close; a non-zero gap is valid and carries no
+    adverse inference. An unsealed node passes."""
+    if sealed_at is None:
+        return
+    if not has_crystallization_record:
+        raise SealWithoutRecord("sealed_at is set and no crystallization record is bound to the node")
+    if closed_at is not None and sealed_at < closed_at:
+        raise SealWithoutRecord(f"sealed_at {sealed_at.isoformat()} precedes closed_at {closed_at.isoformat()}")
