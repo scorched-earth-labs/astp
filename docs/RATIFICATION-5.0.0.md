@@ -1,10 +1,10 @@
 # ASTP 5.0.0 — Ratification Statement (for the Episode of Record)
 
 **Version:** 1.0.0
-**Status:** Draft — to be posted as the opening Segment of the 5.0.0 Episode of Record, then this file updated with the Episode's identifier and sealed root
+**Status:** Sealed — the opening Segment of Episode of Record `ce3f569c-9cdc-4a3d-913a-b9d8573d9a28`; record table filled after the seal
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-18
-**Applies To:** [`SPEC.md`](../SPEC.md) 5.0.0-draft; [`GOVERNANCE.md`](../GOVERNANCE.md) § Episode of Record
+**Applies To:** [`SPEC.md`](../SPEC.md) 5.0.0; [`GOVERNANCE.md`](../GOVERNANCE.md) § Episode of Record
 
 ---
 
@@ -47,8 +47,10 @@ The amendment was deliberated in design Episode `4b9a779e-be46-4d61-872e-fd76545
 
 | | |
 |---|---|
-| Episode identifier | *to be recorded when the Episode is opened* |
-| `SPEC.md` commit ratified | *to be recorded* |
-| Sealed under | *`spine_algorithm_version` — to be recorded; version 1 if sealed by the reference deployment before its adapter adopts version 2* |
-| `episode_root_hash` | *to be recorded at seal* |
-| Sealed at | *to be recorded* |
+| Episode identifier | `ce3f569c-9cdc-4a3d-913a-b9d8573d9a28` ("5.0.0 Episode of Record") |
+| `SPEC.md` commit ratified | `44f764eb8e5caad9757fdf5d0e654bb5602a25d3` — `SPEC.md` SHA3-256 `c2e13d0ee60f7db95d185ec2f8079d38c9f087f7168a3b613aada6bc0a6b8a8d` (git blob `19f9172d107cfad560a7e89c0e312c5a37022fb2`, 207,941 bytes, carrying `**Version:** 5.0.0-draft` by design); `vectors/5.0.0/seal-constructions.json` SHA3-256 `60e304006cc5b9a36189bd537c21d6ce3d6108c00cecc2036b9c8e6a77cc2685`. The content digest is the binding citation; the commit is the navigable pointer. |
+| Sealed under | `spine_algorithm_version` 1, `ordering_version` 2 — the reference deployment's adapter does not yet write version 2 seals; adopting version 2 at seal time is the paired adapter work that follows this release. The amendment that defines version 2 is itself sealed under version 1, and that is coherent: what a specification ratifies and what the sealing deployment can currently emit are two different clocks. |
+| `episode_root_hash` | `3649bff4b96a17c99bb108ec23f4e6f8e41a455d9d38c98d6f32111800afe48a` |
+| Sealed at | `2026-09-18T17:25:35.774405+00:00` (closed `2026-09-18T17:25:35.774405+00:00`) |
+
+The Episode identifier, cited commit, content digests, `episode_root_hash` and `sealed_at` recorded in this file were written after the seal, drawn from the seal. The Episode is the anchor; this file trails it. A verifier reconciling the two reads the Episode as authoritative and this file as its human-readable result: the opening Segment carries this text with its placeholders unresolved and the `-draft` digest, and the released file differs from it in exactly those cells and the suffix, and in nothing normative.
