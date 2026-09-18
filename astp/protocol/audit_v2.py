@@ -23,7 +23,8 @@ wrote them. New chains are written under this construction.
     record_hash = SHA3-256("AUDIT_RECORD:v2:" ‖ enc(fields in the order below))
 
     UUID         audit_id
-    STRING       chain_key             the chain this record belongs to — an Episode UUID as text, or a declared synthetic key
+    STRING       chain_key             the chain this record belongs to — an Episode UUID as text (hashed as text,
+                                       never as a UUID), or a synthetic key such as declaration:<system>:<group>
     UINT         delta_sequence        1 for the first record; +1 per record; never reset
     STRING       delta_type
     STRING       agent_id

@@ -1,6 +1,6 @@
 # ASTP 5.0.0 — Seal Constructions (Draft)
 
-**Version:** 5.0.0-draft.6
+**Version:** 5.0.0-draft.7
 **Status:** Draft for review — **not ratified, not normative.** Nothing here applies to any existing seal.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-18
@@ -203,6 +203,8 @@ record_hash = SHA3-256( "AUDIT_RECORD:v2:"
     ‖ HASH(prior_audit_hash) | NULL      NULL for the first record of a chain; there is no text sentinel
 )
 ```
+
+`chain_key` and `affected_nodes` are `STRING` and `LIST(STRING)` deliberately, not by oversight: the audit chain is outside every seal, and its integrity rests on the `record_hash` recurrence below, not on the identity-canonicality that §7's string-identity argument requires inside a seal. A synthetic key such as `declaration:<system>:<group>` is a conformant `chain_key`, and `affected_nodes` may list Episode identifiers beside node identifiers because that is what an operation touches. A `chain_key` is hashed as its `STRING` bytes under the §2 discipline like every other string: a UUID-shaped key gets no UUID treatment in the preimage — an Episode's chain is keyed by the UUID's canonical text, hashed as text. (Ruled in design Episode `4b9a779e…`, segment 38.)
 
 Every field is bound; the vectors' tests alter each one in turn and the chain breaks at that record. An absent optional field encodes as NULL, which is distinct from an empty string — `human_actor` unset and `human_actor` `""` are different records. The deltas enter as BYTES, not STRING: they are documents already in canonical form, hashed byte-exact, and a writer MUST refuse a delta text that is not its own canonical form.
 
