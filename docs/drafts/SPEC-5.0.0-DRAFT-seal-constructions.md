@@ -1,13 +1,13 @@
 # ASTP 5.0.0 — Seal Constructions (Draft)
 
-**Version:** 5.0.0-draft.7
+**Version:** 5.0.0-draft.9
 **Status:** Draft for review — **not ratified, not normative.** Nothing here applies to any existing seal.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-18
-**Applies To:** proposed replacement text for `SPEC.md` §5.2–§5.8, §8, §9.2 and §19.1.1 in 5.0.0
-**Vectors:** [`vectors/5.0.0-draft/seal-constructions.json`](../../vectors/5.0.0-draft/seal-constructions.json) (regenerate with `generate.py`, never by hand) · **Reference code:** `astp/protocol/encoding.py`, `compute_leaf_hash_v2`, `compute_merkle_root_v2`, `generate_inclusion_proof_v2` / `verify_inclusion_proof_v2`, `astp/core/seal_v2.py`, `astp/protocol/canonical_json.py`, `astp/protocol/audit_v2.py` · **Tests:** `tests/conformance/test_seal_constructions_v2_vectors.py`, `tests/conformance/test_audit_record_v2_vectors.py`
+**Applies To:** proposed replacement text for `SPEC.md` §5.2–§5.8, §8, §9.2, §19.1.1, §19.4 and §20 →2 in 5.0.0
+**Vectors:** [`vectors/5.0.0-draft/seal-constructions.json`](../../vectors/5.0.0-draft/seal-constructions.json) (regenerate with `generate.py`, never by hand) · **Reference code:** `astp/protocol/encoding.py`, `compute_leaf_hash_v2`, `compute_merkle_root_v2`, `generate_inclusion_proof_v2` / `verify_inclusion_proof_v2`, `astp/core/seal_v2.py`, `astp/protocol/canonical_json.py`, `astp/protocol/audit_v2.py`, `astp/core/content_hash_v2.py` · **Tests:** `tests/conformance/test_seal_constructions_v2_vectors.py`, `tests/conformance/test_audit_record_v2_vectors.py`, `tests/conformance/test_content_hashes_v2_vectors.py`
 
-This is the first three units of the 5.0.0 amendment: how an Episode's roots are built (§2–§7), inclusion proofs over the version 2 tree (§4a), and canonical JSON with the audit record (§11–§12). Draft 3 incorporates the rulings of design Episode `4b9a779e-be46-4d61-872e-fd76545aa901`, segments 29 and 31 (§9). It is a MAJOR change under [`VERSIONING.md`](../../VERSIONING.md) and requires an Episode of Record. Every construction below is **new and versioned**. Seals made under `spine_algorithm_version` 0 and 1 remain defined by SPEC 4.5.0 §5.3–§5.8 and remain reproducible; 5.0.0 retains that text as the definition of those versions.
+This is the first four units of the 5.0.0 amendment: how an Episode's roots are built (§2–§7), inclusion proofs over the version 2 tree (§4a), canonical JSON with the audit record (§11–§12), and the side-channel and cross-Episode content hashes (§13). Draft 3 incorporates the rulings of design Episode `4b9a779e-be46-4d61-872e-fd76545aa901`, segments 29 and 31 (§9). It is a MAJOR change under [`VERSIONING.md`](../../VERSIONING.md) and requires an Episode of Record. Every construction below is **new and versioned**. Seals made under `spine_algorithm_version` 0 and 1 remain defined by SPEC 4.5.0 §5.3–§5.8 and remain reproducible; 5.0.0 retains that text as the definition of those versions.
 
 ---
 
@@ -37,6 +37,7 @@ A construction built from named fields is `SHA3-256(prefix ‖ enc(f₁) ‖ …
 | `0x06` | HASH | 32 bytes — a SHA3-256 value, raw, never its hex text |
 | `0x07` | LIST | `u32be(count)` ‖ the items in order, each encoded as a field of the one type the construction states for the list |
 | `0x08` | BOOL | one byte: `0x00` false, `0x01` true |
+| `0x09` | FLOAT | 8 bytes: IEEE 754 binary64, big-endian. The admissible set is exhaustive: NaN and ±∞ are refused before encoding (so no NaN payload ever enters a preimage), subnormals are encoded as-is, and −0 → +0 is the *only* normalization performed; the encoding is otherwise bit-faithful |
 
 A TIMESTAMP MUST be computed from a timezone-aware instant, converted to UTC, in integer arithmetic; a value with no timezone MUST be refused. Sub-millisecond precision is truncated. A field count is fixed by its construction, every field is self-delimiting, and no prefix in §7 is a prefix of another, so distinct inputs cannot encode to the same bytes.
 
@@ -114,7 +115,7 @@ structural_manifest_hash = set( "STRUCTURAL_MANIFEST:v1:", member hashes — §6
 
 ## 6. Structural manifest
 
-**Membership rule.** A structural node is a member if and only if removing it would let a verifier be deceived about the Episode's branch, fork, merge or termination structure. The same rule decides fields: a field that makes a structural claim is in a member's preimage; commentary is not. `spine_merkle_snapshot` binds a divergence to the history it left from, and `merge_type` says how two histories combined — both are in. A `branch_label`, a `merge_summary` or a `synthesis_summary` is commentary: binding it would make an honest edit break a seal while proving nothing. Who initiated a branch, fork or merge, and who returned a fork, is provenance: binding actor identity is the audit chain's job, and the manifest binding it for some nodes and not others, as 4.x did, has no principled defence. All of these are out. The *nodes* remain members; it is only these fields that a member's preimage no longer carries. 4.x seals that bound them remain reproducible under 4.x. A `ForkOrphanMarker` is a diagnostic satellite and is not a member.
+**Membership rule.** A structural node is a member if and only if removing it would let a verifier be deceived about the Episode's branch, fork, merge or termination structure. The same rule decides fields: a field that makes a structural claim is in a member's preimage; commentary is not. `spine_merkle_snapshot` binds a divergence to the history it left from, and `merge_type` says how two histories combined — both are in. A `branch_label`, a `merge_summary` or a `synthesis_summary` is commentary: binding it would make an honest edit break a seal while proving nothing. Who initiated a branch, fork or merge, and who returned a fork, is provenance: binding actor identity is the audit chain's job, and the manifest binding it for some nodes and not others, as 4.x did, has no principled defence. All of these are out. **Named exception:** actor identity is bound where the actor constitutes the construction's defining claim rather than the provenance of an operation on a structure that exists without them — the aside binds both of its parties (G-25 makes the human's presence its defining claim) and the soliloquy binds `initiated_by_agent` (§13). A later reader tightening this rule must not strip those: doing so hashes a weaker claim than the node makes. The *nodes* remain members; it is only these fields that a member's preimage no longer carries. 4.x seals that bound them remain reproducible under 4.x. A `ForkOrphanMarker` is a diagnostic satellite and is not a member.
 
 Members, each under its own prefix (so the set needs no per-member type tag):
 
@@ -142,7 +143,7 @@ episode_root_hash = SHA3-256( "EPISODE_ROOT:v2:" ‖ UUID(episode_id)
 
 `episode_id` is a UUID, as §4.1 requires; the root does not admit a string identifier, because identity bound by string equality is only as strong as the strings' encoding. An Episode whose identifier is not a UUID cannot be sealed under this construction and must say so; it is brought into conformance by being given one, with the old identifier kept as provenance and bound to nothing.
 
-Prefixes introduced here, each used by exactly one construction, none a prefix of another, none shared with 4.x (`LEAF:`, `NODE:`, `SIGNAL_MANIFEST:v1:`, `EXCLUSION:v1:`): `LEAF_HASH:v2:` · `TREE_LEAF:v2:` · `TREE_NODE:v2:` · `SIGNAL_MANIFEST:v2:` · `EXCLUSION:v2:` · `STRUCTURAL_MANIFEST:v1:` · `EPISODE_ROOT:v2:` · `BRANCH_POINT:v2:` · `BRANCH_TERMINUS:v2:` · `FORK_POINT:v2:` · `DEPARTURE_FORK_POINT:v2:` · `FORK_RETURN:v2:` · `MERGE_POINT:v2:` · `HITL_CONTEXT:v2:` · `HITL_RESOLUTION:v2:` · `HITL_NODE:v2:` · `AUDIT_RECORD:v2:` (§12).
+Prefixes introduced here, each used by exactly one construction, none a prefix of another, none shared with 4.x (`LEAF:`, `NODE:`, `SIGNAL_MANIFEST:v1:`, `EXCLUSION:v1:`): `LEAF_HASH:v2:` · `TREE_LEAF:v2:` · `TREE_NODE:v2:` · `SIGNAL_MANIFEST:v2:` · `EXCLUSION:v2:` · `STRUCTURAL_MANIFEST:v1:` · `EPISODE_ROOT:v2:` · `BRANCH_POINT:v2:` · `BRANCH_TERMINUS:v2:` · `FORK_POINT:v2:` · `DEPARTURE_FORK_POINT:v2:` · `FORK_RETURN:v2:` · `MERGE_POINT:v2:` · `HITL_CONTEXT:v2:` · `HITL_RESOLUTION:v2:` · `HITL_NODE:v2:` · `AUDIT_RECORD:v2:` (§12) · `ASIDE:v2:` · `ASIDE_TERMINUS:v2:` · `SOLILOQUY:v2:` · `DELIBERATION_CHAIN:v2:` · `SOLILOQUY_CONCLUSION:v2:` · `LINK_SIGNAL:v2:` · `EPISODE_LINK:v2:` (§13). Retired with no successor: `FINGERPRINT:` (§13.4).
 
 ## 8. Vectors
 
@@ -156,7 +157,7 @@ episode_root_hash (v2), seven structural members, five signals, empty exclusion
                                              f0511b4d1be172554b9f87ec64d400d24a1409f1742ad72f628bf5ab7b7d33f0
 ```
 
-The file also fixes, for §11–§12: RFC 8785's own appendix example and its digest, key ordering by UTF-16 code unit, NFC of a key and a value, number forms, empty containers; a three-record audit chain (`audit_records_v2.chain`) and a minimal first record with every optional field absent, each with its stored form and `record_hash`. It also fixes each field type's bytes, NFC equivalence, UTC normalization of a timestamp given at −08:00, spine roots for n = 1, 2, 3, 7, both manifests empty and populated, each structural member, the structural manifest with a BranchTerminus removed, the Episode root with an empty structural manifest, a pre-5.0.0 Segment's leaf hash computed from its fields, and three inclusion proofs with their sibling counts.
+The file also fixes, for §13, every construction with a populated and an empty list where a list occurs, an inferred link with its source sealed and a human-asserted link with neither end sealed, and the FLOAT bytes. For §11–§12: RFC 8785's own appendix example and its digest, key ordering by UTF-16 code unit, NFC of a key and a value, number forms, empty containers; a three-record audit chain (`audit_records_v2.chain`) and a minimal first record with every optional field absent, each with its stored form and `record_hash`. It also fixes each field type's bytes, NFC equivalence, UTC normalization of a timestamp given at −08:00, spine roots for n = 1, 2, 3, 7, both manifests empty and populated, each structural member, the structural manifest with a BranchTerminus removed, the Episode root with an empty structural manifest, a pre-5.0.0 Segment's leaf hash computed from its fields, and three inclusion proofs with their sibling counts.
 
 ## 9. Rulings incorporated, and what remains open
 
@@ -170,7 +171,7 @@ Consequences outside this text:
 
 ## 10. Not in these units
 
-The remaining 5.0.0 items — the other §19 content hashes (aside, soliloquy, fingerprint), witness commitment and witness validity (G-11/G-12), anchor commitment, `EpisodeLink.content_hash`, the single hashing statement, role-named store values, and the sealed-requires-a-record rule with the late-seal wording — follow in further units, each with vectors.
+The remaining 5.0.0 items — witness commitment and witness validity (G-11/G-12), anchor commitment, the single hashing statement, role-named store values, and the sealed-requires-a-record rule with the late-seal wording — follow in further units, each with vectors.
 
 ## 11. Canonical JSON (replaces every "canonical JSON" and "sorted keys" reference)
 
@@ -211,3 +212,65 @@ Every field is bound; the vectors' tests alter each one in turn and the chain br
 **Chain.** A chain is identified by `chain_key` and verified from its first record: `delta_sequence` runs 1, 2, 3, … without gap; the first record's `prior_audit_hash` is NULL; every later record's is the previous record's `record_hash`; every `record_hash` recomputes from the stored fields. A verifier reports the first record that fails and why. An empty chain verifies. Deletion, insertion, reordering and alteration of any field are each detected at the first affected record; the sequence rule makes a deletion visible even to a reader holding only sequence numbers, and the hash rule makes it visible to a reader holding only hashes. "Audit chain advance must not block operations" (4.x) does not license a writer to guess: a writer that cannot read the chain head MUST NOT emit a record with a guessed `prior_audit_hash` or `delta_sequence`; it fails the operation, per the adapter failure contract (4.6.0).
 
 The audit chain is not in any seal. It is an independent integrity structure over what was done to the Episode, verified on its own, exactly as §8 has always said.
+
+## 13. Side-channel and cross-Episode content hashes (replaces §19.4.1–§19.4.3 hash text and §20 →2 `content_hash`)
+
+None of these is a seal input. Each is a node's own content hash — the claim the node makes, bound so it cannot be altered afterwards — and each is verified on its own, like the audit chain. The membership rule of §6 decides the fields: a field that makes the node's claim is in; commentary, provenance and lifecycle are out. Every construction is new and versioned; 4.x values remain what the 4.x functions computed.
+
+### 13.1 Aside
+
+```
+aside_hash = SHA3-256( "ASIDE:v2:" ‖ UUID(aside_id) ‖ UUID(parent_episode_id) ‖ UUID(parent_segment_id)
+                       ‖ HASH(parent_segment_content_hash) ‖ STRING(initiated_by_human) ‖ STRING(target_agent_id)
+                       ‖ TIMESTAMP(opened_at) )
+
+aside_terminus_hash = SHA3-256( "ASIDE_TERMINUS:v2:" ‖ UUID(aside_terminus_id) ‖ UUID(aside_id) ‖ UUID(parent_episode_id)
+                       ‖ HASH(aside_hash) ‖ LIST(HASH)(produced_content_hashes) ‖ STRING(close_reason)
+                       ‖ BOOL(reference_scan_passed) ‖ LIST(UUID)(external_references_found)
+                       ‖ STRING(termination_status) ‖ TIMESTAMP(closed_at) )
+```
+
+An aside is a channel between one human and one agent, opened from one Segment. **The two parties are bound** — deliberately, against the §6 rule that actor identity is provenance: for a BranchPoint, who pressed the button is provenance of an operation on a structure that exists without them; for an aside, the human and the agent *are* the channel, and G-25 makes the human's presence the node's defining claim. The Segment it opened from is bound by identity and by content hash. 4.x reserved a `parent_hash` for this and never populated it, so every 4.x aside binds an empty string where the parent's content should be; that field is retired, and `parent_segment_content_hash` is required. `aside_label` is commentary and is not bound. The terminus binds what the channel produced — the content hashes of the Segments written inside it, in the order written — the close reason, the reference-scan outcome and the Segments outside the aside that were found holding references into it (the asymmetric-merge disclosure of §19.4.1, now bound rather than merely recorded). Notification targets and duration are not bound. 4.x's terminus hash was an unprefixed SHA3 over the identifier, the sorted reference list and the close reason; it is retired.
+
+### 13.2 Soliloquy, deliberation chain, conclusion
+
+```
+soliloquy_hash = SHA3-256( "SOLILOQUY:v2:" ‖ UUID(soliloquy_id) ‖ UUID(parent_episode_id) ‖ UUID(parent_segment_id)
+                           ‖ HASH(parent_segment_content_hash) ‖ STRING(initiated_by_agent) ‖ TIMESTAMP(opened_at) )
+
+deliberation_chain_hash = SHA3-256( "DELIBERATION_CHAIN:v2:" ‖ UUID(soliloquy_id) ‖ LIST(HASH)(deliberation_content_hashes) )
+
+conclusion_hash = SHA3-256( "SOLILOQUY_CONCLUSION:v2:" ‖ UUID(conclusion_id) ‖ UUID(soliloquy_id) ‖ UUID(parent_episode_id)
+                            ‖ HASH(deliberation_chain_hash) ‖ STRING(conclusion_summary) ‖ UUID(merged_into_segment_id)
+                            ‖ STRING(termination_status) ‖ TIMESTAMP(concluded_at) )
+```
+
+**One construction; the content-hash policy is retired.** 4.x offered `HASH_PLACEHOLDER` (identity and time) and `FULL_CONTENT` (identity, time and the deliberation chain). The chain does not exist when the soliloquy opens, so `FULL_CONTENT` bound whatever the chain was at open — as built, the initial list, usually empty — and the two policies differed in nothing a verifier could use. The soliloquy node binds what is true at open: who opened it, from which Segment, with what content there, when. `soliloquy_purpose` is commentary and is not bound; the visibility policy governs access and is not a hash input.
+
+**The deliberation chain is bound by content, not by name.** 4.x hashed the deliberation Segments' identifiers joined by `|`, which binds nothing about what was thought. Version 2 hashes their content hashes in order — order is meaning in a deliberation — so a human auditor with access (G-27) verifies the chain against the conclusion without the content being in the hash, which is the privacy property §19.4.3 claimed for the placeholder and never had to trade content-binding for. An empty chain is a valid chain. The conclusion binds the chain hash, the public summary, the spine Segment it merged into and how it terminated; duration is derived and is not bound.
+
+### 13.3 Episode link
+
+```
+signal_hash = SHA3-256( "LINK_SIGNAL:v2:" ‖ STRING(signal_type) ‖ FLOAT(signal_weight) ‖ FLOAT(signal_value) ‖ TIMESTAMP(computed_at) )
+
+link_hash = SHA3-256( "EPISODE_LINK:v2:" ‖ UUID(link_id) ‖ UUID(source_episode) ‖ UUID(target_episode)
+                      ‖ HASH(source_episode_root) | NULL ‖ HASH(target_episode_root) | NULL
+                      ‖ TIMESTAMP(created_at) ‖ STRING(link_type) ‖ FLOAT(link_strength) ‖ BOOL(is_inferred)
+                      ‖ LIST(HASH)(inference_signal_hashes) ‖ FLOAT(inference_threshold) | NULL ‖ BOOL(retroactive)
+                      ‖ STRING(source_version) | NULL ‖ STRING(target_version) | NULL )
+```
+
+**What a link binds on each end.** The end's Episode identifier, always; and the end's Episode root at link creation when that end was sealed then, NULL when it was not. A link from or to a sealed Episode is therefore a claim about a specific sealed state, not merely a name: if the source is later re-sealed under a successor, the link says which state it was made against. A sealed end with a NULL root is nonconformant — the writer had the root and declined to bind it — and a verifier holding the seal records checks this. `retroactive` (the source was crystallized before the link) therefore implies a non-NULL `source_episode_root`. The version strings remain, as the human-readable form of the same claim.
+
+**What a link binds about itself.** Its type, its strength as an exact real number, whether it was inferred, and if so every signal that contributed — each signal hashed on its own with its type, weight, value and time, listed in the order recorded — and the threshold in force. This is §20 →12.2's audit-the-decision, made a commitment rather than a record.
+
+**What a link does not bind.** `health_state`, `health_checked_at`, `quarantine_reason`, `quarantined_at`, and the two resolution fields: lifecycle, whose integrity is the audit chain's (§12). And `created_by`: provenance, by the same rule as §6. 4.x bound the four health and quarantine fields, so a 4.x link's `content_hash` changes whenever its health does and commits to no stable claim; the 4.x `LINK_INTEGRITY` proof, which recomputes from current fields, detects only a row whose hash was not re-stamped. Under version 2 the hash is fixed at creation and the proof is meaningful.
+
+### 13.4 Coherence fingerprint — no content hash
+
+`CoherenceFingerprint` is a diagnostic satellite in the sense of §6: it records a detector's reading (topic vector, drift, detection state) and never enters a seal or a chain. 4.x defined a `FINGERPRINT:` prefix over six of its fields; the reference implementation never called it and the node carries no hash field. It is retired with no successor. A fingerprint that needs to be attested is attested by the audit record of the transition it triggered.
+
+### 13.5 Rulings
+
+Ruled in design Episode `4b9a779e…`, segment 40: the aside's two parties and the soliloquy's agent are bound as a named exception to §6 (the parties constitute the construction; a channel with its ends removed is a different, weaker claim); a link binds each end's identifier always and its Episode root when that end was sealed at link creation, NULL otherwise, with sealed-end-NULL nonconformant and `retroactive ⇒ source root present` following from that rule; FLOAT is exact binary64 — bind the number the writer held, not a printing of it — with the admissible set stated exhaustively in §2.
