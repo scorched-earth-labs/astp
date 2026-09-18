@@ -27,6 +27,8 @@ from pathlib import Path
 from uuid import UUID
 
 from astp.core import seal_v2 as S
+from astp.protocol.audit_v2 import make_audit_record
+from astp.protocol.canonical_json import canonical_json
 from astp.protocol import encoding as E
 from astp.protocol.leaf_hash import compute_leaf_hash, compute_leaf_hash_v2
 from astp.protocol.merkle import generate_inclusion_proof_v2
@@ -40,6 +42,68 @@ def H(b: bytes) -> str:
 
 def nid(i: int) -> UUID:
     return UUID(f"00000000-0000-4000-8000-{i:012x}")
+
+
+def canonical_json_vectors() -> dict:
+    """RFC 8785 + NFC. `rfc8785_appendix_example` is the RFC's own example
+    document; the expected output is the RFC's, byte for byte."""
+    euro, dollar, si, nl, bs, q = chr(0x20AC), "$", chr(0x0F), chr(0x0A), chr(0x5C), chr(0x22)
+    rfc_doc = {
+        "numbers": [333333333.33333329, 1e30, 4.50, 2e-3, 0.000000000000000000000000001],
+        "string": euro + dollar + si + nl + "A'B" + q + bs + bs + "/",
+        "literals": [None, True, False],
+    }
+    cases = {
+        "rfc8785_appendix_example": rfc_doc,
+        "nested_keys_sorted_by_utf16_code_units": {"\U0001F600": 1, "\uFFFF": 2, "a": 3, "B": 4, "": 5},
+        "nfc_decomposed_key_and_value": {"e" + chr(0x301): "e" + chr(0x301)},
+        "numbers": {"int": 1, "neg": -7, "float_one": 1.0, "tiny": 1e-7, "big": 1e21, "neg_zero": -0.0,
+                    "large_int": 123456789012345678901234567890},
+        "empty_containers": {"o": {}, "a": []},
+    }
+    return {k: {"input_repr": repr(v), "canonical": canonical_json(v).decode("utf-8"),
+                "sha3_256": H(canonical_json(v))} for k, v in cases.items()}
+
+
+def audit_vectors(ep: UUID, t: datetime) -> dict:
+    """A three-record chain plus a genesis-with-everything-absent record."""
+    key = str(ep)
+    common = dict(chain_key=key, agent_id="agent-α", session_id="session-1")
+    r1 = make_audit_record(**common, delta_sequence=1, delta_type="BRANCH_CREATED",
+                           trigger_context="human_explicit", human_actor="devin",
+                           forward_delta={"branch_id": str(nid(20)), "label": "e" + chr(0x301) + "tude", "depth": 2.5},
+                           reverse_delta={"branch_id": str(nid(20)), "deleted": True},
+                           affected_nodes=[str(nid(20)), str(nid(3))], explicit_reason="try the other reading",
+                           caught_by="HUMAN", detection_window_open=True, wall_clock_time=t, episode_time=7,
+                           prior_audit_hash=None, audit_id=nid(30))
+    r2 = make_audit_record(**common, delta_sequence=2, delta_type="BRANCH_ABANDONED",
+                           trigger_context="agent_detected", forward_delta={"branch_id": str(nid(20))},
+                           reverse_delta={}, affected_nodes=[str(nid(20))], wall_clock_time=t + timedelta(seconds=1, microseconds=999_999),
+                           episode_time=8, prior_audit_hash=r1.record_hash, audit_id=nid(31))
+    r3 = make_audit_record(**common, delta_sequence=3, delta_type="LINK_ASSERTED",
+                           trigger_context="human_explicit", forward_delta={"z": [1, {"y": None}], "a": ""},
+                           reverse_delta={}, affected_nodes=[], wall_clock_time=t + timedelta(seconds=2),
+                           episode_time=8, prior_audit_hash=r2.record_hash, audit_id=nid(32))
+    genesis_minimal = make_audit_record(chain_key="declaration:system-x:group-y", delta_sequence=1,
+                                        delta_type="GROUP_DECLARED", agent_id="", session_id="",
+                                        trigger_context="system_automatic", forward_delta={}, reverse_delta={},
+                                        wall_clock_time=datetime(1970, 1, 1, tzinfo=timezone.utc),
+                                        prior_audit_hash=None, audit_id=nid(33))
+    def dump(r):
+        d = json.loads(r.model_dump_json())
+        return d
+    return {
+        "preimage_field_order": ["audit_id UUID", "chain_key STRING", "delta_sequence UINT", "delta_type STRING",
+                                 "agent_id STRING", "session_id STRING", "human_actor STRING|NULL",
+                                 "wall_clock_time TIMESTAMP", "episode_time UINT", "forward_delta BYTES",
+                                 "reverse_delta BYTES", "affected_nodes LIST(STRING)", "trigger_context STRING",
+                                 "explicit_reason STRING|NULL", "caught_by STRING", "detection_window_open BOOL",
+                                 "prior_audit_hash HASH|NULL"],
+        "prefix": "AUDIT_RECORD:v2:",
+        "chain": [dump(r1), dump(r2), dump(r3)],
+        "genesis_minimal": dump(genesis_minimal),
+        "note": "wall_clock_time is stored at millisecond precision; record 2 was built from an instant with 999999 microseconds and is stored truncated, so the stored value is what was hashed.",
+    }
 
 
 def build() -> dict:
@@ -89,7 +153,13 @@ def build() -> dict:
             "TIMESTAMP_2026-01-01T00:00:00.123Z": E.encode_field(E.TIMESTAMP, t).hex(),
             "TIMESTAMP_same_instant_at_-08:00": E.encode_field(E.TIMESTAMP, t.astimezone(timezone(timedelta(hours=-8)))).hex(),
             "HASH_of_leaf-0": E.encode_field(E.HASH, segs[0]["content_hash"]).hex(),
+            "LIST_of_STRING_a_b": E.encode_field((E.LIST, E.STRING), ["a", "b"]).hex(),
+            "LIST_empty": E.encode_field((E.LIST, E.STRING), []).hex(),
+            "BOOL_true": E.encode_field(E.BOOL, True).hex(),
+            "BOOL_false": E.encode_field(E.BOOL, False).hex(),
         },
+        "canonical_json": canonical_json_vectors(),
+        "audit_records_v2": audit_vectors(ep, t),
         "episode_id": str(ep),
         "segments": segs,
         "spine_root_sav2": {str(n): S.compute_spine_root_sav2(leaves[:n]) for n in (1, 2, 3, 7)},
