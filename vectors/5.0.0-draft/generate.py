@@ -28,6 +28,9 @@ from uuid import UUID
 
 from astp.core import seal_v2 as S
 from astp.core import content_hash_v2 as C
+from astp.protocol.anchor_v2 import compute_anchor_commitment_v2
+from astp.protocol.witness_v2 import sign_witness_record_v2
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from astp.protocol.audit_v2 import make_audit_record
 from astp.protocol.canonical_json import canonical_json
 from astp.protocol import encoding as E
@@ -138,6 +141,31 @@ def content_hash_vectors(ep: UUID, t: datetime, segs: list) -> dict:
     }
 
 
+def witness_anchor_vectors(ep: UUID, t: datetime) -> dict:
+    """Witness records signed with the RFC 8032 §7.1 test keys (Ed25519 is
+    deterministic, so the signatures are reproducible), and an anchor commitment."""
+    root = H(b"episode-root-of-source")
+    sk1 = Ed25519PrivateKey.from_private_bytes(bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"))
+    sk2 = Ed25519PrivateKey.from_private_bytes(bytes.fromhex("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb"))
+    common = dict(node_id=ep, node_type="episode", root=root, root_version=2, sequence_index=7, logical_clock=9,
+                  witnessed_at=t + timedelta(minutes=1))
+    w1 = sign_witness_record_v2(sk1, witness_id="witness-1", role="SEAL_WITNESS", **common)
+    w2 = sign_witness_record_v2(sk2, witness_id="witness-2", role="CUSTOM", role_detail="notary", **common)
+    def dump(w):
+        d = json.loads(w.model_dump_json(exclude={"signature", "public_key"}))
+        d["signature"] = w.signature.hex(); d["public_key"] = w.public_key.hex()
+        return d
+    anchor = compute_anchor_commitment_v2(node_id=ep, node_type="episode", workspace_id="ws-1", root=root, root_version=2,
+                                          crystallization_sequence=7, logical_clock=9, anchored_at=t + timedelta(minutes=2))
+    return {
+        "signing_keys": "RFC 8032 section 7.1 TEST 1 and TEST 2 secret keys; signatures are over bytes.fromhex(commitment_hash)",
+        "witness_records": [dump(w1), dump(w2)],
+        "anchor_commitment_v2": anchor,
+        "anchor_inputs": {"node_id": str(ep), "node_type": "episode", "workspace_id": "ws-1", "root": root, "root_version": 2,
+                          "crystallization_sequence": 7, "logical_clock": 9, "anchored_at": (t + timedelta(minutes=2)).isoformat()},
+    }
+
+
 def build() -> dict:
     ep = UUID("550e8400-e29b-41d4-a716-446655440000")
     t = datetime(2026, 1, 1, 0, 0, 0, 123000, tzinfo=timezone.utc)
@@ -194,6 +222,7 @@ def build() -> dict:
             "LIST_of_HASH_two": E.encode_field((E.LIST, E.HASH), [segs[0]["content_hash"], segs[1]["content_hash"]]).hex(),
         },
         "content_hashes_v2": content_hash_vectors(ep, t, segs),
+        "witness_and_anchor_v2": witness_anchor_vectors(ep, t),
         "canonical_json": canonical_json_vectors(),
         "audit_records_v2": audit_vectors(ep, t),
         "episode_id": str(ep),
