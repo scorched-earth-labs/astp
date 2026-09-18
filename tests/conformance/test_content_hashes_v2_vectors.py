@@ -31,7 +31,7 @@ import pytest
 from astp.core import content_hash_v2 as C
 from astp.protocol.encoding import FLOAT, encode_field
 
-VECTORS = json.loads((Path(__file__).parents[2] / "vectors" / "5.0.0-draft" / "seal-constructions.json").read_text("utf-8"))
+VECTORS = json.loads((Path(__file__).parents[2] / "vectors" / "5.0.0" / "seal-constructions.json").read_text("utf-8"))
 V = VECTORS["content_hashes_v2"]
 EP = UUID(VECTORS["episode_id"])
 EP2 = UUID(V["target_episode_id"])
@@ -152,5 +152,5 @@ def test_episode_link_binds_the_ends_and_the_claim_but_not_lifecycle():
 
 def test_vector_file_is_current():
     import subprocess, sys
-    gen = Path(__file__).parents[2] / "vectors" / "5.0.0-draft" / "generate.py"
+    gen = Path(__file__).parents[2] / "vectors" / "5.0.0" / "generate.py"
     assert subprocess.run([sys.executable, str(gen), "--check"]).returncode == 0

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Draft SPEC 5.0.0 seal constructions, checked against ``vectors/5.0.0-draft/``.
+SPEC 5.0.0 seal constructions, checked against ``vectors/5.0.0/``.
 
 Two checks per value. The library must produce it — and so must the few lines of
 ``hashlib`` below, written from the draft text alone, which import nothing from
@@ -36,7 +36,7 @@ from astp.protocol.merkle import (InclusionProofV2, compute_merkle_root_v2, expe
                                   generate_inclusion_proof_v2, verify_inclusion_proof_v2)
 
 VECTORS = json.loads(
-    (Path(__file__).resolve().parents[2] / "vectors" / "5.0.0-draft" / "seal-constructions.json").read_text(encoding="utf-8")
+    (Path(__file__).resolve().parents[2] / "vectors" / "5.0.0" / "seal-constructions.json").read_text(encoding="utf-8")
 )
 EPISODE = UUID(VECTORS["episode_id"])
 SEGMENTS = VECTORS["segments"]
@@ -255,8 +255,8 @@ def test_old_segment_is_sealed_from_its_fields_never_from_its_old_leaf_hash():
 def test_vector_file_is_current():
     import subprocess, sys
 
-    gen = Path(__file__).resolve().parents[2] / "vectors" / "5.0.0-draft" / "generate.py"
-    assert subprocess.run([sys.executable, str(gen), "--check"]).returncode == 0, "run vectors/5.0.0-draft/generate.py"
+    gen = Path(__file__).resolve().parents[2] / "vectors" / "5.0.0" / "generate.py"
+    assert subprocess.run([sys.executable, str(gen), "--check"]).returncode == 0, "run vectors/5.0.0/generate.py"
 
 
 def test_episode_root_v2():

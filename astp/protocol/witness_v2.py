@@ -13,7 +13,7 @@
 # limitations under the License.
 """
 ASTP — Witness commitment and witness validity, version 2
-(DRAFT for SPEC 5.0.0; not yet ratified)
+(SPEC 5.0.0; pending ratification)
 
 A witness record is a claim by one party about what it saw: *this* witness saw
 *this* root for *this* node at *this* time, in *this* role. Version 2 binds all

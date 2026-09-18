@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-ASTP — Anchor commitment, version 2 (DRAFT for SPEC 5.0.0; not yet ratified)
+ASTP — Anchor commitment, version 2 (SPEC 5.0.0; pending ratification)
 
 What is submitted to a transparency log at crystallization (G-14): a claim
 that *this* node, in *this* workspace, had *this* root at *this* sequence and

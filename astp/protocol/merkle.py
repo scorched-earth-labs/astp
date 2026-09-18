@@ -224,7 +224,7 @@ class MerkleTree:
         return current == proof.spine_root
 
 
-# ── spine_algorithm_version 2 (DRAFT for SPEC 5.0.0; not yet ratified) ──────────
+# ── spine_algorithm_version 2 (SPEC 5.0.0; pending ratification) ──────────
 
 TREE_LEAF_V2_PREFIX = b"TREE_LEAF:v2:"
 TREE_NODE_V2_PREFIX = b"TREE_NODE:v2:"
