@@ -35,7 +35,7 @@ from astp.protocol.witness_v2 import (
     count_distinct_valid_witnesses_v2, enforce_witness_threshold_v2, is_valid_witness_v2, sign_witness_record_v2,
 )
 
-VECTORS = json.loads((Path(__file__).parents[2] / "vectors" / "5.0.0-draft" / "seal-constructions.json").read_text("utf-8"))
+VECTORS = json.loads((Path(__file__).parents[2] / "vectors" / "5.0.0" / "seal-constructions.json").read_text("utf-8"))
 V = VECTORS["witness_and_anchor_v2"]
 SK1 = Ed25519PrivateKey.from_private_bytes(bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"))
 SK2 = Ed25519PrivateKey.from_private_bytes(bytes.fromhex("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb"))
@@ -152,5 +152,5 @@ def test_anchor_commitment_matches_the_independent_reference():
 
 def test_vector_file_is_current():
     import subprocess, sys
-    gen = Path(__file__).parents[2] / "vectors" / "5.0.0-draft" / "generate.py"
+    gen = Path(__file__).parents[2] / "vectors" / "5.0.0" / "generate.py"
     assert subprocess.run([sys.executable, str(gen), "--check"]).returncode == 0

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-ASTP — Audit record, version 2 (DRAFT for SPEC 5.0.0; not yet ratified)
+ASTP — Audit record, version 2 (SPEC 5.0.0; pending ratification)
 
 One audit record schema and one fully specified preimage. Under 4.x there are
 two ``AuditRecord`` models with two hash constructions and two ``"GENESIS"``

@@ -13,8 +13,8 @@
 # limitations under the License.
 """Regenerate seal-constructions.json from the draft reference constructions.
 
-    python vectors/5.0.0-draft/generate.py            # rewrite the file
-    python vectors/5.0.0-draft/generate.py --check    # exit 1 if the file is stale
+    python vectors/5.0.0/generate.py            # rewrite the file
+    python vectors/5.0.0/generate.py --check    # exit 1 if the file is stale
 
 The JSON is the artifact: a second implementation needs it and the draft text,
 not this script. The script exists so the file is never edited by hand.

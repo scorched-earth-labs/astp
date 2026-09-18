@@ -36,7 +36,7 @@ from astp.protocol.audit_v2 import (
 )
 from astp.protocol.canonical_json import canonical_json, es6_number
 
-VECTORS = json.loads((Path(__file__).parents[2] / "vectors" / "5.0.0-draft" / "seal-constructions.json").read_text("utf-8"))
+VECTORS = json.loads((Path(__file__).parents[2] / "vectors" / "5.0.0" / "seal-constructions.json").read_text("utf-8"))
 CJ = VECTORS["canonical_json"]
 AR = VECTORS["audit_records_v2"]
 
@@ -227,5 +227,5 @@ def test_null_and_empty_string_do_not_collide():
 
 def test_vector_file_is_current():
     import subprocess, sys
-    gen = Path(__file__).parents[2] / "vectors" / "5.0.0-draft" / "generate.py"
+    gen = Path(__file__).parents[2] / "vectors" / "5.0.0" / "generate.py"
     assert subprocess.run([sys.executable, str(gen), "--check"]).returncode == 0

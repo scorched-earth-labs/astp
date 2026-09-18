@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Episode seal constructions for SPEC 5.0.0 (DRAFT; not yet ratified).
+Episode seal constructions for SPEC 5.0.0 (SPEC 5.0.0; pending ratification).
 
 Everything here is a *new versioned construction*. Nothing in this module
 replaces a 4.x function: seals made under ``spine_algorithm_version`` 0 and 1
@@ -229,7 +229,7 @@ def compute_hitl_node_hash_v2(context_hash: str, resolution_hash: str) -> str:
     return hash_fields(HITL_NODE_V2, [(HASH, context_hash), (HASH, resolution_hash)])
 
 
-# ── Sealed-requires-a-record (DRAFT §17) ────────────────────────────────────────
+# ── Sealed-requires-a-record (SPEC G-40) ────────────────────────────────────────
 
 class SealWithoutRecord(ValueError):
     """A node claims to be sealed and no crystallization record is bound to it,

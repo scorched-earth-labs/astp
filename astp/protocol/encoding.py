@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-ASTP — Canonical Field Encoding (DRAFT for SPEC 5.0.0; not yet ratified)
+ASTP — Canonical Field Encoding (SPEC 5.0.0; pending ratification)
 
 One encoding for every hash preimage that is built from named fields. A
 construction is ``SHA3-256(prefix ‖ enc(f1) ‖ … ‖ enc(fn))``: a domain prefix

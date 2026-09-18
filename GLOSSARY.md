@@ -3,7 +3,7 @@
 **Version:** none of its own — versioned with [`SPEC.md`](./SPEC.md); last fully reconciled with SPEC `2.5.0-draft` (see below)
 **Status:** Partially current — reconciliation with SPEC 4.x in progress
 **Authors:** Scorched Earth Labs
-**Date:** 2026-09-17
+**Date:** 2026-09-18
 **Applies To:** `SPEC.md`, the implementation guides, and the `astp` Python package
 
 ---
@@ -119,7 +119,15 @@ Pointer to the full content in durable storage (e.g. an object-store key, a file
 
 ### `leaf_hash`
 
-The position-binding leaf hash for a node in the Merkle Spine. Combines the `content_hash` with position-binding fields (including `sequence_index`, `parent_node_id`, and others — see SPEC §5.2). Computed **once** at node creation and never recomputed. Any change to a node's position or content invalidates the chain at that point.
+The position-binding leaf hash for a node in the Merkle Spine: `SHA3-256("LEAF_HASH:v2:" ‖ node_id ‖ node_type ‖ schema_version ‖ sequence_index ‖ content_hash ‖ parent_node_id|NULL)` under the *Canonical Field Encoding* (`hash_version` 2; SPEC §5.2). Computed **once** at node creation and never recomputed. Under `spine_algorithm_version` 2 it is the spine's leaf input, so the spine root binds identity, type, schema, position, content and parent. `hash_version` 1 (4.x) also bound `sealed_at` and used 16 zero bytes for an absent parent; it is retained as the definition of that version.
+
+### Canonical Field Encoding
+
+**The one byte form every 5.0.0 construction is built from.** A construction is `SHA3-256(prefix ‖ enc(f₁) ‖ … ‖ enc(fₙ))`: a domain prefix, then each field as a one-byte type tag and its payload — NULL, BYTES, STRING (NFC, length-prefixed), UINT (8 bytes), UUID (16 bytes), TIMESTAMP (UTC milliseconds), HASH (32 raw bytes), LIST, BOOL, FLOAT (IEEE 754 binary64). Every field is self-delimiting and every construction has one prefix, so distinct inputs cannot encode to the same bytes. An order-independent *set of hashes* is `SHA3-256(prefix ‖ u32be(n) ‖ sorted members)`. SPEC §5.1.1; `astp.protocol.encoding`.
+
+### Canonical JSON
+
+**The byte form of a JSON document inside a preimage**: RFC 8785 (JCS) with every string and key NFC-normalized; keys that collide after NFC are refused. The canonical form is what is hashed *and what is stored* — a stored document is a fixed point of canonicalization. SPEC §5.1.2; `astp.protocol.canonical_json`.
 
 ### `spine_hash`
 
@@ -127,7 +135,7 @@ The hash chain over leaf hashes within a cognitive node's tree. Iteratively comb
 
 ### `episode_root_hash`
 
-The Merkle root of an episode's spine — the episode's cryptographic fingerprint. Used to verify the episode hasn't been tampered with.
+The sealed Episode's outermost commitment — see *Episode Root*. Under version 2 it binds the Episode's UUID, the spine root, the signal manifest, the structural manifest and the exclusion set.
 
 ### `parent_node_id`
 
@@ -167,23 +175,35 @@ The ordered hash chain of leaf hashes within a cognitive node's tree. Each leaf 
 
 ### Spine Leaf Set
 
-**What is, and is not, a leaf of an Episode's spine.** Exactly the Episode's non-ephemeral Segments, ordered by `sequence_index`. Signals are not leaves (they commit through the *Signal Manifest*); `EPHEMERAL` segments are not leaves (they commit through the *Exclusion Set*). `sequence_index` is the only ordering key and is unique per Episode, so the order is total with no tiebreak. Defined in SPEC §5.6; reference function `compute_spine_root_v2`.
+**What is, and is not, a leaf of an Episode's spine.** Exactly the Episode's non-ephemeral Segments, ordered by `sequence_index`; under `spine_algorithm_version` 2 the leaf input is each Segment's `hash_version` 2 *`leaf_hash`*. Signals are not leaves (they commit through the *Signal Manifest*); `EPHEMERAL` segments are not leaves (*Exclusion Set*); structural nodes are not leaves (*Structural Manifest*); there is no Episode-identifier leaf. `sequence_index` is the only ordering key and is unique per Episode, so the order is total with no tiebreak. SPEC §5.6; `compute_spine_root_sav2` (version 2), `compute_spine_root_v2` (retained versions 0/1).
 
 ### Signal Manifest
 
-**The order-independent commitment to an Episode's SPINE-placed Signals.** `SHA3-256("SIGNAL_MANIFEST:v1:" || sorted content hashes joined by "|")`; the empty set hashes a sentinel. A set, not a sequence: membership binds, arrival order and timestamps do not. One of the three components of the *Episode Root*. SPEC §5.7; `compute_signal_manifest_hash`.
+**The order-independent commitment to an Episode's SPINE-placed Signals.** Version 2: the *set of hashes* under `SIGNAL_MANIFEST:v2:` (empty set is `n = 0`, no sentinel). A set, not a sequence: membership binds, arrival order and timestamps do not. One component of the *Episode Root*. SPEC §5.7; `compute_signal_manifest_hash_v2`. (4.x: `SIGNAL_MANIFEST:v1:` over sorted hex strings joined by `|`, retained.)
 
 ### Exclusion Set
 
-**The commitment to what was deliberately left out of the spine** — the content hashes of `EPHEMERAL` segments — so that the omission is itself verifiable. Same set construction as the Signal Manifest under the `EXCLUSION:v1:` domain. SPEC §5.7; `compute_exclusion_hash`.
+**The commitment to what was deliberately left out of the spine** — the content hashes of `EPHEMERAL` segments — so that the omission is itself verifiable. Same set construction as the Signal Manifest under `EXCLUSION:v2:`. SPEC §5.7; `compute_exclusion_hash_v2`.
+
+### Structural Manifest
+
+**The order-independent commitment to an Episode's branch, fork, merge and termination structure**: the *set of hashes* under `STRUCTURAL_MANIFEST:v1:` over the member hashes of its BranchPoints, BranchTermini, ForkPoints, DepartureForkPoints, ForkReturns, MergePoints and terminal-state HITL events (RESOLVED, TIMED_OUT, ESCALATED), each under its own prefix. Governed by the *Membership Rule*. Fourth component of the *Episode Root* from 5.0.0; removing any member changes the Episode root. SPEC §5.7.1; `compute_structural_manifest_hash`.
+
+### Membership Rule
+
+**A structural node — or a field of one — is bound if and only if removing it would let a verifier be deceived about the Episode's structure.** Structural claims (`spine_merkle_snapshot`, `merge_type`) are in; commentary (labels, summaries) and provenance (who initiated) are out — the audit chain binds provenance. *Named exception:* actor identity is bound where the actor constitutes the construction's defining claim (an aside's two parties; a soliloquy's agent). SPEC §5.7.1.
 
 ### Episode Root
 
-**The three-component integrity commitment of a sealed Episode**: `SHA3-256("NODE:" || spine_root || signal_manifest_hash || exclusion_hash)`. `sealed_chain_root` on the CrystallizationDelta records the spine root; `episode_root_hash` on the Episode records the composition. SPEC §5.7; `compute_episode_root_hash`.
+**The integrity commitment of a sealed Episode.** Version 2: `SHA3-256("EPISODE_ROOT:v2:" ‖ UUID(episode_id) ‖ spine_root ‖ signal_manifest_hash ‖ structural_manifest_hash ‖ exclusion_hash)` — it binds the Episode's identifier directly and admits no string identifier. `sealed_chain_root` on the CrystallizationDelta records the spine root; `episode_root_hash` on the Episode records the composition. SPEC §5.7; `compute_episode_root_hash_v2`. (Version 1, under `spine_algorithm_version` 0/1: `SHA3-256("NODE:" ‖ spine_root ‖ signal_manifest_hash ‖ exclusion_hash)`, retained; SPEC §5.7.2.)
 
 ### Version Identifiers (hash_version, spine_algorithm_version, ordering_version)
 
-**Which construction produced a record's hashes.** `hash_version` on every CognitiveNode; `spine_algorithm_version` (0 legacy iterative Merkle, 1 Adaptive Merkle Tree) and `ordering_version` (1 legacy segments-then-signals-by-arrival, 2 segments-only per §5.6) on the CrystallizationDelta. Diagnostic metadata outside every hash preimage — a verifier reads them to pick the reproduction function; altering them cannot make a tampered root verify. Absent means pre-4.3.0. SPEC §5.8.
+**Which construction produced a record's hashes.** `hash_version` (1, 2) on every CognitiveNode; `spine_algorithm_version` (0, 1, 2) and `ordering_version` (1, 2) on the CrystallizationDelta. **`spine_algorithm_version` 2 selects the entire seal construction** — leaf hash, tree, encoding, sets and Episode root — read it as *seal construction version*; there is deliberately no separate Episode-root identifier. Diagnostic metadata outside every hash preimage — a verifier reads them to pick the reproduction function and refuses values it does not know; altering them cannot make a tampered root verify. Absent means pre-4.3.0. SPEC §5.8.
+
+### Outermost Sealed Commitment
+
+**The construction that commits everything under a node's seal**, defined by construction rather than by enumeration: the *Episode Root* for an Episode; the spine root for a node type with no manifests. It is what a *Witness Record* and an *Anchor Commitment* bind (as `root`, with `root_version`), so the two attest the same object. SPEC §16.4.2.
 
 ### Reproducibility Obligation
 
@@ -208,7 +228,19 @@ This separation lets the Merkle tree rebalance for performance without invalidat
 
 ### Domain Separation
 
-The technique of prefixing hash preimages with a domain tag so the same byte sequence in different contexts produces different hashes. Prevents cross-protocol hash collisions. See SPEC §5.3.
+The technique of prefixing hash preimages with a domain tag so the same byte sequence in different contexts produces different hashes. In 5.0.0 every construction has exactly one prefix (`…:v2:`), used by no other construction and never reused across versions; the registry is SPEC §5.1.3. See SPEC §5.3.
+
+### Late Seal
+
+**A seal established after the Episode closed — ordinary lifecycle, not a defect.** `closed_at` records closure, `sealed_at` records when fixity was computed (never back-dated), `sealed_at ≥ closed_at` is the only ordering constraint, and a non-zero gap carries no adverse inference. A non-null `sealed_at` with no bound crystallization record is not a seal at all (`NO_CRYSTAL`). SPEC G-40.
+
+### Witness Validity
+
+**When a witness record counts (G-12).** Its commitment (`WITNESS_COMMITMENT:v2:`, binding the witness, the node, the *Outermost Sealed Commitment* and its version, position, time and role) recomputes; its fingerprint is the SHA3-256 of its key; its Ed25519 signature verifies under that key over the raw commitment; and the witness is not the node's author. A record failing any condition is recorded but never valid. The threshold (G-11) counts valid records as a maximum matching between distinct names and distinct keys. SPEC §16.4, G-11, G-12.
+
+### Chain Key
+
+**What identifies an audit chain**: an Episode's UUID as text, or a declared synthetic key such as `declaration:<system>:<group>`. A `STRING` deliberately — the audit chain is outside every seal and its integrity rests on the `record_hash` recurrence, not on identifier canonicality. SPEC §8.1.
 
 ---
 
@@ -436,8 +468,16 @@ For lookup. Each term links back to its categorical definition above.
 - **CrystallizationDeltaNode** — §2
 - **CRYSTALLIZED** — §6
 - **CLOSING / CLOSING_PENDING_SEAL** — §6
+- **Canonical Field Encoding** — §3
+- **Canonical JSON** — §3
+- **Chain Key** — §5
 - **Domain Separation** — §5
 - **Dual Index** — §5
+- **Late Seal** — §5
+- **Membership Rule** — §5
+- **Outermost Sealed Commitment** — §5
+- **Structural Manifest** — §5
+- **Witness Validity** — §5
 - **Episode / EpisodeNode** — §2
 - **Episode Lifecycle** — §6
 - **Episode of Record** — §13
