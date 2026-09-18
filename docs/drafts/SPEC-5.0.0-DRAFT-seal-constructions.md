@@ -1,6 +1,6 @@
 # ASTP 5.0.0 — Seal Constructions (Draft)
 
-**Version:** 5.0.0-draft.12
+**Version:** 5.0.0-draft.13
 **Status:** Draft for review — **not ratified, not normative.** Nothing here applies to any existing seal.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-18
@@ -339,6 +339,6 @@ The one permitted retroactive spine write of §19.3.7 (orphan recovery's point w
 Both were ruled in this Episode (segments 29 and 31) and belong to the 4.6.0 adapter change rather than to the text, because each alters runtime behaviour the consuming deployment relies on:
 
 1. **`ESCALATED` is terminal for its gate.** The reference implementation's `HITLNodeStatus.ESCALATED` is described as "awaiting higher-authority resolution" and its resolution writer records every decision other than a timeout as `resolved`, so an escalation does not survive as a status. Under 5.0.0 an escalated gate is closed with status `escalated`, is a structural-manifest member as such (§6), and any continuation is a new gate that references it.
-2. **Non-UUID Episode identifiers are refused where Episodes are created.** The write boundary accepted a string against a model declaring `UUID`. The one such Episode in the reference deployment is to be closed and sealed under `spine_algorithm_version` 1 before the refusal lands (§9, consequence 2).
+2. **Non-UUID Episode identifiers are refused where Episodes are created.** The write boundary accepted a string against a model declaring `UUID`. The one such Episode in the reference deployment is to be closed and sealed under `spine_algorithm_version` 1 before the refusal lands (§9, consequence 2): **the write boundary closes only after that Episode is sealed**, because closing it first would strand it unsealable — refuse-first would create the orphan the rule exists to prevent. Ruled in design Episode `4b9a779e…`, segment 44, with §15–§19 as written.
 
 Two names are also settled here so no naming question survives into ratification: `mnemosyne_countersignature` on the seal record becomes `countersignature` (the counter-signing party is named by the record's `sealed_by`/witness records, not by a product), and the illustrative `GroupingSystem` values are removed from the enum — any string identifier is valid, as the enum's own docstring says, and a protocol enum is not the place to list vendors.
