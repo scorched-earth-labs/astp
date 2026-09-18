@@ -24,10 +24,10 @@ import json
 import logging
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from astp.core.schema import (
     AriadneGovernanceError,
@@ -129,7 +129,12 @@ class CrystallizationDeltaNode(BaseModel):
     Structural analogy: blockchain block header.
     """
     delta_id: UUID = Field(default_factory=uuid4)
-    episode_id: UUID
+    # A UUID, as §4.1 requires. A legacy identifier that is not a UUID is
+    # admitted only so that an Episode created under an earlier version can be
+    # sealed under spine_algorithm_version 0 or 1, which hash the identifier as
+    # text (SPEC G-40); it is never admitted for a version 2 seal, whose Episode
+    # root binds a UUID (§5.7). episode_id is in no delta hash preimage.
+    episode_id: Union[UUID, str]
     delta_type: DeltaType = DeltaType.CRYSTALLIZATION
     chain_position: int  # Strictly > any prior CRYSTALLIZATION_DELTA
     content: CrystallizationContent
@@ -140,6 +145,20 @@ class CrystallizationDeltaNode(BaseModel):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
+
+    @field_validator("episode_id", mode="before")
+    @classmethod
+    def _episode_ref(cls, v):
+        return episode_ref(v)
+
+    @model_validator(mode="after")
+    def validate_legacy_identifier_only_under_version_1(self) -> "CrystallizationDeltaNode":
+        if isinstance(self.episode_id, str) and (self.content.spine_algorithm_version or 0) >= 2:
+            raise ValueError(
+                f"episode_id {self.episode_id!r} is not a UUID; a version 2 seal binds a UUID (SPEC §5.7, G-40). "
+                "Seal this Episode under spine_algorithm_version 1."
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_immutability_flag(self) -> "CrystallizationDeltaNode":
@@ -188,8 +207,21 @@ def compute_crystallization_node_hash(content_hash: str, predecessor_hash: str) 
     )
 
 
+def episode_ref(value: Union[UUID, str]) -> Union[UUID, str]:
+    """A UUID when the value is one (in any text form), otherwise the legacy
+    identifier string unchanged. Refuses empty and non-string values."""
+    if isinstance(value, UUID):
+        return value
+    if not isinstance(value, str) or not value:
+        raise ValueError("episode_id must be a UUID or a non-empty legacy identifier string")
+    try:
+        return UUID(value)
+    except ValueError:
+        return value
+
+
 def build_crystallization_delta(
-    episode_id: UUID,
+    episode_id: Union[UUID, str],
     predecessor_hash: str,
     sealed_chain_root: str,
     verification_authority: str,
