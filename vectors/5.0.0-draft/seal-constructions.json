@@ -14,7 +14,148 @@
     "UUID_episode": "04550e8400e29b41d4a716446655440000",
     "TIMESTAMP_2026-01-01T00:00:00.123Z": "050000019b76daa87b",
     "TIMESTAMP_same_instant_at_-08:00": "050000019b76daa87b",
-    "HASH_of_leaf-0": "06aa6c290f56f0f7eb3a8da563ae72efc5d10cc89b88a3112c612d8e3825e20aad"
+    "HASH_of_leaf-0": "06aa6c290f56f0f7eb3a8da563ae72efc5d10cc89b88a3112c612d8e3825e20aad",
+    "LIST_of_STRING_a_b": "0700000002020000000161020000000162",
+    "LIST_empty": "0700000000",
+    "BOOL_true": "0801",
+    "BOOL_false": "0800"
+  },
+  "canonical_json": {
+    "rfc8785_appendix_example": {
+      "input_repr": "{'numbers': [333333333.3333333, 1e+30, 4.5, 0.002, 1e-27], 'string': '€$\\x0f\\nA\\'B\"\\\\\\\\/', 'literals': [None, True, False]}",
+      "canonical": "{\"literals\":[null,true,false],\"numbers\":[333333333.3333333,1e+30,4.5,0.002,1e-27],\"string\":\"€$\\u000f\\nA'B\\\"\\\\\\\\/\"}",
+      "sha3_256": "6d0c8d5aade6d7207376c70453a33e36183295ad30039c41aedb37ffbe68c721"
+    },
+    "nested_keys_sorted_by_utf16_code_units": {
+      "input_repr": "{'😀': 1, '\\uffff': 2, 'a': 3, 'B': 4, '': 5}",
+      "canonical": "{\"\":5,\"B\":4,\"a\":3,\"😀\":1,\"￿\":2}",
+      "sha3_256": "15b351dbde3544dc272c6a16b6c0ec63ba8fa05c0e6d3d2cfde8b7199e4b9a17"
+    },
+    "nfc_decomposed_key_and_value": {
+      "input_repr": "{'é': 'é'}",
+      "canonical": "{\"é\":\"é\"}",
+      "sha3_256": "efdd6d8f40acd437218d6e6b01d011458185f537b039b45ef9d6c8bc6cd13a70"
+    },
+    "numbers": {
+      "input_repr": "{'int': 1, 'neg': -7, 'float_one': 1.0, 'tiny': 1e-07, 'big': 1e+21, 'neg_zero': -0.0, 'large_int': 123456789012345678901234567890}",
+      "canonical": "{\"big\":1e+21,\"float_one\":1,\"int\":1,\"large_int\":123456789012345678901234567890,\"neg\":-7,\"neg_zero\":0,\"tiny\":1e-7}",
+      "sha3_256": "8b429171e845c27b465a4452a230866676ac5290903250a2e953c85a128e7137"
+    },
+    "empty_containers": {
+      "input_repr": "{'o': {}, 'a': []}",
+      "canonical": "{\"a\":[],\"o\":{}}",
+      "sha3_256": "d611298b38590a0c7b9983845add5166f0c176708cc6e44844a4c1e05445c6fa"
+    }
+  },
+  "audit_records_v2": {
+    "preimage_field_order": [
+      "audit_id UUID",
+      "chain_key STRING",
+      "delta_sequence UINT",
+      "delta_type STRING",
+      "agent_id STRING",
+      "session_id STRING",
+      "human_actor STRING|NULL",
+      "wall_clock_time TIMESTAMP",
+      "episode_time UINT",
+      "forward_delta BYTES",
+      "reverse_delta BYTES",
+      "affected_nodes LIST(STRING)",
+      "trigger_context STRING",
+      "explicit_reason STRING|NULL",
+      "caught_by STRING",
+      "detection_window_open BOOL",
+      "prior_audit_hash HASH|NULL"
+    ],
+    "prefix": "AUDIT_RECORD:v2:",
+    "chain": [
+      {
+        "audit_id": "00000000-0000-4000-8000-00000000001e",
+        "chain_key": "550e8400-e29b-41d4-a716-446655440000",
+        "delta_sequence": 1,
+        "delta_type": "BRANCH_CREATED",
+        "agent_id": "agent-α",
+        "session_id": "session-1",
+        "human_actor": "devin",
+        "wall_clock_time": "2026-01-01T00:00:00.123000Z",
+        "episode_time": 7,
+        "forward_delta": "{\"branch_id\":\"00000000-0000-4000-8000-000000000014\",\"depth\":2.5,\"label\":\"étude\"}",
+        "reverse_delta": "{\"branch_id\":\"00000000-0000-4000-8000-000000000014\",\"deleted\":true}",
+        "affected_nodes": [
+          "00000000-0000-4000-8000-000000000014",
+          "00000000-0000-4000-8000-000000000003"
+        ],
+        "trigger_context": "human_explicit",
+        "explicit_reason": "try the other reading",
+        "caught_by": "HUMAN",
+        "detection_window_open": true,
+        "prior_audit_hash": null,
+        "record_hash": "319cc66cf55f9599995a9f8116a3d740a5c9436b82a584aa8bf93ea35f695e48"
+      },
+      {
+        "audit_id": "00000000-0000-4000-8000-00000000001f",
+        "chain_key": "550e8400-e29b-41d4-a716-446655440000",
+        "delta_sequence": 2,
+        "delta_type": "BRANCH_ABANDONED",
+        "agent_id": "agent-α",
+        "session_id": "session-1",
+        "human_actor": null,
+        "wall_clock_time": "2026-01-01T00:00:02.122000Z",
+        "episode_time": 8,
+        "forward_delta": "{\"branch_id\":\"00000000-0000-4000-8000-000000000014\"}",
+        "reverse_delta": "{}",
+        "affected_nodes": [
+          "00000000-0000-4000-8000-000000000014"
+        ],
+        "trigger_context": "agent_detected",
+        "explicit_reason": null,
+        "caught_by": "SYSTEM",
+        "detection_window_open": false,
+        "prior_audit_hash": "319cc66cf55f9599995a9f8116a3d740a5c9436b82a584aa8bf93ea35f695e48",
+        "record_hash": "24963bd5d6fecfdf7215ac6d76be30133d1c900e8ddc0ee460411f10b65e986c"
+      },
+      {
+        "audit_id": "00000000-0000-4000-8000-000000000020",
+        "chain_key": "550e8400-e29b-41d4-a716-446655440000",
+        "delta_sequence": 3,
+        "delta_type": "LINK_ASSERTED",
+        "agent_id": "agent-α",
+        "session_id": "session-1",
+        "human_actor": null,
+        "wall_clock_time": "2026-01-01T00:00:02.123000Z",
+        "episode_time": 8,
+        "forward_delta": "{\"a\":\"\",\"z\":[1,{\"y\":null}]}",
+        "reverse_delta": "{}",
+        "affected_nodes": [],
+        "trigger_context": "human_explicit",
+        "explicit_reason": null,
+        "caught_by": "SYSTEM",
+        "detection_window_open": false,
+        "prior_audit_hash": "24963bd5d6fecfdf7215ac6d76be30133d1c900e8ddc0ee460411f10b65e986c",
+        "record_hash": "f14e91b7229318c321baaa42fc65a93e892a35db86c64b93e2d55098b407a161"
+      }
+    ],
+    "genesis_minimal": {
+      "audit_id": "00000000-0000-4000-8000-000000000021",
+      "chain_key": "declaration:system-x:group-y",
+      "delta_sequence": 1,
+      "delta_type": "GROUP_DECLARED",
+      "agent_id": "",
+      "session_id": "",
+      "human_actor": null,
+      "wall_clock_time": "1970-01-01T00:00:00Z",
+      "episode_time": 0,
+      "forward_delta": "{}",
+      "reverse_delta": "{}",
+      "affected_nodes": [],
+      "trigger_context": "system_automatic",
+      "explicit_reason": null,
+      "caught_by": "SYSTEM",
+      "detection_window_open": false,
+      "prior_audit_hash": null,
+      "record_hash": "3334b2aed11f30430484c1802c2d9f8ba46fd44f51981a25cfc7d5621ca8e2da"
+    },
+    "note": "wall_clock_time is stored at millisecond precision; record 2 was built from an instant with 999999 microseconds and is stored truncated, so the stored value is what was hashed."
   },
   "episode_id": "550e8400-e29b-41d4-a716-446655440000",
   "segments": [

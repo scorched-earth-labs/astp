@@ -30,6 +30,8 @@ preimages of 4.x lack.
     0x04  UUID        16 bytes
     0x05  TIMESTAMP   8 bytes, big-endian: whole milliseconds since the Unix epoch, UTC
     0x06  HASH        32 bytes (a SHA3-256 value, raw — never its hex text)
+    0x07  LIST        u32be(count) ‖ the items, each encoded as a field of one stated kind
+    0x08  BOOL        one byte, 0x00 or 0x01
 """
 
 import unicodedata
@@ -39,9 +41,9 @@ from uuid import UUID
 
 from astp.protocol.hashing import sha3_256
 
-NULL, BYTES, STRING, UINT, UUID_, TIMESTAMP, HASH = range(7)
+NULL, BYTES, STRING, UINT, UUID_, TIMESTAMP, HASH, LIST, BOOL = range(9)
 
-Field = Tuple[int, object]
+Field = Tuple[object, object]   # (kind, value); a LIST kind is the tuple (LIST, item_kind)
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
@@ -84,6 +86,14 @@ def encode_field(kind: int, value: object) -> bytes:
         if len(raw) != 32:
             raise ValueError("HASH field requires a 32-byte value")
         return bytes([HASH]) + raw
+    if kind == BOOL:
+        if not isinstance(value, bool):
+            raise TypeError("BOOL field requires bool")
+        return bytes([BOOL, 1 if value else 0])
+    if isinstance(kind, tuple) and len(kind) == 2 and kind[0] == LIST:
+        item_kind = kind[1]
+        items = list(value)
+        return bytes([LIST]) + _u32(len(items)) + b"".join(encode_field(item_kind, v) for v in items)
     raise ValueError(f"unknown field kind {kind!r}")
 
 

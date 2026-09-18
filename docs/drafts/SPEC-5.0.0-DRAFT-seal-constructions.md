@@ -1,13 +1,13 @@
 # ASTP 5.0.0 — Seal Constructions (Draft)
 
-**Version:** 5.0.0-draft.5
+**Version:** 5.0.0-draft.6
 **Status:** Draft for review — **not ratified, not normative.** Nothing here applies to any existing seal.
 **Authors:** Scorched Earth Labs
-**Date:** 2026-09-17
-**Applies To:** proposed replacement text for `SPEC.md` §5.2–§5.8 and §9.2 in 5.0.0
-**Vectors:** [`vectors/5.0.0-draft/seal-constructions.json`](../../vectors/5.0.0-draft/seal-constructions.json) (regenerate with `generate.py`, never by hand) · **Reference code:** `astp/protocol/encoding.py`, `compute_leaf_hash_v2`, `compute_merkle_root_v2`, `generate_inclusion_proof_v2` / `verify_inclusion_proof_v2`, `astp/core/seal_v2.py` · **Tests:** `tests/conformance/test_seal_constructions_v2_vectors.py`
+**Date:** 2026-09-18
+**Applies To:** proposed replacement text for `SPEC.md` §5.2–§5.8, §8, §9.2 and §19.1.1 in 5.0.0
+**Vectors:** [`vectors/5.0.0-draft/seal-constructions.json`](../../vectors/5.0.0-draft/seal-constructions.json) (regenerate with `generate.py`, never by hand) · **Reference code:** `astp/protocol/encoding.py`, `compute_leaf_hash_v2`, `compute_merkle_root_v2`, `generate_inclusion_proof_v2` / `verify_inclusion_proof_v2`, `astp/core/seal_v2.py`, `astp/protocol/canonical_json.py`, `astp/protocol/audit_v2.py` · **Tests:** `tests/conformance/test_seal_constructions_v2_vectors.py`, `tests/conformance/test_audit_record_v2_vectors.py`
 
-This is one unit of the 5.0.0 amendment: how an Episode's roots are built. Draft 3 incorporates the rulings of design Episode `4b9a779e-be46-4d61-872e-fd76545aa901`, segments 29 and 31 (§9). It is a MAJOR change under [`VERSIONING.md`](../../VERSIONING.md) and requires an Episode of Record. Every construction below is **new and versioned**. Seals made under `spine_algorithm_version` 0 and 1 remain defined by SPEC 4.5.0 §5.3–§5.8 and remain reproducible; 5.0.0 retains that text as the definition of those versions.
+This is the first three units of the 5.0.0 amendment: how an Episode's roots are built (§2–§7), inclusion proofs over the version 2 tree (§4a), and canonical JSON with the audit record (§11–§12). Draft 3 incorporates the rulings of design Episode `4b9a779e-be46-4d61-872e-fd76545aa901`, segments 29 and 31 (§9). It is a MAJOR change under [`VERSIONING.md`](../../VERSIONING.md) and requires an Episode of Record. Every construction below is **new and versioned**. Seals made under `spine_algorithm_version` 0 and 1 remain defined by SPEC 4.5.0 §5.3–§5.8 and remain reproducible; 5.0.0 retains that text as the definition of those versions.
 
 ---
 
@@ -35,6 +35,8 @@ A construction built from named fields is `SHA3-256(prefix ‖ enc(f₁) ‖ …
 | `0x04` | UUID | 16 bytes |
 | `0x05` | TIMESTAMP | 8 bytes big-endian: whole milliseconds since 1970-01-01T00:00:00Z |
 | `0x06` | HASH | 32 bytes — a SHA3-256 value, raw, never its hex text |
+| `0x07` | LIST | `u32be(count)` ‖ the items in order, each encoded as a field of the one type the construction states for the list |
+| `0x08` | BOOL | one byte: `0x00` false, `0x01` true |
 
 A TIMESTAMP MUST be computed from a timezone-aware instant, converted to UTC, in integer arithmetic; a value with no timezone MUST be refused. Sub-millisecond precision is truncated. A field count is fixed by its construction, every field is self-delimiting, and no prefix in §7 is a prefix of another, so distinct inputs cannot encode to the same bytes.
 
@@ -140,7 +142,7 @@ episode_root_hash = SHA3-256( "EPISODE_ROOT:v2:" ‖ UUID(episode_id)
 
 `episode_id` is a UUID, as §4.1 requires; the root does not admit a string identifier, because identity bound by string equality is only as strong as the strings' encoding. An Episode whose identifier is not a UUID cannot be sealed under this construction and must say so; it is brought into conformance by being given one, with the old identifier kept as provenance and bound to nothing.
 
-Prefixes introduced here, each used by exactly one construction, none a prefix of another, none shared with 4.x (`LEAF:`, `NODE:`, `SIGNAL_MANIFEST:v1:`, `EXCLUSION:v1:`): `LEAF_HASH:v2:` · `TREE_LEAF:v2:` · `TREE_NODE:v2:` · `SIGNAL_MANIFEST:v2:` · `EXCLUSION:v2:` · `STRUCTURAL_MANIFEST:v1:` · `EPISODE_ROOT:v2:` · `BRANCH_POINT:v2:` · `BRANCH_TERMINUS:v2:` · `FORK_POINT:v2:` · `DEPARTURE_FORK_POINT:v2:` · `FORK_RETURN:v2:` · `MERGE_POINT:v2:` · `HITL_CONTEXT:v2:` · `HITL_RESOLUTION:v2:` · `HITL_NODE:v2:`.
+Prefixes introduced here, each used by exactly one construction, none a prefix of another, none shared with 4.x (`LEAF:`, `NODE:`, `SIGNAL_MANIFEST:v1:`, `EXCLUSION:v1:`): `LEAF_HASH:v2:` · `TREE_LEAF:v2:` · `TREE_NODE:v2:` · `SIGNAL_MANIFEST:v2:` · `EXCLUSION:v2:` · `STRUCTURAL_MANIFEST:v1:` · `EPISODE_ROOT:v2:` · `BRANCH_POINT:v2:` · `BRANCH_TERMINUS:v2:` · `FORK_POINT:v2:` · `DEPARTURE_FORK_POINT:v2:` · `FORK_RETURN:v2:` · `MERGE_POINT:v2:` · `HITL_CONTEXT:v2:` · `HITL_RESOLUTION:v2:` · `HITL_NODE:v2:` · `AUDIT_RECORD:v2:` (§12).
 
 ## 8. Vectors
 
@@ -154,7 +156,7 @@ episode_root_hash (v2), seven structural members, five signals, empty exclusion
                                              f0511b4d1be172554b9f87ec64d400d24a1409f1742ad72f628bf5ab7b7d33f0
 ```
 
-The file also fixes each field type's bytes, NFC equivalence, UTC normalization of a timestamp given at −08:00, spine roots for n = 1, 2, 3, 7, both manifests empty and populated, each structural member, the structural manifest with a BranchTerminus removed, the Episode root with an empty structural manifest, a pre-5.0.0 Segment's leaf hash computed from its fields, and three inclusion proofs with their sibling counts.
+The file also fixes, for §11–§12: RFC 8785's own appendix example and its digest, key ordering by UTF-16 code unit, NFC of a key and a value, number forms, empty containers; a three-record audit chain (`audit_records_v2.chain`) and a minimal first record with every optional field absent, each with its stored form and `record_hash`. It also fixes each field type's bytes, NFC equivalence, UTC normalization of a timestamp given at −08:00, spine roots for n = 1, 2, 3, 7, both manifests empty and populated, each structural member, the structural manifest with a BranchTerminus removed, the Episode root with an empty structural manifest, a pre-5.0.0 Segment's leaf hash computed from its fields, and three inclusion proofs with their sibling counts.
 
 ## 9. Rulings incorporated, and what remains open
 
@@ -166,6 +168,44 @@ Consequences outside this text:
 2. **The write boundary.** An Episode identifier that is not a UUID MUST be refused where Episodes are created, not merely be unrepresentable in the root. The reference deployment holds one Episode created with a string identifier; 286 immutable Layer 3 nodes carry that string inside their content hashes, so it cannot be renamed. It is a well-formed `spine_algorithm_version` 1 Episode — version 1 hashes the identifier as text — and is to be closed and sealed under version 1 before the deployment adopts version 2.
 3. **What the seal path must now read** — six fields per Segment rather than one — is an implementation note for the consuming runtime, to be written with the adapter work.
 
-## 10. Not in this unit
+## 10. Not in these units
 
-The remaining 5.0.0 items — the other §19 content hashes (aside, soliloquy, fingerprint), the audit record schema and preimage, witness commitment and witness validity (G-11/G-12), anchor commitment, `EpisodeLink.content_hash`, canonical JSON, the single hashing statement, role-named store values, and the sealed-requires-a-record rule with the late-seal wording — follow in further units, each with vectors.
+The remaining 5.0.0 items — the other §19 content hashes (aside, soliloquy, fingerprint), witness commitment and witness validity (G-11/G-12), anchor commitment, `EpisodeLink.content_hash`, the single hashing statement, role-named store values, and the sealed-requires-a-record rule with the late-seal wording — follow in further units, each with vectors.
+
+## 11. Canonical JSON (replaces every "canonical JSON" and "sorted keys" reference)
+
+Where a hash preimage contains a JSON document — an audit record's deltas, a Layer 3 node's state — the bytes hashed are the document's canonical form: **RFC 8785** (JSON Canonicalization Scheme), with every string, object keys and values alike, first normalized to Unicode NFC. Concretely: object members sorted by key, keys compared as sequences of UTF-16 code units (RFC 8785 §3.2.3), no whitespace; strings in UTF-8 with only `"`, `\` and control characters below U+0020 escaped (the two-character escapes for backspace, form feed, newline, carriage return and tab, otherwise lowercase `\u00xx`); integers as digits; other numbers as ECMAScript `Number::toString` (RFC 8785 §3.2.2.3) — shortest round-tripping digits, negative zero as `0`, NaN and infinities refused; the literals `true`, `false`, `null`. Two keys that become equal after NFC make the document invalid; it MUST be refused, not merged.
+
+**The canonical form is what is hashed and what is stored.** A record that hashes canonical JSON stores canonical JSON; a reader that hashes what it reads gets the writer's digest with no re-serialization step. 4.x's `sort_keys=True` at hash time over an unsorted stored document is exactly the drift this closes. A canonical document is a fixed point: canonicalizing it again yields the same bytes, which is the check a verifier applies to a stored delta before hashing it.
+
+## 12. Audit record — `AUDIT_RECORD:v2:` (replaces §8 and §19.1.1)
+
+One schema, one preimage, no sentinel. 4.x carries two `AuditRecord` models with two hash constructions and two `"GENESIS"` strings; both remain verifiable by the code that wrote them, and both are retired for new chains. The two models' fields are united below; nothing a 4.x record recorded is dropped except `schema_version`, which the prefix now carries.
+
+```
+record_hash = SHA3-256( "AUDIT_RECORD:v2:"
+    ‖ UUID(audit_id)
+    ‖ STRING(chain_key)                  the chain: an Episode's UUID as text, or a declared synthetic key
+    ‖ UINT(delta_sequence)               1 for the first record of a chain, +1 per record, never reset
+    ‖ STRING(delta_type)
+    ‖ STRING(agent_id)
+    ‖ STRING(session_id)
+    ‖ STRING(human_actor) | NULL
+    ‖ TIMESTAMP(wall_clock_time)         UTC, whole milliseconds — stored at that precision
+    ‖ UINT(episode_time)                 logical clock
+    ‖ BYTES(forward_delta)               canonical JSON (§11), UTF-8 — stored in that form
+    ‖ BYTES(reverse_delta)               canonical JSON (§11), UTF-8 — stored in that form
+    ‖ LIST(STRING)(affected_nodes)       identifiers as canonical text, in the order written
+    ‖ STRING(trigger_context)
+    ‖ STRING(explicit_reason) | NULL
+    ‖ STRING(caught_by)
+    ‖ BOOL(detection_window_open)
+    ‖ HASH(prior_audit_hash) | NULL      NULL for the first record of a chain; there is no text sentinel
+)
+```
+
+Every field is bound; the vectors' tests alter each one in turn and the chain breaks at that record. An absent optional field encodes as NULL, which is distinct from an empty string — `human_actor` unset and `human_actor` `""` are different records. The deltas enter as BYTES, not STRING: they are documents already in canonical form, hashed byte-exact, and a writer MUST refuse a delta text that is not its own canonical form.
+
+**Chain.** A chain is identified by `chain_key` and verified from its first record: `delta_sequence` runs 1, 2, 3, … without gap; the first record's `prior_audit_hash` is NULL; every later record's is the previous record's `record_hash`; every `record_hash` recomputes from the stored fields. A verifier reports the first record that fails and why. An empty chain verifies. Deletion, insertion, reordering and alteration of any field are each detected at the first affected record; the sequence rule makes a deletion visible even to a reader holding only sequence numbers, and the hash rule makes it visible to a reader holding only hashes. "Audit chain advance must not block operations" (4.x) does not license a writer to guess: a writer that cannot read the chain head MUST NOT emit a record with a guessed `prior_audit_hash` or `delta_sequence`; it fails the operation, per the adapter failure contract (4.6.0).
+
+The audit chain is not in any seal. It is an independent integrity structure over what was done to the Episode, verified on its own, exactly as §8 has always said.
