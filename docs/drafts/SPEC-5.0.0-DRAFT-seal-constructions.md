@@ -1,13 +1,13 @@
 # ASTP 5.0.0 — Seal Constructions (Draft)
 
-**Version:** 5.0.0-draft.9
+**Version:** 5.0.0-draft.10
 **Status:** Draft for review — **not ratified, not normative.** Nothing here applies to any existing seal.
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-18
-**Applies To:** proposed replacement text for `SPEC.md` §5.2–§5.8, §8, §9.2, §19.1.1, §19.4 and §20 →2 in 5.0.0
-**Vectors:** [`vectors/5.0.0-draft/seal-constructions.json`](../../vectors/5.0.0-draft/seal-constructions.json) (regenerate with `generate.py`, never by hand) · **Reference code:** `astp/protocol/encoding.py`, `compute_leaf_hash_v2`, `compute_merkle_root_v2`, `generate_inclusion_proof_v2` / `verify_inclusion_proof_v2`, `astp/core/seal_v2.py`, `astp/protocol/canonical_json.py`, `astp/protocol/audit_v2.py`, `astp/core/content_hash_v2.py` · **Tests:** `tests/conformance/test_seal_constructions_v2_vectors.py`, `tests/conformance/test_audit_record_v2_vectors.py`, `tests/conformance/test_content_hashes_v2_vectors.py`
+**Applies To:** proposed replacement text for `SPEC.md` §5.2–§5.8, §8, §9.2, §16.3–§16.4, §19.1.1, §19.4 and §20 →2, and G-11/G-12, in 5.0.0
+**Vectors:** [`vectors/5.0.0-draft/seal-constructions.json`](../../vectors/5.0.0-draft/seal-constructions.json) (regenerate with `generate.py`, never by hand) · **Reference code:** `astp/protocol/encoding.py`, `compute_leaf_hash_v2`, `compute_merkle_root_v2`, `generate_inclusion_proof_v2` / `verify_inclusion_proof_v2`, `astp/core/seal_v2.py`, `astp/protocol/canonical_json.py`, `astp/protocol/audit_v2.py`, `astp/core/content_hash_v2.py`, `astp/protocol/witness_v2.py`, `astp/protocol/anchor_v2.py` · **Tests:** `tests/conformance/test_seal_constructions_v2_vectors.py`, `tests/conformance/test_audit_record_v2_vectors.py`, `tests/conformance/test_content_hashes_v2_vectors.py`, `tests/conformance/test_witness_anchor_v2_vectors.py`
 
-This is the first four units of the 5.0.0 amendment: how an Episode's roots are built (§2–§7), inclusion proofs over the version 2 tree (§4a), canonical JSON with the audit record (§11–§12), and the side-channel and cross-Episode content hashes (§13). Draft 3 incorporates the rulings of design Episode `4b9a779e-be46-4d61-872e-fd76545aa901`, segments 29 and 31 (§9). It is a MAJOR change under [`VERSIONING.md`](../../VERSIONING.md) and requires an Episode of Record. Every construction below is **new and versioned**. Seals made under `spine_algorithm_version` 0 and 1 remain defined by SPEC 4.5.0 §5.3–§5.8 and remain reproducible; 5.0.0 retains that text as the definition of those versions.
+This is the first four units of the 5.0.0 amendment: how an Episode's roots are built (§2–§7), inclusion proofs over the version 2 tree (§4a), canonical JSON with the audit record (§11–§12), the side-channel and cross-Episode content hashes (§13), and witness and anchor commitments (§14). Draft 3 incorporates the rulings of design Episode `4b9a779e-be46-4d61-872e-fd76545aa901`, segments 29 and 31 (§9). It is a MAJOR change under [`VERSIONING.md`](../../VERSIONING.md) and requires an Episode of Record. Every construction below is **new and versioned**. Seals made under `spine_algorithm_version` 0 and 1 remain defined by SPEC 4.5.0 §5.3–§5.8 and remain reproducible; 5.0.0 retains that text as the definition of those versions.
 
 ---
 
@@ -143,7 +143,7 @@ episode_root_hash = SHA3-256( "EPISODE_ROOT:v2:" ‖ UUID(episode_id)
 
 `episode_id` is a UUID, as §4.1 requires; the root does not admit a string identifier, because identity bound by string equality is only as strong as the strings' encoding. An Episode whose identifier is not a UUID cannot be sealed under this construction and must say so; it is brought into conformance by being given one, with the old identifier kept as provenance and bound to nothing.
 
-Prefixes introduced here, each used by exactly one construction, none a prefix of another, none shared with 4.x (`LEAF:`, `NODE:`, `SIGNAL_MANIFEST:v1:`, `EXCLUSION:v1:`): `LEAF_HASH:v2:` · `TREE_LEAF:v2:` · `TREE_NODE:v2:` · `SIGNAL_MANIFEST:v2:` · `EXCLUSION:v2:` · `STRUCTURAL_MANIFEST:v1:` · `EPISODE_ROOT:v2:` · `BRANCH_POINT:v2:` · `BRANCH_TERMINUS:v2:` · `FORK_POINT:v2:` · `DEPARTURE_FORK_POINT:v2:` · `FORK_RETURN:v2:` · `MERGE_POINT:v2:` · `HITL_CONTEXT:v2:` · `HITL_RESOLUTION:v2:` · `HITL_NODE:v2:` · `AUDIT_RECORD:v2:` (§12) · `ASIDE:v2:` · `ASIDE_TERMINUS:v2:` · `SOLILOQUY:v2:` · `DELIBERATION_CHAIN:v2:` · `SOLILOQUY_CONCLUSION:v2:` · `LINK_SIGNAL:v2:` · `EPISODE_LINK:v2:` (§13). Retired with no successor: `FINGERPRINT:` (§13.4).
+Prefixes introduced here, each used by exactly one construction, none a prefix of another, none shared with 4.x (`LEAF:`, `NODE:`, `SIGNAL_MANIFEST:v1:`, `EXCLUSION:v1:`): `LEAF_HASH:v2:` · `TREE_LEAF:v2:` · `TREE_NODE:v2:` · `SIGNAL_MANIFEST:v2:` · `EXCLUSION:v2:` · `STRUCTURAL_MANIFEST:v1:` · `EPISODE_ROOT:v2:` · `BRANCH_POINT:v2:` · `BRANCH_TERMINUS:v2:` · `FORK_POINT:v2:` · `DEPARTURE_FORK_POINT:v2:` · `FORK_RETURN:v2:` · `MERGE_POINT:v2:` · `HITL_CONTEXT:v2:` · `HITL_RESOLUTION:v2:` · `HITL_NODE:v2:` · `AUDIT_RECORD:v2:` (§12) · `ASIDE:v2:` · `ASIDE_TERMINUS:v2:` · `SOLILOQUY:v2:` · `DELIBERATION_CHAIN:v2:` · `SOLILOQUY_CONCLUSION:v2:` · `LINK_SIGNAL:v2:` · `EPISODE_LINK:v2:` (§13) · `WITNESS_COMMITMENT:v2:` · `ANCHOR_COMMITMENT:v2:` (§14). Retired with no successor: `FINGERPRINT:` (§13.4).
 
 ## 8. Vectors
 
@@ -157,7 +157,7 @@ episode_root_hash (v2), seven structural members, five signals, empty exclusion
                                              f0511b4d1be172554b9f87ec64d400d24a1409f1742ad72f628bf5ab7b7d33f0
 ```
 
-The file also fixes, for §13, every construction with a populated and an empty list where a list occurs, an inferred link with its source sealed and a human-asserted link with neither end sealed, and the FLOAT bytes. For §11–§12: RFC 8785's own appendix example and its digest, key ordering by UTF-16 code unit, NFC of a key and a value, number forms, empty containers; a three-record audit chain (`audit_records_v2.chain`) and a minimal first record with every optional field absent, each with its stored form and `record_hash`. It also fixes each field type's bytes, NFC equivalence, UTC normalization of a timestamp given at −08:00, spine roots for n = 1, 2, 3, 7, both manifests empty and populated, each structural member, the structural manifest with a BranchTerminus removed, the Episode root with an empty structural manifest, a pre-5.0.0 Segment's leaf hash computed from its fields, and three inclusion proofs with their sibling counts.
+The file also fixes, for §14, two witness records signed with the RFC 8032 §7.1 test keys (Ed25519 signatures are deterministic, so they are reproducible to the byte) and an anchor commitment. For §13, every construction with a populated and an empty list where a list occurs, an inferred link with its source sealed and a human-asserted link with neither end sealed, and the FLOAT bytes. For §11–§12: RFC 8785's own appendix example and its digest, key ordering by UTF-16 code unit, NFC of a key and a value, number forms, empty containers; a three-record audit chain (`audit_records_v2.chain`) and a minimal first record with every optional field absent, each with its stored form and `record_hash`. It also fixes each field type's bytes, NFC equivalence, UTC normalization of a timestamp given at −08:00, spine roots for n = 1, 2, 3, 7, both manifests empty and populated, each structural member, the structural manifest with a BranchTerminus removed, the Episode root with an empty structural manifest, a pre-5.0.0 Segment's leaf hash computed from its fields, and three inclusion proofs with their sibling counts.
 
 ## 9. Rulings incorporated, and what remains open
 
@@ -171,7 +171,7 @@ Consequences outside this text:
 
 ## 10. Not in these units
 
-The remaining 5.0.0 items — witness commitment and witness validity (G-11/G-12), anchor commitment, the single hashing statement, role-named store values, and the sealed-requires-a-record rule with the late-seal wording — follow in further units, each with vectors.
+The remaining 5.0.0 items — the single hashing statement, role-named store values, and the sealed-requires-a-record rule with the late-seal wording — follow in further units, each with vectors.
 
 ## 11. Canonical JSON (replaces every "canonical JSON" and "sorted keys" reference)
 
@@ -274,3 +274,46 @@ link_hash = SHA3-256( "EPISODE_LINK:v2:" ‖ UUID(link_id) ‖ UUID(source_episo
 ### 13.5 Rulings
 
 Ruled in design Episode `4b9a779e…`, segment 40: the aside's two parties and the soliloquy's agent are bound as a named exception to §6 (the parties constitute the construction; a channel with its ends removed is a different, weaker claim); a link binds each end's identifier always and its Episode root when that end was sealed at link creation, NULL otherwise, with sealed-end-NULL nonconformant and `retroactive ⇒ source root present` following from that rule; FLOAT is exact binary64 — bind the number the writer held, not a printing of it — with the admissible set stated exhaustively in §2.
+
+## 14. Witness and anchor commitments (replaces §16.3.2, §16.4.2–§16.4.3, G-11 and G-12)
+
+### 14.1 What a witness attests
+
+A witness record is a claim by one party about what it saw: **this witness** saw **this root** for **this node** at **this time**, in **this role**. Version 2 binds all five.
+
+```
+witness_commitment = SHA3-256( "WITNESS_COMMITMENT:v2:" ‖ STRING(witness_id) ‖ UUID(node_id) ‖ STRING(node_type)
+                               ‖ HASH(root) ‖ UINT(root_version)
+                               ‖ UINT(sequence_index) ‖ UINT(logical_clock) ‖ TIMESTAMP(witnessed_at)
+                               ‖ STRING(role) ‖ STRING(role_detail) | NULL )
+```
+
+`root` is the node's outermost sealed commitment — the Episode root for an Episode; the spine root for a node type that has no manifests — and `root_version` is the version of the construction that produced it, so a verifier knows what kind of object the witnessed digest is before it compares. `sequence_index` and `logical_clock` are the node's position claims at the moment of witnessing, as 4.x had them. `role_detail` is bound so that a `CUSTOM` role says what it was.
+
+4.x bound the node, the root and the role, and not the witness or the time. Every witness of a root therefore shared one commitment, and a record could be copied under a second `witness_id` and count again toward the threshold; and a record whose `signature` was empty passed G-12, so the threshold could be met by writing unsigned rows. Both are closed here: the commitment names its witness, and validity requires a signature that verifies.
+
+**Signature.** Ed25519 over the 32 raw bytes of the commitment — `Sign(sk, bytes.fromhex(commitment_hash))`, the same form §4.6 fixes for HITL signatures — carried with the 32-byte public key and `public_key_fingerprint = SHA3-256(public_key)`. `ed25519` is the one registered `signature_scheme`; a record naming another is not valid. The protocol verifies that a record was signed by the key it names; whether that key belongs to the named `witness_id` is the workspace key registry's question, outside the preimage and outside this rule.
+
+### 14.2 Witness validity — G-12, version 2
+
+A record is **valid** if and only if all of: its `commitment_hash` recomputes from its fields; `public_key_fingerprint` is the SHA3-256 of `public_key`; its signature verifies under `public_key` over the raw commitment; and its `witness_id` is not the node's author (`authored_by`) — a party cannot witness its own claim. A record failing any condition is recorded but never valid, and never counts toward any threshold. A verifier reports the first condition that failed.
+
+### 14.3 Witness threshold — G-11, version 2
+
+A node meets a workspace threshold *n* when at least *n* valid records exist with pairwise-distinct `witness_id` **and** pairwise-distinct `public_key_fingerprint`: one key cannot count twice under two names, and one name cannot count twice under two keys. The count is the size of the largest such set — each valid record is an edge between a name and a key, and the count is a maximum matching, not a greedy pass (A under k₁, A under k₂ and B under k₁ admit two witnesses, A/k₂ and B/k₁; a greedy pass that takes A/k₁ first finds one). The threshold value itself remains workspace configuration, as §16.4.5 says.
+
+### 14.4 Anchor commitment
+
+```
+anchor_commitment = SHA3-256( "ANCHOR_COMMITMENT:v2:" ‖ UUID(node_id) ‖ STRING(node_type) ‖ STRING(workspace_id)
+                              ‖ HASH(root) ‖ UINT(root_version)
+                              ‖ UINT(crystallization_sequence) ‖ UINT(logical_clock) ‖ TIMESTAMP(anchored_at) )
+```
+
+What is submitted to a transparency log at crystallization (G-14): that this node, in this workspace, had this root at this sequence and clock, at this time; no payload internals, as §16.3.2 requires. `root` and `root_version` are as in §14.1. 4.x hashed a sorted-JSON document carrying a `protocol_version` string that defaulted to the literal `"2.3.0"` and a timestamp truncated to the second; neither is a claim about the node, and both are gone. The receipt (`AnchorReceipt`) is the log's artifact and is unchanged.
+
+### 14.5 Open for the design Episode
+
+1. `root` as "the node's outermost sealed commitment" with `root_version` naming its construction, rather than the bare spine root 4.x named — so a witness of a 5.0.0 Episode attests the Episode root, which commits the spine and both manifests.
+2. Ed25519 as the one registered scheme for witness signatures, matching §4.6, rather than "implementation-defined subject to minimum security requirements" (§2.2), which no verifier can act on.
+3. Author-distinctness as a validity condition (a party cannot witness its own claim), and the double-distinctness threshold count.
