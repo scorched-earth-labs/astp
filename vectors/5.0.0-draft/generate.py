@@ -27,6 +27,7 @@ from pathlib import Path
 from uuid import UUID
 
 from astp.core import seal_v2 as S
+from astp.core import content_hash_v2 as C
 from astp.protocol.audit_v2 import make_audit_record
 from astp.protocol.canonical_json import canonical_json
 from astp.protocol import encoding as E
@@ -106,6 +107,37 @@ def audit_vectors(ep: UUID, t: datetime) -> dict:
     }
 
 
+def content_hash_vectors(ep: UUID, t: datetime, segs: list) -> dict:
+    """Aside, soliloquy and Episode-link content hashes (draft §13)."""
+    c = [s["content_hash"] for s in segs]
+    aside = C.compute_aside_hash_v2(nid(40), ep, nid(2), c[2], "devin", "agent-α", t)
+    aside_t = C.compute_aside_terminus_hash_v2(nid(41), nid(40), ep, aside, [c[3], c[4]], "done",
+                                               False, [nid(5)], "CLOSED", t + timedelta(minutes=5))
+    sol = C.compute_soliloquy_hash_v2(nid(42), ep, nid(2), c[2], "agent-α", t)
+    chain = C.compute_deliberation_chain_hash_v2(nid(42), [c[3], c[4], c[5]])
+    chain_empty = C.compute_deliberation_chain_hash_v2(nid(42), [])
+    concl = C.compute_soliloquy_conclusion_hash_v2(nid(43), nid(42), ep, chain, "take the second reading",
+                                                   nid(6), "ABSORBED", t + timedelta(minutes=5))
+    sig1 = C.compute_link_signal_hash_v2("SEMANTIC_SIMILARITY", 0.6, 0.91, t)
+    sig2 = C.compute_link_signal_hash_v2("PARTICIPANT_OVERLAP", 0.4, 0.5, t)
+    src_root = H(b"episode-root-of-source")
+    ep2 = UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+    link_inferred = C.compute_episode_link_hash_v2(nid(44), ep, ep2, src_root, None, t, "RELATES_TO", 0.736, True,
+                                                   [sig1, sig2], 0.7, True, "1.0.0", None)
+    link_asserted = C.compute_episode_link_hash_v2(nid(45), ep, ep2, None, None, t, "CONTINUES_FROM", 1.0, False,
+                                                   [], None, False, None, None)
+    return {
+        "inputs": "see tests/conformance/test_content_hashes_v2_vectors.py for the exact field values",
+        "aside_v2": aside, "aside_terminus_v2": aside_t,
+        "soliloquy_v2": sol, "deliberation_chain_v2": chain, "deliberation_chain_v2_empty": chain_empty,
+        "soliloquy_conclusion_v2": concl,
+        "link_signal_v2": [sig1, sig2],
+        "episode_link_v2_inferred_source_sealed": link_inferred,
+        "episode_link_v2_asserted_neither_sealed": link_asserted,
+        "source_episode_root_used": src_root, "target_episode_id": str(ep2),
+    }
+
+
 def build() -> dict:
     ep = UUID("550e8400-e29b-41d4-a716-446655440000")
     t = datetime(2026, 1, 1, 0, 0, 0, 123000, tzinfo=timezone.utc)
@@ -157,7 +189,11 @@ def build() -> dict:
             "LIST_empty": E.encode_field((E.LIST, E.STRING), []).hex(),
             "BOOL_true": E.encode_field(E.BOOL, True).hex(),
             "BOOL_false": E.encode_field(E.BOOL, False).hex(),
+            "FLOAT_0.75": E.encode_field(E.FLOAT, 0.75).hex(),
+            "FLOAT_negative_zero_is_positive_zero": [E.encode_field(E.FLOAT, -0.0).hex(), E.encode_field(E.FLOAT, 0.0).hex()],
+            "LIST_of_HASH_two": E.encode_field((E.LIST, E.HASH), [segs[0]["content_hash"], segs[1]["content_hash"]]).hex(),
         },
+        "content_hashes_v2": content_hash_vectors(ep, t, segs),
         "canonical_json": canonical_json_vectors(),
         "audit_records_v2": audit_vectors(ep, t),
         "episode_id": str(ep),

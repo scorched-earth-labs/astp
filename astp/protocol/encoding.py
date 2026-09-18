@@ -32,8 +32,11 @@ preimages of 4.x lack.
     0x06  HASH        32 bytes (a SHA3-256 value, raw — never its hex text)
     0x07  LIST        u32be(count) ‖ the items, each encoded as a field of one stated kind
     0x08  BOOL        one byte, 0x00 or 0x01
+    0x09  FLOAT       8 bytes: IEEE 754 binary64, big-endian; NaN and infinities refused;
+                      negative zero encoded as positive zero
 """
 
+import struct
 import unicodedata
 from datetime import datetime, timezone
 from typing import Iterable, Optional, Tuple, Union
@@ -41,7 +44,7 @@ from uuid import UUID
 
 from astp.protocol.hashing import sha3_256
 
-NULL, BYTES, STRING, UINT, UUID_, TIMESTAMP, HASH, LIST, BOOL = range(9)
+NULL, BYTES, STRING, UINT, UUID_, TIMESTAMP, HASH, LIST, BOOL, FLOAT = range(10)
 
 Field = Tuple[object, object]   # (kind, value); a LIST kind is the tuple (LIST, item_kind)
 
@@ -90,6 +93,15 @@ def encode_field(kind: int, value: object) -> bytes:
         if not isinstance(value, bool):
             raise TypeError("BOOL field requires bool")
         return bytes([BOOL, 1 if value else 0])
+    if kind == FLOAT:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError("FLOAT field requires a real number")
+        x = float(value)
+        if x != x or x in (float("inf"), float("-inf")):
+            raise ValueError("FLOAT field cannot be NaN or infinite")
+        if x == 0.0:
+            x = 0.0   # drops the sign of negative zero
+        return bytes([FLOAT]) + struct.pack(">d", x)
     if isinstance(kind, tuple) and len(kind) == 2 and kind[0] == LIST:
         item_kind = kind[1]
         items = list(value)
