@@ -13,7 +13,7 @@
 # limitations under the License.
 """
 Content hashes for the §19 side-channel nodes and the cross-Episode link
-(SPEC 5.0.0; pending ratification).
+(SPEC 5.0.0).
 
 None of these is a seal input. Each is a node's own content hash: the claim
 that node makes, bound so that the claim cannot be altered after the fact.

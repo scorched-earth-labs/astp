@@ -224,7 +224,7 @@ class MerkleTree:
         return current == proof.spine_root
 
 
-# ── spine_algorithm_version 2 (SPEC 5.0.0; pending ratification) ──────────
+# ── spine_algorithm_version 2 (SPEC 5.0.0) ──────────
 
 TREE_LEAF_V2_PREFIX = b"TREE_LEAF:v2:"
 TREE_NODE_V2_PREFIX = b"TREE_NODE:v2:"
@@ -284,7 +284,7 @@ def expected_sibling_count_v2(leaf_index: int, leaf_count: int) -> int:
 
 
 class InclusionProofV2(BaseModel):
-    """Position-binding inclusion proof over the version 2 tree (DRAFT, 5.0.0).
+    """Position-binding inclusion proof over the version 2 tree (SPEC 5.0.0 §9.2).
 
     The path shape is not stated by the prover: a verifier derives, from
     ``leaf_index`` and ``leaf_count``, at which levels a sibling exists and on

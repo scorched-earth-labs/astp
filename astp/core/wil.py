@@ -111,7 +111,7 @@ class StoreLayer(str, Enum):
 
 
 class StoreRole(str, Enum):
-    """Role-named store values (SPEC 5.0.0 §12.1; pending ratification).
+    """Role-named store values (SPEC 5.0.0 §12.1).
 
     5.0.0 names the four storage roles of SPEC §12.1 by role. Ledger entries
     written under 4.x carry the reference deployment's provider names in

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Episode seal constructions for SPEC 5.0.0 (SPEC 5.0.0; pending ratification).
+Episode seal constructions for SPEC 5.0.0 (ratified in Episode of Record ce3f569c-9cdc-4a3d-913a-b9d8573d9a28).
 
 Everything here is a *new versioned construction*. Nothing in this module
 replaces a 4.x function: seals made under ``spine_algorithm_version`` 0 and 1
@@ -48,8 +48,11 @@ from astp.protocol.encoding import HASH, STRING, TIMESTAMP, UINT, UUID_, hash_fi
 from astp.protocol.leaf_hash import compute_leaf_hash_v2
 from astp.protocol.merkle import compute_merkle_root_v2
 
-SPINE_ALGORITHM_VERSION_DRAFT = 2
-EPISODE_ROOT_VERSION_DRAFT = 2
+SPINE_ALGORITHM_VERSION_2 = 2      # SPEC §5.8: selects the entire seal construction
+EPISODE_ROOT_VERSION_2 = 2
+# Names used while 5.0.0 was a draft; kept so callers do not break.
+SPINE_ALGORITHM_VERSION_DRAFT = SPINE_ALGORITHM_VERSION_2
+EPISODE_ROOT_VERSION_DRAFT = EPISODE_ROOT_VERSION_2
 
 # ── domain prefix registry (one per construction and version) ───────────────────
 SIGNAL_MANIFEST_V2 = b"SIGNAL_MANIFEST:v2:"
