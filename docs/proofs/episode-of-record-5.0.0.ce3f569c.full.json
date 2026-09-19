@@ -1,0 +1,71 @@
+{
+  "format": "astp-proof-of-record/1",
+  "protocol_version": "5.1.0",
+  "profile": "full",
+  "episode_id": "ce3f569c-9cdc-4a3d-913a-b9d8573d9a28",
+  "title": "5.0.0 Episode of Record",
+  "seal": {
+    "spine_algorithm_version": 1,
+    "ordering_version": 2,
+    "hash_version": 1,
+    "sealed_at": "2026-09-18T17:25:35.774405+00:00",
+    "closed_at": "2026-09-18T17:25:35.774405+00:00",
+    "spine_root": "ba3ab02e444009714ef7049d1cc51e6780c5a79b523e4ccc7d6e0e4699d9117a",
+    "signal_manifest_hash": "3096920cb3207a06fda43b58232636b5e681d163e078ac6c570869fffa39a576",
+    "exclusion_hash": "45849be4da47e279538916284a2ac74cd6acd60a67b9a8982992f97afa149be6",
+    "structural_manifest_hash": null,
+    "episode_root_hash": "3649bff4b96a17c99bb108ec23f4e6f8e41a455d9d38c98d6f32111800afe48a",
+    "leaf_count": 8
+  },
+  "notes": "Episode of Record for ASTP 5.0.0. Ratifies SPEC.md at 44f764eb8e5caad9757fdf5d0e654bb5602a25d3 by content digest c2e13d0ee60f7db95d185ec2f8079d38c9f087f7168a3b613aada6bc0a6b8a8d. See docs/RATIFICATION-5.0.0.md.",
+  "stored": {
+    "segments": [
+      {
+        "leaf_index": 0,
+        "content_hash": "e2f7581bf0f87ae19a2c55c774d619c0cbef6775ee0e06a35b7cc066011b1f83"
+      },
+      {
+        "leaf_index": 1,
+        "content_hash": "4250ee71b9975e46abcdab3f83a7bf83ce053d06e89ee9c684ef0981fe481a7d"
+      },
+      {
+        "leaf_index": 2,
+        "content_hash": "d9af9b50f629e2801d6bc946a8b33973417b09dc3128acbce815775694883aab"
+      },
+      {
+        "leaf_index": 3,
+        "content_hash": "58a147aa98e55208e672e4d39c9f5ede82a4ab9c88e10cfc782c2c0fae703221"
+      },
+      {
+        "leaf_index": 4,
+        "content_hash": "9ed4fcb96d566ee6307f423c52f3be9c11af3889843480a6b2be937b4a28416b"
+      },
+      {
+        "leaf_index": 5,
+        "content_hash": "1328523afeadf311a72df8e2250e8e8baed48576b4640f0801222b042435e351"
+      },
+      {
+        "leaf_index": 6,
+        "content_hash": "45082c813f4c9b1531d64f3ca5055dce6d8bb057c7b85921674f7042b801a1ee"
+      },
+      {
+        "leaf_index": 7,
+        "content_hash": "3d4f348c71a59489fa01310d5af44e3e02803269d12145d95f0ce7765df6f608"
+      }
+    ],
+    "signal_content_hashes": [
+      "0f17eefa499a8ecb08a1ffad03792e8abfa12ee5bd390ccda6e2cd40ce30dd9b",
+      "d5f29aa29e688227610b39de8241a2d7c37a342a3797c9897033c2d55ff03d8e",
+      "d9af9b50f629e2801d6bc946a8b33973417b09dc3128acbce815775694883aab",
+      "4250ee71b9975e46abcdab3f83a7bf83ce053d06e89ee9c684ef0981fe481a7d",
+      "9ed4fcb96d566ee6307f423c52f3be9c11af3889843480a6b2be937b4a28416b",
+      "58a147aa98e55208e672e4d39c9f5ede82a4ab9c88e10cfc782c2c0fae703221",
+      "1328523afeadf311a72df8e2250e8e8baed48576b4640f0801222b042435e351",
+      "45082c813f4c9b1531d64f3ca5055dce6d8bb057c7b85921674f7042b801a1ee",
+      "3d4f348c71a59489fa01310d5af44e3e02803269d12145d95f0ce7765df6f608"
+    ],
+    "excluded_content_hashes": [],
+    "structural_member_hashes": [],
+    "resolved_signal_order": null
+  }
+}
