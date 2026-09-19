@@ -15,7 +15,7 @@
 Conformance: canonical JSON and the version 2 audit record (SPEC 5.0.0 §5.1.2, §8).
 
 Every vector is checked twice — against the library, and against a reference
-written from the draft text that imports nothing from ``astp``: ``hashlib``,
+written from the SPEC text that imports nothing from ``astp``: ``hashlib``,
 ``json``, ``unicodedata`` and the standard library only. The canonical-JSON
 reference is RFC 8785's own appendix example, whose expected output is the
 RFC's, byte for byte.
@@ -41,7 +41,7 @@ CJ = VECTORS["canonical_json"]
 AR = VECTORS["audit_records_v2"]
 
 
-# ── reference written from the draft text, no astp imports ───────────────────────
+# ── reference written from the SPEC text, no astp imports ───────────────────────
 
 def _u32(n): return n.to_bytes(4, "big")
 def _null(): return b"\x00"
@@ -59,7 +59,7 @@ def _bool(b): return b"\x08" + (b"\x01" if b else b"\x00")
 
 
 def ref_record_hash(r: dict) -> str:
-    """The preimage as the draft lists it, field by field."""
+    """The preimage as SPEC §8.1 lists it, field by field."""
     pre = (b"AUDIT_RECORD:v2:"
            + _uuid(r["audit_id"])
            + _string(r["chain_key"])

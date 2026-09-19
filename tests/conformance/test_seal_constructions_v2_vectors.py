@@ -15,9 +15,9 @@
 SPEC 5.0.0 seal constructions, checked against ``vectors/5.0.0/``.
 
 Two checks per value. The library must produce it — and so must the few lines of
-``hashlib`` below, written from the draft text alone, which import nothing from
+``hashlib`` below, written from the SPEC text alone, which import nothing from
 ``astp``. The vector file is language-neutral; a second implementation needs the
-JSON and the draft, not this package.
+JSON and SPEC.md, not this package.
 """
 
 import hashlib
@@ -43,7 +43,7 @@ SEGMENTS = VECTORS["segments"]
 LEAVES = [s["leaf_hash_v2"] for s in SEGMENTS]
 
 
-# ── an independent implementation, from the draft text ─────────────────────────
+# ── an independent implementation, from the SPEC text ─────────────────────────
 
 def _sha3(b: bytes) -> bytes:
     return hashlib.sha3_256(b).digest()
@@ -284,7 +284,7 @@ def test_every_prefix_in_the_registry_is_distinct_and_none_is_a_4x_prefix():
 # ── inclusion proofs over the version 2 tree ───────────────────────────────────
 
 def _ref_verify(proof: dict) -> bool:
-    """Verifier written from the draft text: derive the path shape from
+    """Verifier written from the SPEC text: derive the path shape from
     (leaf_index, leaf_count); place each sibling by the leaf's parity."""
     n, pos, k = proof["leaf_count"], proof["leaf_index"], 0
     if not 0 <= pos < n:

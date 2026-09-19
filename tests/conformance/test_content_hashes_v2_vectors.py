@@ -14,7 +14,7 @@
 """
 Conformance: §19 side-channel content hashes and the Episode link
 (SPEC 5.0.0 §19.4, §20 §2). Each vector is checked against the library and
-against a reference written from the draft text with ``hashlib`` and
+against a reference written from the SPEC text with ``hashlib`` and
 ``struct`` alone, importing nothing from ``astp``.
 """
 
@@ -43,7 +43,7 @@ def nid(i: int) -> UUID:
     return UUID(f"00000000-0000-4000-8000-{i:012x}")
 
 
-# ── reference written from the draft text, no astp imports ───────────────────────
+# ── reference written from the SPEC text, no astp imports ───────────────────────
 
 def _u32(n): return n.to_bytes(4, "big")
 def _null(): return b"\x00"
