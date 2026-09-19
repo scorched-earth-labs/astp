@@ -53,3 +53,25 @@ class StaleRootError(AriadneProtocolError):
 class MonotonicityViolation(GovernanceViolation):
     """A monotonically increasing value decreased (logical clock, sequence index)."""
     pass
+
+
+class AdapterWriteError(AriadneProtocolError):
+    """An adapter operation did not complete (SPEC §15 item 7: fail loudly).
+
+    Raised, chained to the underlying driver or store error, by every reference
+    adapter writer and reader when the store refuses or the operation fails part
+    way. Never swallowed inside the package: the host decides whether to retry,
+    queue, or surface it, and a ledger entry is never written as COMPLETE for a
+    write that did not happen (G-39).
+    """
+
+
+class BranchOperationError(AriadneProtocolError):
+    """A branch, fork, merge, aside or soliloquy operation failed after it began.
+
+    Raised, chained, in place of the ``return None`` the 4.x operations used
+    for any exception. A precondition *refusal* (source Episode not found or
+    not ACTIVE, branch already terminated, …) is not an error: those still
+    return ``None`` after logging, so a caller can tell "refused" from
+    "failed". No WIL entry is written for an operation that raised.
+    """

@@ -16,7 +16,7 @@ Ariadne Neo4j+Redis WIL Adapter
 
 Persistence operations for the Write Intent Log protocol.
 Coordinates writes across Redis (ephemeral) and Neo4j (durable).
-All operations are gated by ARIADNE_ENABLED feature flag.
+Every operation raises AdapterWriteError on failure; nothing is gated by a flag.
 
 Protocol-level models, invariants, and guards live in astp.core.wil.
 This module handles only the database operations.
@@ -27,7 +27,6 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from astp.core.wil import (
-    ARIADNE_ENABLED,
     StoreLayer,
     WILOperation,
     WILStatus,
@@ -39,6 +38,8 @@ from astp.core.wil import (
     enforce_write_order,
     get_redis_ttl,
 )
+
+from astp.protocol.errors import AdapterWriteError, AriadneProtocolError
 
 logger = logging.getLogger("astp.adapters.neo4j.wil")
 
@@ -57,14 +58,6 @@ async def declare_write_intent(
     Phase 1: INTENT_DECLARED.
     Creates a WIL entry in Redis with completed_at=null.
     """
-    if not ARIADNE_ENABLED:
-        return WriteIntentEntry(
-            operation=operation, episode_id=episode_id,
-            stores_involved=stores_involved,
-            pre_state_hash=pre_state_hash,
-            post_state_hash=post_state_hash,
-        )
-
     entry = WriteIntentEntry(
         operation=operation,
         episode_id=episode_id,
@@ -91,8 +84,6 @@ async def record_store_completion(
     Phase 2: Record successful store write.
     Updates last_completed_store for recovery resumption.
     """
-    if not ARIADNE_ENABLED:
-        return
     key = build_redis_wil_key(intent_id)
     raw = await redis_client.get(key)
     if not raw:
@@ -113,8 +104,6 @@ async def complete_write_intent(
     Phase 3: COMPLETION.
     Marks complete and graduates from Redis to Neo4j.
     """
-    if not ARIADNE_ENABLED:
-        return
     key = build_redis_wil_key(intent_id)
     raw = await redis_client.get(key)
     if not raw:
@@ -163,8 +152,6 @@ async def fail_write_intent(
     reason: str,
 ) -> None:
     """Marks a WIL entry as FAILED. Remains in Redis for recovery scanner."""
-    if not ARIADNE_ENABLED:
-        return
     key = build_redis_wil_key(intent_id)
     raw = await redis_client.get(key)
     if not raw:
@@ -184,8 +171,6 @@ async def find_incomplete_wil_entries(redis_client) -> list[WriteIntentEntry]:
     Scans Redis for WIL entries with completed_at=null.
     Called on startup and periodically (recommended: every 5 minutes).
     """
-    if not ARIADNE_ENABLED:
-        return []
     incomplete = []
     async for key in redis_client.scan_iter("ariadne::wil::*"):
         raw = await redis_client.get(key)
@@ -195,8 +180,11 @@ async def find_incomplete_wil_entries(redis_client) -> list[WriteIntentEntry]:
             entry = WriteIntentEntry.model_validate_json(raw)
             if entry.completed_at is None:
                 incomplete.append(entry)
+        except AriadneProtocolError:
+            raise
         except Exception as e:
-            logger.warning(f"WIL recovery scan: Could not parse entry {key}: {e}")
+            logger.error(f"WIL recovery scan: Could not parse entry {key}: {e}")
+            raise AdapterWriteError(f"find_incomplete_wil_entries: {e}") from e
     if incomplete:
         logger.warning(
             f"WIL: Found {len(incomplete)} incomplete write intent(s). "
@@ -214,8 +202,6 @@ async def replay_incomplete_write(
     Marks entry as REPLAYING. Actual re-execution is delegated to
     operation-specific handlers based on entry.operation.
     """
-    if not ARIADNE_ENABLED:
-        return
     key = build_redis_wil_key(str(entry.intent_id))
     entry.status = WILStatus.REPLAYING
     ttl = get_redis_ttl(key)
@@ -243,7 +229,7 @@ async def execute_episode_create(
 
     Delegates the Neo4j write to `create_episode_node` rather than inlining the
     Cypher, for the same reason `execute_segment_commit` does: the writer owns
-    the node's shape and its `_ariadne_guard`, and a second copy of that MERGE
+    the node's shape, and a second copy of that MERGE
     would drift from it.
 
     On the state hashes: `pre_state_hash` defaults to empty because an episode
@@ -257,9 +243,6 @@ async def execute_episode_create(
     interrupted episode create recognisable as `completed_at=null`, which a
     single completed entry could never express.
     """
-    if not ARIADNE_ENABLED:
-        return ""
-
     from astp.adapters.neo4j.writer import create_episode_node
 
     stores = [StoreLayer.NEO4J]
@@ -309,9 +292,6 @@ async def execute_consultation_commit(
     `participant` is the consulted agent's record and is optional: a
     consultation with no distinct consulted episode has none.
     """
-    if not ARIADNE_ENABLED:
-        return ""
-
     from astp.adapters.neo4j.writer import (
         create_consultation_node,
         create_consultation_participant_node,
@@ -360,9 +340,6 @@ async def execute_attachment_commit(
     meaningful commitment is to the injected content, since that is the thing
     whose later change the record exists to detect.
     """
-    if not ARIADNE_ENABLED:
-        return ""
-
     from astp.adapters.neo4j.writer import create_attachment_node
 
     stores = [StoreLayer.NEO4J]
@@ -405,9 +382,6 @@ async def execute_codicil_append(
     addendum's content. Callers with a broader notion of post-write state can
     override it.
     """
-    if not ARIADNE_ENABLED:
-        return ""
-
     from astp.adapters.neo4j.writer import create_codicil_node
 
     stores = [StoreLayer.NEO4J]
@@ -456,9 +430,6 @@ async def execute_episode_archive(
     in progress while the crystallization completed. Collapsing both into a
     single entry would lose which of the two failed if one did.
     """
-    if not ARIADNE_ENABLED:
-        return ""
-
     from astp.adapters.neo4j.crystallization import archive_episode
 
     stores = [StoreLayer.NEO4J]
@@ -516,9 +487,6 @@ async def execute_crystallization(
     recovery needs. Ledgering only the delta write would leave the stuck state
     unexplained.
     """
-    if not ARIADNE_ENABLED:
-        return ""
-
     from astp.adapters.neo4j.crystallization import (
         acquire_crystallization_lock,
         release_crystallization_lock,
@@ -586,9 +554,6 @@ async def execute_episode_close(
     SEALED state. Both are registered operations and they are not
     interchangeable.
     """
-    if not ARIADNE_ENABLED:
-        return ""
-
     from astp.core.schema import EpisodeStatus
     from astp.adapters.neo4j.writer import (
         create_closure_record_node,
@@ -636,9 +601,6 @@ async def execute_signal_commit(
     Blob write must be done by caller BEFORE calling this function.
     Returns intent_id.
     """
-    if not ARIADNE_ENABLED:
-        return ""
-
     if is_provisional:
         enforce_provisional_state_guard(True, StoreLayer.NEO4J, "signal during provisional window")
 
@@ -691,9 +653,6 @@ async def execute_segment_commit(
     guard, and duplicating its MERGE here would silently bypass both. A
     coordinated write must not be a way around governance.
     """
-    if not ARIADNE_ENABLED:
-        return ""
-
     from astp.adapters.neo4j.writer import create_segment_node
 
     if is_provisional:
@@ -744,9 +703,6 @@ async def execute_episode_seal(
     Blob write must be done by caller BEFORE calling this function.
     Returns intent_id.
     """
-    if not ARIADNE_ENABLED:
-        return ""
-
     stores = [StoreLayer.BLOB, StoreLayer.NEO4J, StoreLayer.REDIS]
     intent = await declare_write_intent(
         redis_client, WILOperation.EPISODE_SEAL, episode_id,
@@ -806,9 +762,6 @@ async def execute_manifest_finalize(
     post_state_hash: str,
 ) -> str:
     """Coordinated write for MANIFEST_FINALIZE. Returns intent_id."""
-    if not ARIADNE_ENABLED:
-        return ""
-
     stores = [StoreLayer.NEO4J, StoreLayer.REDIS]
     intent = await declare_write_intent(
         redis_client, WILOperation.MANIFEST_FINALIZE, episode_id,
@@ -856,9 +809,6 @@ async def handle_redis_failure_recovery(
     Called when Redis is unavailable and provisional state may have been lost.
     Returns recovery summary — does NOT automatically re-execute writes.
     """
-    if not ARIADNE_ENABLED:
-        return {}
-
     async with neo4j_driver.session() as session:
         ep_result = await session.run("""
             MATCH (e:AriadneEpisode {episode_id: $episode_id})

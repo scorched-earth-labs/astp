@@ -36,7 +36,6 @@ from astp.core.schema import AriadneGovernanceError
 
 logger = logging.getLogger(__name__)
 
-ARIADNE_ENABLED = os.getenv("ARIADNE_ENABLED", "false").lower() == "true"
 
 # PROVISIONAL_WINDOW_PENDING_EMPIRICAL_VALIDATION
 # 4 hours is the conservative upper bound.
