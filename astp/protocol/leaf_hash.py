@@ -97,7 +97,7 @@ def compute_leaf_hash_from_node(node) -> str:
     )
 
 
-# ── hash_version 2 (SPEC 5.0.0; pending ratification) ─────────────────────
+# ── hash_version 2 (SPEC 5.0.0) ─────────────────────
 
 LEAF_HASH_V2_PREFIX = b"LEAF_HASH:v2:"
 

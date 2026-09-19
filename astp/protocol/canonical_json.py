@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-ASTP — Canonical JSON (SPEC 5.0.0; pending ratification)
+ASTP — Canonical JSON (SPEC 5.0.0)
 
 Where a hash preimage contains a JSON document — an audit record's deltas, a
 Layer 3 node's state — the bytes hashed are the document's canonical form:

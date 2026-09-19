@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""SPEC 5.0.0 DRAFT §16 (role-named store values) and §17 (sealed requires a record)."""
+"""SPEC 5.0.0 §12.1 (role-named store values) and G-40 (sealed requires a record)."""
 
 from datetime import datetime, timedelta, timezone
 
