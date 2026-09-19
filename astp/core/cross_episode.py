@@ -169,7 +169,13 @@ class EpisodeLink(BaseModel):
     quarantine_resolution: Optional[QuarantineResolution] = None
 
     # Integrity
-    content_hash: Optional[str] = None  # SHA3-256 of canonical preimage (see compute_episode_link_content_hash)
+    # Each end's Episode root when that end was sealed at link creation, else None
+    # (SPEC §20 →2, 5.0.0). A sealed end with None is nonconformant; the writer
+    # fills these from the graph before stamping.
+    source_episode_root: Optional[str] = None
+    target_episode_root: Optional[str] = None
+
+    content_hash: Optional[str] = None  # EPISODE_LINK:v2: (see compute_episode_link_content_hash)
 
 
 # ── Governance ───────────────────────────────────────────────────────────────
@@ -241,24 +247,35 @@ _HASH_PREIMAGE_FIELDS: tuple[str, ...] = (
 
 
 def compute_episode_link_content_hash(link: EpisodeLink) -> str:
-    """SHA3-256 of the EpisodeLink canonical preimage.
+    """`EPISODE_LINK:v2:` (SPEC §20 →2): the two Episode identifiers, each end's
+    Episode root when that end was sealed at link creation, the type, exact
+    strength, whether inferred, every inference signal (each `LINK_SIGNAL:v2:`)
+    in the order recorded, the threshold, the retroactive flag and the version
+    strings. Health, quarantine and `created_by` are lifecycle and provenance —
+    the audit chain's — and are not bound, so the hash is fixed at creation."""
+    from astp.core.content_hash_v2 import compute_episode_link_hash_v2, compute_link_signal_hash_v2
+    signal_hashes = [compute_link_signal_hash_v2(sig.signal_type.value, sig.signal_weight, sig.signal_value, sig.computed_at)
+                     for sig in link.inference_signals]
+    return compute_episode_link_hash_v2(
+        link.link_id, link.source_episode, link.target_episode, link.source_episode_root, link.target_episode_root,
+        link.created_at, link.link_type.value, link.link_strength, link.is_inferred, signal_hashes,
+        link.inference_threshold, link.retroactive, link.source_version, link.target_version,
+    )
 
-    Excludes `quarantine_resolved_at` and `quarantine_resolution` per
-    SPEC §20 →2 — these are mutable lifecycle annotations whose
-    integrity lives in the audit log, not the content hash.
 
-    Canonicalization rules (UTC ISO 8601 datetimes, repr() floats, etc.)
-    live in `astp.core.hash_canonical`. Field order is the order
-    declared in `_HASH_PREIMAGE_FIELDS`.
-    """
+def compute_episode_link_content_hash_4x(link: EpisodeLink) -> str:
+    """The 4.x preimage (`_HASH_PREIMAGE_FIELDS`, canonical JSON) — retained only
+    to verify links written before 5.0.0. It bound the health and quarantine
+    fields, so it changed whenever a link's health did."""
     return hash_preimage(link, _HASH_PREIMAGE_FIELDS)
 
 
 def stamp_content_hash(link: EpisodeLink) -> EpisodeLink:
-    """Compute and set `content_hash` on the given link. Returns the same
-    instance for chaining. Idempotent: re-stamping with unchanged fields
-    yields the same hash; changes to mutable fields (e.g., health_state)
-    update the hash on re-stamp."""
+    """Compute and set `content_hash` on the given link (`EPISODE_LINK:v2:`).
+    Returns the same instance for chaining. The hash is a function of the
+    link's immutable claim only: re-stamping after a health change yields the
+    same hash. Fill `source_episode_root` / `target_episode_root` first when the
+    ends are sealed — the writer does this from the graph."""
     link.content_hash = compute_episode_link_content_hash(link)
     return link
 
