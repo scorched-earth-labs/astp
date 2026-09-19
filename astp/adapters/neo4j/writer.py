@@ -50,6 +50,7 @@ from astp.core.schema import (
 )
 
 from astp.protocol.errors import AdapterWriteError, AriadneProtocolError
+from astp.core.schema import hitl_terminal_status, require_episode_uuid
 
 logger = logging.getLogger("astp.adapters.neo4j")
 
@@ -237,6 +238,7 @@ def _episode_params(episode: EpisodeNode) -> dict:
 
 
 async def create_episode_node(driver, episode: EpisodeNode) -> None:
+    require_episode_uuid(episode.episode_id)   # G-40: the write boundary
     params = _episode_params(episode)
     async with driver.session() as session:
         await session.run("""
@@ -399,7 +401,8 @@ async def create_seal_node(driver, seal: SealNode) -> None:
         "write_intent_id": str(seal.write_intent_id),
         "seal_status": seal.seal_status.value,
         "agent_signature": seal.agent_signature,
-        "mnemosyne_countersignature": seal.mnemosyne_countersignature,
+        # the graph property keeps its stored 4.x name; the model field is `countersignature`
+        "mnemosyne_countersignature": seal.countersignature,
     }
     async with driver.session() as session:
         await session.run("""
@@ -1179,7 +1182,8 @@ def write_hitl_event_resolution_sync(
                 RETURN h.hitl_event_id AS updated
             """, {
                 "hitl_event_id": hitl_event_id,
-                "status": "resolved" if decision != "timed_out" else "timed_out",
+                # ESCALATED concludes this gate and MUST stay distinguishable from RESOLVED (SPEC §4.6, §5.7.1)
+                "status": hitl_terminal_status(decision),
                 "decision": decision,
                 "resolved_by": resolved_by,
                 "resolved_at": resolved_at,

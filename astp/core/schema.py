@@ -25,11 +25,12 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # sha3_256 is defined in the protocol layer and re-exported here so that
 # ``from astp.core.schema import sha3_256`` keeps working.
 from astp.protocol.hashing import sha3_256
+from astp.protocol.errors import AriadneProtocolError
 
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
@@ -151,7 +152,38 @@ class HITLNodeStatus(str, Enum):
     INVOKED = "invoked"        # Phase 1 — gate raised, awaiting human decision
     RESOLVED = "resolved"      # Phase 2 — human decision recorded
     TIMED_OUT = "timed_out"    # Resolution window expired — treated as rejection
-    ESCALATED = "escalated"    # Forwarded, awaiting higher-authority resolution
+    ESCALATED = "escalated"    # Terminal for THIS gate: the decision recorded is the escalation; any further deliberation is a new gate that references this one (SPEC §4.6)
+
+
+def hitl_terminal_status(decision: str) -> str:
+    """The terminal HITLNodeStatus a decision concludes a gate with (SPEC §4.6):
+    ``timed_out`` and ``escalated`` are their own terminal statuses and MUST NOT
+    be recorded as ``resolved``; every other decision resolves the gate."""
+    d = decision.lower()
+    if d == HITLNodeStatus.TIMED_OUT.value:
+        return HITLNodeStatus.TIMED_OUT.value
+    if d == HITLDecision.ESCALATED.value:
+        return HITLNodeStatus.ESCALATED.value
+    return HITLNodeStatus.RESOLVED.value
+
+
+class EpisodeIdentifierError(AriadneProtocolError):
+    """G-40: an Episode identifier that is not a UUID is refused where Episodes are created."""
+
+
+def require_episode_uuid(value) -> UUID:
+    """G-40 write boundary. Accepts a UUID or its canonical text; refuses anything
+    else with ``EpisodeIdentifierError``. Applies to Episode *creation* only — an
+    Episode created under an earlier version with a legacy identifier is read,
+    verified and sealed under spine_algorithm_version 1 (see
+    ``astp.core.crystallization.episode_ref``)."""
+    if isinstance(value, UUID):
+        return value
+    try:
+        return UUID(str(value))
+    except (ValueError, TypeError, AttributeError):
+        raise EpisodeIdentifierError(
+            f"Episode identifier {value!r} is not a UUID; SPEC G-40 refuses it at creation") from None
 
 
 # ── Node Models ───────────────────────────────────────────────────────────────
@@ -260,7 +292,19 @@ class SealNode(BaseModel):
     write_intent_id: UUID
     seal_status: SealStatus = SealStatus.PENDING
     agent_signature: Optional[str] = None
-    mnemosyne_countersignature: Optional[str] = None
+    countersignature: Optional[str] = None
+    # 4.x name for the same field. Kept readable so stored records and old callers load;
+    # the graph property is stored data and keeps its 4.x name (see the writer).
+    @property
+    def mnemosyne_countersignature(self) -> Optional[str]:
+        return self.countersignature
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_4x_countersignature_name(cls, data):
+        if isinstance(data, dict) and "mnemosyne_countersignature" in data and "countersignature" not in data:
+            data = {**data, "countersignature": data.pop("mnemosyne_countersignature")}
+        return data
 
 
 class ExclusionRecord(BaseModel):

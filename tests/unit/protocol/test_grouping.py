@@ -71,13 +71,10 @@ class TestMembershipRole:
 
 
 class TestGroupingSystem:
-    def test_reference_implementations_registered(self):
-        # Open-ended — these are reference values, implementations may
-        # declare arbitrary group_system strings.
-        assert GroupingSystem.ARIADNE_NATIVE.value == "ariadne_native"
-        assert GroupingSystem.SEL_THERMYT_COLLECTION.value == "sel-thermyt:Collection"
-        assert GroupingSystem.CLAUDE_PROJECT.value == "claude:Project"
-        assert GroupingSystem.NOTION_DATABASE.value == "notion:Database"
+    def test_only_the_protocol_native_value_is_reserved(self):
+        # Open-ended: any group_system string is valid; vendors are named by
+        # their ConformanceDeclaration, not by a protocol enum member.
+        assert [m.value for m in GroupingSystem] == ["ariadne_native"]
 
 
 class TestCognitiveDeltaTypeAdditions:

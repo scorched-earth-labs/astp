@@ -67,20 +67,13 @@ class MembershipRole(str, Enum):
 
 
 class GroupingSystem(str, Enum):
-    """Identifiers for known native grouping implementations. The protocol
-    does not constrain implementations to register from this list — any
-    string identifier is valid — these are illustrative group-system
-    identifiers.
-
-    Implementations register their conformance via `ConformanceDeclaration`
-    (SPEC §20 →8).
+    """The one grouping-system identifier the protocol itself reserves. Any
+    other `group_system` is a string the implementation declares — a vendor's
+    construct is named by the vendor's `ConformanceDeclaration` (SPEC §20 →8),
+    not by a member of a protocol enum. (5.0.0 removed the illustrative vendor
+    values that lived here.)
     """
-
-    # Reserved values; implementations may declare arbitrary group_system strings.
     ARIADNE_NATIVE = "ariadne_native"   # protocol's own internal grouping (if used)
-    SEL_THERMYT_COLLECTION = "sel-thermyt:Collection"
-    CLAUDE_PROJECT = "claude:Project"
-    NOTION_DATABASE = "notion:Database"
 
 
 # ── Capability ──────────────────────────────────────────────────────────────
