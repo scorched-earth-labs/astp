@@ -2741,7 +2741,9 @@ def write_episode_link_sync(driver, link) -> None:
             """
             MATCH (s:AriadneEpisode {episode_id: $src})
             MATCH (t:AriadneEpisode {episode_id: $tgt})
-            RETURN s.episode_id AS src_id, t.episode_id AS tgt_id
+            RETURN s.episode_id AS src_id, t.episode_id AS tgt_id,
+                   CASE WHEN s.sealed_at IS NOT NULL THEN s.episode_root_hash END AS src_root,
+                   CASE WHEN t.sealed_at IS NOT NULL THEN t.episode_root_hash END AS tgt_root
             """,
             {"src": src_id, "tgt": tgt_id},
         ).single()
@@ -2750,6 +2752,12 @@ def write_episode_link_sync(driver, link) -> None:
                 f"Cannot create EpisodeLink: one or both endpoints not found "
                 f"(source={src_id}, target={tgt_id})"
             )
+        # SPEC §20 →2: a link binds each end's Episode root when that end was sealed
+        # at link creation. Fill from the graph; a caller-supplied value stands.
+        if link.source_episode_root is None and endpoints["src_root"]:
+            link.source_episode_root = endpoints["src_root"]
+        if link.target_episode_root is None and endpoints["tgt_root"]:
+            link.target_episode_root = endpoints["tgt_root"]
 
         # 2. Mutual exclusivity check.
         existing = session.run(
@@ -2763,9 +2771,9 @@ def write_episode_link_sync(driver, link) -> None:
         existing_types = [LinkType(record["link_type"]) for record in existing]
         enforce_link_mutual_exclusivity(link.link_type, existing_types)
 
-        # 3. Stamp hash if caller didn't.
-        if not link.content_hash:
-            link.content_hash = compute_episode_link_content_hash(link)
+        # 3. Stamp the hash here, over the roots just filled. A caller's stamp
+        #    could not have bound roots it did not have; the writer's stamp wins.
+        link.content_hash = compute_episode_link_content_hash(link)
 
         # 4. Write node + edge in one transaction-equivalent block. Inline
         # signal serialization to a string list — Neo4j property graph
@@ -2799,6 +2807,8 @@ def write_episode_link_sync(driver, link) -> None:
             "quarantine_resolution": (
                 link.quarantine_resolution.value if link.quarantine_resolution else None
             ),
+            "source_episode_root": link.source_episode_root,
+            "target_episode_root": link.target_episode_root,
             "content_hash": link.content_hash,
         }
         session.run(
@@ -2823,6 +2833,8 @@ def write_episode_link_sync(driver, link) -> None:
                 quarantined_at:         $quarantined_at,
                 quarantine_resolved_at: $quarantine_resolved_at,
                 quarantine_resolution:  $quarantine_resolution,
+                source_episode_root:    $source_episode_root,
+                target_episode_root:    $target_episode_root,
                 content_hash:           $content_hash
             })
             """,

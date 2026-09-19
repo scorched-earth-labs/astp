@@ -26,10 +26,40 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from astp.core.wil import WILOperation
 from astp.protocol.errors import AdapterWriteError, BranchOperationError
+from astp.core.content_hash_v2 import (
+    compute_aside_hash_v2,
+    compute_aside_terminus_hash_v2,
+    compute_deliberation_chain_hash_v2,
+    compute_soliloquy_conclusion_hash_v2,
+    compute_soliloquy_hash_v2,
+)
+
+
+def _is_uuid(value) -> bool:
+    try:
+        UUID(str(value))
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def _parent_segment_for_side_channel(driver, parent_segment_id):
+    """(UUID, content_hash) of the Segment an aside or soliloquy opens from, or
+    None — logged — when it is not a UUID or does not exist. SPEC §19.4 binds the
+    parent by identity and by content, so both must be real."""
+    from astp.adapters.neo4j.queries import segment_content_hashes_sync
+    if not _is_uuid(parent_segment_id):
+        logger.error(f"parent_segment_id {parent_segment_id!r} is not a UUID")
+        return None
+    found = segment_content_hashes_sync(driver, [parent_segment_id])
+    if str(parent_segment_id) not in found:
+        logger.error(f"parent segment {parent_segment_id} not found or has no content hash")
+        return None
+    return UUID(str(parent_segment_id)), found[str(parent_segment_id)][1]
 from astp.core.branching import (
     BranchPointNode,
     BranchTerminusNode,
@@ -1865,6 +1895,13 @@ def create_aside(
                 )
                 return None
 
+        # The parent Segment is bound by identity and by content (SPEC §19.4.1); a
+        # parent that does not exist, or is not a UUID, is a precondition refusal.
+        parent = _parent_segment_for_side_channel(driver, parent_segment_id)
+        if parent is None:
+            return None
+        parent_uuid, parent_content_hash = parent
+
         # STEP 2: Create AsideSegmentNode
         aside = AsideSegmentNode(
             parent_episode_id=parent_episode_id,
@@ -1874,15 +1911,11 @@ def create_aside(
             target_agent_id=target_agent_id,
             return_obligation=return_obligation,
             content_refs=content_refs or [],
+            parent_hash=parent_content_hash,
         )
-        aside.content_hash = compute_aside_hash(
-            str(aside.aside_id),
-            str(aside.parent_episode_id),
-            aside.parent_segment_id,
-            aside.initiated_by_human,
-            aside.target_agent_id,
-            aside.timestamp_utc.isoformat(),
-            aside.parent_hash,
+        aside.content_hash = compute_aside_hash_v2(
+            aside.aside_id, aside.parent_episode_id, parent_uuid, parent_content_hash,
+            aside.initiated_by_human, aside.target_agent_id, aside.timestamp_utc,
         )
 
         # STEP 3: Write AsideSegmentNode
@@ -2012,27 +2045,30 @@ def close_aside(
         )
         reference_scan_passed = len(external_refs) == 0
 
-        # STEP 3: Compute final content hash over the aside's closed state
-        final_content_hash = sha3_256(
-            b"ASIDE_FINAL:" +
-            f"{aside_id}:{','.join(sorted(content_refs))}:{close_reason}".encode()
-        )
-
-        # STEP 4: Duration
+        # STEP 3: Duration
         created_at_str = aside_data.get("timestamp_utc", "")
         duration_ms = _compute_branch_duration_ms(created_at_str)
 
-        # STEP 5: Write AsideTerminusNode
+        # STEP 4: The terminus binds what the channel produced — the content hashes
+        # of the Segments written inside it, in the order written — the close
+        # reason, the scan outcome and the external references found (SPEC §19.4.1).
+        from astp.adapters.neo4j.queries import content_hashes_in_sequence_order, segment_content_hashes_sync
+        produced = content_hashes_in_sequence_order(segment_content_hashes_sync(driver, content_refs), content_refs)
         terminus = AsideTerminusNode(
             aside_id=aside_id,
             parent_episode_id=parent_episode_id,
             close_reason=close_reason,
-            final_content_hash=final_content_hash,
+            final_content_hash="",   # filled below
             reference_scan_passed=reference_scan_passed,
             external_references_found=external_refs,
             notification_targets=notification_targets or [],
             duration_ms=duration_ms,
             termination_status=AsideTerminationStatus.CLOSED,
+        )
+        terminus.final_content_hash = compute_aside_terminus_hash_v2(
+            terminus.aside_terminus_id, UUID(str(aside_id)), UUID(str(parent_episode_id)),
+            str(aside_data.get("content_hash") or ""), produced, close_reason, reference_scan_passed,
+            [UUID(str(x)) for x in external_refs if _is_uuid(x)], terminus.termination_status.value, terminus.timestamp_utc,
         )
         write_aside_terminus_sync(driver, terminus)
 
@@ -2040,7 +2076,7 @@ def close_aside(
         forward_delta = {
             "aside_id": aside_id,
             "close_reason": close_reason,
-            "final_content_hash": final_content_hash,
+            "final_content_hash": terminus.final_content_hash,
             "reference_scan_passed": reference_scan_passed,
             "external_references_found": external_refs,
             "notification_targets": notification_targets or [],
@@ -2094,7 +2130,7 @@ def close_aside(
         return AsideCloseResult(
             aside_id=aside_id,
             aside_terminus_id=str(terminus.aside_terminus_id),
-            final_content_hash=final_content_hash,
+            final_content_hash=terminus.final_content_hash,
             reference_scan_passed=reference_scan_passed,
             external_references_found=external_refs,
             notification_targets=notification_targets or [],
@@ -2177,7 +2213,13 @@ def create_soliloquy(
                 )
                 return None
 
-        # STEP 2: Create SoliloquySegmentNode
+        parent = _parent_segment_for_side_channel(driver, parent_segment_id)
+        if parent is None:
+            return None
+        parent_uuid, parent_content_hash = parent
+
+        # STEP 2: Create SoliloquySegmentNode — one construction (SPEC §19.4.2); the
+        # content-hash policy no longer selects a hash form.
         soliloquy = SoliloquySegmentNode(
             parent_episode_id=parent_episode_id,
             parent_segment_id=parent_segment_id,
@@ -2185,15 +2227,11 @@ def create_soliloquy(
             initiated_by_agent=initiated_by_agent,
             visibility_policy=policy,
             deliberation_chain=deliberation_chain or [],
+            parent_hash=parent_content_hash,
         )
-        soliloquy.content_hash = compute_soliloquy_content_hash(
-            str(soliloquy.soliloquy_id),
-            str(soliloquy.parent_episode_id),
-            soliloquy.parent_segment_id,
-            soliloquy.initiated_by_agent,
-            soliloquy.timestamp_utc.isoformat(),
-            soliloquy.deliberation_chain,
-            policy,
+        soliloquy.content_hash = compute_soliloquy_hash_v2(
+            soliloquy.soliloquy_id, soliloquy.parent_episode_id, parent_uuid, parent_content_hash,
+            soliloquy.initiated_by_agent, soliloquy.timestamp_utc,
         )
 
         # STEP 3: Write SoliloquySegmentNode
@@ -2326,9 +2364,20 @@ def conclude_soliloquy(
             else list(sol_data.get("deliberation_chain") or [])
         )
 
-        # STEP 2: Compute chain hash + conclusion hash
-        chain_hash = compute_deliberation_chain_hash(
-            soliloquy_id, deliberation_chain,
+        # STEP 2: The deliberation chain is bound by content, not by name: the
+        # deliberation Segments' content hashes in the order written (SPEC §19.4.3).
+        # The merge target must be a UUID — it is bound as one.
+        if not _is_uuid(merged_into_segment_id):
+            logger.error(f"merged_into_segment_id {merged_into_segment_id!r} is not a UUID")
+            return None
+        from astp.adapters.neo4j.queries import content_hashes_in_sequence_order, segment_content_hashes_sync
+        found = segment_content_hashes_sync(driver, deliberation_chain)
+        missing = [x for x in deliberation_chain if str(x) not in found]
+        if missing:
+            logger.error(f"deliberation chain names Segments that do not exist or have no content hash: {missing}")
+            return None
+        chain_hash = compute_deliberation_chain_hash_v2(
+            UUID(str(soliloquy_id)), content_hashes_in_sequence_order(found, deliberation_chain),
         )
         ts = datetime.now(timezone.utc)
 
@@ -2343,11 +2392,9 @@ def conclude_soliloquy(
             termination_status=SoliloquyTerminationStatus.ABSORBED,
             timestamp_utc=ts,
         )
-        conclusion.conclusion_content_hash = compute_soliloquy_conclusion_hash(
-            str(conclusion.conclusion_id),
-            soliloquy_id,
-            conclusion_summary,
-            ts.isoformat(),
+        conclusion.conclusion_content_hash = compute_soliloquy_conclusion_hash_v2(
+            conclusion.conclusion_id, UUID(str(soliloquy_id)), UUID(str(parent_episode_id)), chain_hash,
+            conclusion_summary, UUID(str(merged_into_segment_id)), conclusion.termination_status.value, ts,
         )
 
         # STEP 3: Write SoliloquyConclusionNode

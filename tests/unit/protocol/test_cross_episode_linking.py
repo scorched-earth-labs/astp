@@ -190,13 +190,23 @@ class TestContentHash:
         link.quarantine_resolved_at = datetime.now(timezone.utc)
         assert compute_episode_link_content_hash(link) == baseline
 
-    def test_includes_health_state(self):
-        """Health state IS in the preimage so drift detection ties
-        cryptographically to the anchor state at write time."""
+    def test_excludes_health_state_and_binds_the_ends_roots(self):
+        """5.0.0 (SPEC §20 →2): the hash is fixed at creation. Health, quarantine
+        and created_by are lifecycle and provenance — the audit chain's — and a
+        4.x hash that moved with health committed to nothing stable. What the
+        hash does bind is each end's Episode root when that end was sealed."""
         link = _make_link()
         baseline = compute_episode_link_content_hash(link)
         link.health_state = LinkHealthState.STALE
+        link.created_by = "someone-else"
+        assert compute_episode_link_content_hash(link) == baseline
+        link.source_episode_root = "ab" * 32
         assert compute_episode_link_content_hash(link) != baseline
+        # the 4.x form is retained, for verifying links already written, and did move with health
+        from astp.core.cross_episode import compute_episode_link_content_hash_4x
+        link = _make_link(); old = compute_episode_link_content_hash_4x(link)
+        link.health_state = LinkHealthState.STALE
+        assert compute_episode_link_content_hash_4x(link) != old
 
     def test_includes_link_strength(self):
         link = _make_link(link_strength=0.5)

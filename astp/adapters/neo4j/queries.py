@@ -25,6 +25,8 @@ import logging
 import os
 from typing import Any, Optional
 
+from astp.protocol.errors import AdapterWriteError, AriadneProtocolError
+
 logger = logging.getLogger("astp.adapters.neo4j.queries")
 
 
@@ -1246,3 +1248,36 @@ async def list_conformance_declarations(
             return [dict(r["declaration"]) for r in result]
 
     return await asyncio.to_thread(_query)
+
+
+# ── content-hash lookups for the 5.0.0 side-channel constructions ────────────
+
+def segment_content_hashes_sync(driver, segment_ids) -> dict:
+    """``segment_id -> (sequence_index, content_hash)`` for the Segments that
+    exist among ``segment_ids``. Used to bind a parent Segment's content into an
+    aside or soliloquy hash (SPEC §19.4) and to hash a deliberation chain or an
+    aside's produced content by *content*, in ``sequence_index`` order."""
+    ids = [str(i) for i in segment_ids]
+    if not ids:
+        return {}
+    try:
+        with driver.session() as session:
+            rows = session.run(
+                """
+                MATCH (s:AriadneSegment) WHERE s.segment_id IN $ids AND s.content_hash IS NOT NULL
+                RETURN s.segment_id AS id, s.sequence_index AS seq, s.content_hash AS h
+                """,
+                {"ids": ids},
+            )
+            return {r["id"]: (r["seq"], r["h"]) for r in rows}
+    except AriadneProtocolError:
+        raise
+    except Exception as e:
+        raise AdapterWriteError(f"segment_content_hashes_sync: {e}") from e
+
+
+def content_hashes_in_sequence_order(found: dict, segment_ids) -> list:
+    """The content hashes of ``segment_ids`` present in ``found``, ordered by
+    ``sequence_index`` — the order the Segments were written."""
+    present = [found[str(i)] for i in segment_ids if str(i) in found]
+    return [h for _, h in sorted(present, key=lambda t: (t[0] is None, t[0]))]
