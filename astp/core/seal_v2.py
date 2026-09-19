@@ -41,6 +41,8 @@ What changes, and why (design Episode 4b9a779e-be46-4d61-872e-fd76545aa901):
 """
 
 from datetime import datetime
+
+from pydantic import BaseModel
 from typing import Iterable, List, Optional
 from uuid import UUID
 
@@ -251,3 +253,97 @@ def check_seal_record(*, sealed_at: Optional[datetime], closed_at: Optional[date
         raise SealWithoutRecord("sealed_at is set and no crystallization record is bound to the node")
     if closed_at is not None and sealed_at < closed_at:
         raise SealWithoutRecord(f"sealed_at {sealed_at.isoformat()} precedes closed_at {closed_at.isoformat()}")
+
+
+# ── The seal, as a runtime computes and a verifier reproduces it ─────────────────
+
+class SegmentSealInput(BaseModel):
+    """The six stored fields of a Segment that a version 2 seal reads (SPEC §5.2).
+    ``content_hash`` is the stored value; the leaf hash is computed here, from
+    these fields, never from a stored version 1 leaf hash."""
+    node_id: UUID
+    node_type: str = "segment"
+    schema_version: str
+    sequence_index: int
+    content_hash: str
+    parent_node_id: Optional[UUID] = None
+
+
+class SealV2(BaseModel):
+    """A version 2 seal and the identifiers that name its construction. A runtime
+    stamps the delta from this record, never from a module-level 'current'
+    constant, so the identifiers cannot disagree with the roots."""
+    episode_id: UUID
+    spine_root: str
+    signal_manifest_hash: str
+    structural_manifest_hash: str
+    exclusion_hash: str
+    episode_root_hash: str
+    leaf_count: int
+    spine_algorithm_version: int = SPINE_ALGORITHM_VERSION_2
+    ordering_version: int = 2
+    hash_version: int = 2
+
+
+def compute_episode_seal_v2(
+    episode_id: UUID,
+    segments: Iterable[SegmentSealInput],
+    *,
+    signal_content_hashes: Iterable[str] = (),
+    excluded_content_hashes: Iterable[str] = (),
+    structural_member_hashes: Iterable[str] = (),
+) -> SealV2:
+    """Seal an Episode under ``spine_algorithm_version`` 2 from stored fields.
+
+    ``segments`` are the non-ephemeral Segments (any order; they are sorted by
+    ``sequence_index`` here, which is unique per Episode). ``signal_content_hashes``
+    are the SPINE-placed Signals', ``excluded_content_hashes`` the EPHEMERAL
+    Segments', ``structural_member_hashes`` the ``:v2:`` member hashes of §5.7.1.
+    Refuses an Episode with no spine leaf (the root of an empty list is
+    undefined) and a duplicated ``sequence_index``."""
+    segs = sorted(segments, key=lambda s: s.sequence_index)
+    if not segs:
+        raise ValueError("an Episode with no non-ephemeral Segment has no spine root and cannot be sealed")
+    seen = set()
+    for s in segs:
+        if s.sequence_index in seen:
+            raise ValueError(f"duplicate sequence_index {s.sequence_index}: the leaf order is not total")
+        seen.add(s.sequence_index)
+    leaves = [compute_leaf_hash_v2(s.node_id, s.node_type, s.schema_version, s.sequence_index, s.content_hash, s.parent_node_id)
+              for s in segs]
+    spine_root = compute_spine_root_sav2(leaves)
+    sig = compute_signal_manifest_hash_v2(signal_content_hashes)
+    exc = compute_exclusion_hash_v2(excluded_content_hashes)
+    st = compute_structural_manifest_hash(structural_member_hashes)
+    return SealV2(
+        episode_id=episode_id, spine_root=spine_root, signal_manifest_hash=sig, structural_manifest_hash=st,
+        exclusion_hash=exc, episode_root_hash=compute_episode_root_hash_v2(episode_id, spine_root, sig, st, exc),
+        leaf_count=len(leaves),
+    )
+
+
+def reproduce_episode_root(
+    *,
+    spine_algorithm_version: int,
+    episode_id,
+    spine_root: str,
+    signal_content_hashes: Iterable[str],
+    excluded_content_hashes: Iterable[str],
+    structural_member_hashes: Iterable[str] = (),
+) -> str:
+    """Recompute a sealed Episode root under the construction its
+    ``spine_algorithm_version`` names (SPEC §5.7, §5.7.2, §9.3), given a spine
+    root already reproduced for that version (``astp.core.schema.reproduce_spine_root``
+    for 0 and 1, :func:`compute_spine_root_sav2` for 2). Version 2 binds the
+    Episode's UUID and the structural manifest; versions 0 and 1 bind neither.
+    Unknown versions are refused."""
+    if spine_algorithm_version in (0, 1):
+        from astp.core.schema import compute_episode_root_hash, compute_exclusion_hash, compute_signal_manifest_hash
+        return compute_episode_root_hash(spine_root, compute_signal_manifest_hash(list(signal_content_hashes)),
+                                         compute_exclusion_hash(list(excluded_content_hashes)))
+    if spine_algorithm_version == SPINE_ALGORITHM_VERSION_2:
+        return compute_episode_root_hash_v2(
+            episode_id if isinstance(episode_id, UUID) else UUID(str(episode_id)), spine_root,
+            compute_signal_manifest_hash_v2(signal_content_hashes), compute_structural_manifest_hash(structural_member_hashes),
+            compute_exclusion_hash_v2(excluded_content_hashes))
+    raise ValueError(f"unknown spine_algorithm_version {spine_algorithm_version!r}")
