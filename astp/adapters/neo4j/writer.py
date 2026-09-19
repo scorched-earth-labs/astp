@@ -1057,8 +1057,13 @@ def write_document_node_sync(driver, document: DocumentNode) -> None:
 # ── HITL Event Writer (SPEC §4.6) ────────────────────────────────────────────
 
 
-def write_hitl_event_invocation_sync(driver, hitl_event) -> None:
+def write_hitl_event_invocation_sync(driver, hitl_event, context_json: Optional[str] = None) -> None:
     """Write Phase 1 of a HITL event — the invocation record.
+
+    ``context_json`` is the document the ``context_hash`` was computed over. It
+    is stored on the node so that the event can be a structural-manifest member
+    under a version 2 seal (SPEC §5.7.1, ``HITL_CONTEXT:v2:`` binds it); a
+    terminal event stored without it cannot enter a version 2 seal.
 
     Creates an AriadneHITLEvent node in INVOKED status and a HITL_GATE
     edge from the episode. The node is immutable after this write until
@@ -1085,8 +1090,10 @@ def write_hitl_event_invocation_sync(driver, hitl_event) -> None:
                   h.context_hash          = $context_hash,
                   h.invocation_signature  = $invocation_signature,
                   h.invocation_key_fingerprint = $invocation_key_fingerprint,
-                  h.schema_version        = $schema_version
+                  h.schema_version        = $schema_version,
+                  h.context_json          = $context_json
             """, {
+                "context_json": context_json,
                 "hitl_event_id": str(hitl_event.hitl_event_id),
                 "episode_id": str(hitl_event.episode_id),
                 "hitl_request_id": hitl_event.hitl_request_id,
