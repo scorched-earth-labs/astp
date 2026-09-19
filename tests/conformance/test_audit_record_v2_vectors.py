@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Conformance: canonical JSON and the version 2 audit record (SPEC 5.0.0 DRAFT).
+Conformance: canonical JSON and the version 2 audit record (SPEC 5.0.0 §5.1.2, §8).
 
 Every vector is checked twice — against the library, and against a reference
 written from the draft text that imports nothing from ``astp``: ``hashlib``,

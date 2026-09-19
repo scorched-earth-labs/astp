@@ -13,7 +13,7 @@
 # limitations under the License.
 """
 Conformance: §19 side-channel content hashes and the Episode link
-(SPEC 5.0.0 DRAFT §13). Each vector is checked against the library and
+(SPEC 5.0.0 §19.4, §20 §2). Each vector is checked against the library and
 against a reference written from the draft text with ``hashlib`` and
 ``struct`` alone, importing nothing from ``astp``.
 """

@@ -13,7 +13,7 @@
 # limitations under the License.
 """
 Conformance: witness commitment, witness validity and the anchor commitment
-(SPEC 5.0.0 DRAFT §14). The commitment reference is written from the draft text
+(SPEC 5.0.0 §16.3–§16.4, G-11, G-12). The commitment reference is written from the SPEC text
 with ``hashlib`` alone; signature verification uses ``cryptography``'s Ed25519
 directly, importing nothing from ``astp``.
 """
