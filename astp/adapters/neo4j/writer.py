@@ -13,7 +13,9 @@
 # limitations under the License.
 """
 ASTP Neo4j write operations.
-All writes are gated by ARIADNE_ENABLED feature flag.
+Every writer raises AdapterWriteError (chained) when the store refuses or the
+write fails part way; nothing is swallowed and nothing is gated by a flag —
+the host decides whether to call the adapter (SPEC §15 item 7).
 
 IMPORTANT: Neo4j session.run() signature is run(query, parameters=None, **kwargs).
 All parameters are passed as an explicit dict (positional arg) to avoid collisions
@@ -47,15 +49,9 @@ from astp.core.schema import (
     validate_signal_classification,
 )
 
+from astp.protocol.errors import AdapterWriteError, AriadneProtocolError
+
 logger = logging.getLogger("astp.adapters.neo4j")
-
-ARIADNE_ENABLED = os.getenv("ARIADNE_ENABLED", "false").lower() == "true"
-
-
-def _ariadne_guard() -> bool:
-    if not ARIADNE_ENABLED:
-        return False
-    return True
 
 
 # ── Schema Initialization ────────────────────────────────────────────────────
@@ -201,11 +197,7 @@ ON CREATE SET
 
 async def initialize_ariadne_schema(driver) -> None:
     """Create all Ariadne constraints, indexes, and schema version seed.
-    Called on startup when ARIADNE_ENABLED=true."""
-    if not _ariadne_guard():
-        logger.info("Ariadne schema init skipped (ARIADNE_ENABLED=false)")
-        return
-
+    Called on startup."""
     logger.info("Initializing Ariadne Neo4j schema...")
     async with driver.session() as session:
         for constraint in SCHEMA_CONSTRAINTS:
@@ -245,8 +237,6 @@ def _episode_params(episode: EpisodeNode) -> dict:
 
 
 async def create_episode_node(driver, episode: EpisodeNode) -> None:
-    if not _ariadne_guard():
-        return
     params = _episode_params(episode)
     async with driver.session() as session:
         await session.run("""
@@ -274,8 +264,6 @@ async def create_episode_node(driver, episode: EpisodeNode) -> None:
 
 
 async def create_segment_node(driver, segment: SegmentNode, episode_status: EpisodeStatus) -> None:
-    if not _ariadne_guard():
-        return
     enforce_G1_write_guard(episode_status)  # Rule G-1
     from astp.core.crystallization import enforce_crystallization_lock_guard
     enforce_crystallization_lock_guard(episode_status.value)  # crystallization lock
@@ -333,8 +321,6 @@ async def create_signal_node(
     episode_status: EpisodeStatus,
     triggered_segment_ids: list[str] | None = None,
 ) -> None:
-    if not _ariadne_guard():
-        return
     enforce_G1_write_guard(episode_status)  # Rule G-1
     from astp.core.crystallization import enforce_crystallization_lock_guard
     enforce_crystallization_lock_guard(episode_status.value)  # crystallization lock
@@ -401,8 +387,6 @@ async def create_signal_node(
 
 
 async def create_seal_node(driver, seal: SealNode) -> None:
-    if not _ariadne_guard():
-        return
     params = {
         "seal_id": str(seal.seal_id),
         "episode_id": str(seal.episode_id),
@@ -487,9 +471,6 @@ async def update_episode_status(driver, episode_id, status, **fields) -> None:
     that quietly fails to record `sealed_at` looks identical to one that
     recorded it.
     """
-    if not _ariadne_guard():
-        return
-
     unknown = sorted(set(fields) - _UPDATABLE_EPISODE_FIELDS)
     if unknown:
         raise AriadneGovernanceError(
@@ -516,8 +497,6 @@ async def create_closure_record_node(driver, closure: EpisodeClosureRecord) -> N
 
     The SEALS_EPISODE edge runs closure -> episode.
     """
-    if not _ariadne_guard():
-        return
     params = {
         "closure_id": str(closure.closure_id),
         "episode_id": str(closure.episode_id),
@@ -571,8 +550,6 @@ async def create_consultation_node(driver, consultation: ConsultationNode) -> No
     G-1 is not enforced: a consultation is a branch event, not a spine append,
     so it does not extend the segment chain.
     """
-    if not _ariadne_guard():
-        return
     params = {
         "consultation_id": str(consultation.consultation_id),
         "episode_id": str(consultation.episode_id),
@@ -632,8 +609,6 @@ async def create_exchange_entry_node(driver, entry: ExchangeEntry) -> None:
     integrity is verifiable is a protocol concern, whatever the interaction
     pattern layered on top is called.
     """
-    if not _ariadne_guard():
-        return
     params = {
         "entry_id": str(entry.entry_id),
         "consultation_id": str(entry.consultation_id),
@@ -681,8 +656,6 @@ async def create_consultation_participant_node(
     records of one consultation from opposite sides, neither duplicating the
     other.
     """
-    if not _ariadne_guard():
-        return
     params = {
         "participant_id": str(participant.participant_id),
         "consultation_id": str(participant.consultation_id),
@@ -734,8 +707,6 @@ async def create_amendment_link_node(driver, amendment: AmendmentLink) -> None:
     Nothing about the sealed record changes: the amendment is a new episode
     beside it, which is the whole point of reopening rather than editing.
     """
-    if not _ariadne_guard():
-        return
     params = {
         "amendment_id": str(amendment.amendment_id),
         "source_episode_id": str(amendment.source_episode_id),
@@ -791,8 +762,6 @@ async def create_attachment_node(driver, attachment: AttachmentNode) -> None:
     it were content would forbid attaching to a closed episode for no integrity
     reason, since nothing about the sealed record changes.
     """
-    if not _ariadne_guard():
-        return
     params = {
         "attachment_id": str(attachment.attachment_id),
         "episode_id": str(attachment.episode_id),
@@ -836,8 +805,6 @@ async def create_codicil_node(driver, codicil: CodicilNode) -> None:
     the guard would make the node type unwritable in the only state it exists
     for.
     """
-    if not _ariadne_guard():
-        return
     params = {
         "codicil_id": str(codicil.codicil_id),
         "episode_id": str(codicil.episode_id),
@@ -871,8 +838,6 @@ async def create_codicil_node(driver, codicil: CodicilNode) -> None:
 
 
 async def create_exclusion_record(driver, exclusion: ExclusionRecord) -> None:
-    if not _ariadne_guard():
-        return
     params = {
         "exclusion_id": str(exclusion.exclusion_id),
         "episode_id": str(exclusion.episode_id),
@@ -900,8 +865,6 @@ async def create_segment_reference_edge(
     reference_type: ReferenceType,
 ) -> None:
     """REFERENCES edge: SegmentNode -> SegmentNode."""
-    if not _ariadne_guard():
-        return
     async with driver.session() as session:
         await session.run("""
             MATCH (a:AriadneSegment {segment_id: $from_id})
@@ -924,8 +887,6 @@ async def create_branch_episode(
     Creates a branch episode and the BRANCHES_FROM edge.
     The parent episode must be in ACTIVE state.
     """
-    if not _ariadne_guard():
-        return
     async with driver.session() as session:
         # Verify the parent episode is ACTIVE
         result = await session.run("""
@@ -970,9 +931,6 @@ def write_attachment_node_sync(driver, attachment: AttachmentNode) -> None:
     to `execute_attachment_commit`. Silently attaching without an entry is the
     gap §12.4.2 forbids absorbing.
     """
-    if not _ariadne_guard():
-        return
-
     params = {
         "attachment_id": str(attachment.attachment_id),
         "episode_id": str(attachment.episode_id),
@@ -1005,8 +963,11 @@ def write_attachment_node_sync(driver, attachment: AttachmentNode) -> None:
                 "attachment_id": str(attachment.attachment_id),
                 "attached_at": attachment.attached_at.isoformat(),
             })
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: attachment write failed (non-fatal): {e}")
+        logger.error(f"Ariadne: attachment write failed (non-fatal): {e}")
+        raise AdapterWriteError(f"write_attachment_node_sync: {e}") from e
 
 
 def write_document_node_sync(driver, document: DocumentNode) -> None:
@@ -1017,9 +978,6 @@ def write_document_node_sync(driver, document: DocumentNode) -> None:
     Used both for user uploads and for agent-produced artifacts that the
     host application publishes into an episode.
     """
-    if not _ariadne_guard():
-        return
-
     try:
         with driver.session() as session:
             # Verify episode exists
@@ -1086,8 +1044,11 @@ def write_document_node_sync(driver, document: DocumentNode) -> None:
                 f"{str(document.episode_id)[:8]}..."
             )
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write document node: {e}")
+        logger.error(f"Ariadne: Failed to write document node: {e}")
+        raise AdapterWriteError(f"write_document_node_sync: {e}") from e
 
 
 # ── HITL Event Writer (SPEC §4.6) ────────────────────────────────────────────
@@ -1102,9 +1063,6 @@ def write_hitl_event_invocation_sync(driver, hitl_event) -> None:
 
     Sync variant — for callers running in a synchronous context.
     """
-    if not _ariadne_guard():
-        return
-
     try:
         from astp.core.schema import ARIADNE_SCHEMA_VERSION
 
@@ -1175,8 +1133,11 @@ def write_hitl_event_invocation_sync(driver, hitl_event) -> None:
             f"(episode={str(hitl_event.episode_id)[:8]}...)"
         )
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write HITL invocation: {e}")
+        logger.error(f"Ariadne: Failed to write HITL invocation: {e}")
+        raise AdapterWriteError(f"write_hitl_event_invocation_sync: {e}") from e
 
 
 def write_hitl_event_resolution_sync(
@@ -1200,9 +1161,6 @@ def write_hitl_event_resolution_sync(
 
     Sync variant — for callers running in a synchronous context.
     """
-    if not _ariadne_guard():
-        return
-
     try:
         with driver.session() as session:
             result = session.run("""
@@ -1245,8 +1203,11 @@ def write_hitl_event_resolution_sync(
                     f"or not in INVOKED status — resolution not recorded"
                 )
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write HITL resolution: {e}")
+        logger.error(f"Ariadne: Failed to write HITL resolution: {e}")
+        raise AdapterWriteError(f"write_hitl_event_resolution_sync: {e}") from e
 
 
 # ── Branch/Fork/Merge Writer (Phase 1) ──────────────────────────────────────
@@ -1254,9 +1215,6 @@ def write_hitl_event_resolution_sync(
 
 def write_branch_point_sync(driver, branch_point) -> None:
     """Write a BranchPointNode + BRANCH_ORIGIN edge from episode."""
-    if not _ariadne_guard():
-        return
-
     try:
         from astp.core.schema import ARIADNE_SCHEMA_VERSION
 
@@ -1327,15 +1285,15 @@ def write_branch_point_sync(driver, branch_point) -> None:
             f"(episode={str(branch_point.episode_id)[:8]}...)"
         )
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write BranchPoint: {e}")
+        logger.error(f"Ariadne: Failed to write BranchPoint: {e}")
+        raise AdapterWriteError(f"write_branch_point_sync: {e}") from e
 
 
 def write_branch_terminus_sync(driver, terminus) -> None:
     """Write a BranchTerminusNode marking branch end."""
-    if not _ariadne_guard():
-        return
-
     try:
         with driver.session() as session:
             session.run("""
@@ -1386,15 +1344,15 @@ def write_branch_terminus_sync(driver, terminus) -> None:
             f"(branch={str(terminus.branch_id)[:8]}...)"
         )
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write BranchTerminus: {e}")
+        logger.error(f"Ariadne: Failed to write BranchTerminus: {e}")
+        raise AdapterWriteError(f"write_branch_terminus_sync: {e}") from e
 
 
 def write_audit_record_sync(driver, audit) -> None:
     """Write an AuditRecord to the tamper-evident audit chain."""
-    if not _ariadne_guard():
-        return
-
     try:
         import json
 
@@ -1460,15 +1418,15 @@ def write_audit_record_sync(driver, audit) -> None:
             f"(episode={audit.episode_id[:8]}...)"
         )
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write AuditRecord: {e}")
+        logger.error(f"Ariadne: Failed to write AuditRecord: {e}")
+        raise AdapterWriteError(f"write_audit_record_sync: {e}") from e
 
 
 def write_intent_record_sync(driver, intent) -> None:
     """Write an IntentRecord for concurrent operation guard."""
-    if not _ariadne_guard():
-        return
-
     try:
         with driver.session() as session:
             session.run("""
@@ -1492,8 +1450,11 @@ def write_intent_record_sync(driver, intent) -> None:
                 "result_node_id": intent.result_node_id,
             })
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write IntentRecord: {e}")
+        logger.error(f"Ariadne: Failed to write IntentRecord: {e}")
+        raise AdapterWriteError(f"write_intent_record_sync: {e}") from e
 
 
 def acquire_intent_sync(driver, idempotency_key: str, intent_type: str, initiator_id: str):
@@ -1501,9 +1462,6 @@ def acquire_intent_sync(driver, idempotency_key: str, intent_type: str, initiato
 
     Returns: (IntentRecord dict, is_new: bool)
     """
-    if not _ariadne_guard():
-        return None, False
-
     try:
         from uuid import uuid4
         from datetime import datetime, timezone
@@ -1544,16 +1502,15 @@ def acquire_intent_sync(driver, idempotency_key: str, intent_type: str, initiato
 
             return {"intent_id": intent_id, "idempotency_key": idempotency_key, "status": "PENDING"}, True
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to acquire intent: {e}")
-        return None, False
+        logger.error(f"Ariadne: Failed to acquire intent: {e}")
+        raise AdapterWriteError(f"acquire_intent_sync: {e}") from e
 
 
 def complete_intent_sync(driver, idempotency_key: str, result_node_id: str) -> None:
     """Mark an intent record as COMPLETE with the result node ID."""
-    if not _ariadne_guard():
-        return
-
     try:
         from datetime import datetime, timezone
 
@@ -1570,8 +1527,11 @@ def complete_intent_sync(driver, idempotency_key: str, result_node_id: str) -> N
                 "result_node_id": result_node_id,
             })
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to complete intent: {e}")
+        logger.error(f"Ariadne: Failed to complete intent: {e}")
+        raise AdapterWriteError(f"complete_intent_sync: {e}") from e
 
 
 # ── Branch/Fork/Merge Writer (Phase 2) ──────────────────────────────────────
@@ -1583,9 +1543,6 @@ def write_fork_point_sync(driver, fork_point) -> None:
     A single create_fork() call writes N ForkPointNodes sharing the same
     fork_id. Each ForkPoint anchors a new Episode.
     """
-    if not _ariadne_guard():
-        return
-
     try:
         from astp.core.schema import ARIADNE_SCHEMA_VERSION
 
@@ -1651,8 +1608,11 @@ def write_fork_point_sync(driver, fork_point) -> None:
             f"(fork={str(fork_point.fork_id)[:8]}...)"
         )
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write ForkPoint: {e}")
+        logger.error(f"Ariadne: Failed to write ForkPoint: {e}")
+        raise AdapterWriteError(f"write_fork_point_sync: {e}") from e
 
 
 def write_departure_fork_episode_sync(driver, episode) -> None:
@@ -1660,8 +1620,6 @@ def write_departure_fork_episode_sync(driver, episode) -> None:
     fork provenance. Sync counterpart of create_episode_node, extended with the
     Phase-D fork_* provenance fields so episode + provenance land atomically inside
     create_departure_fork(). (Ariadne BFM Phase D.)"""
-    if not _ariadne_guard():
-        return
     try:
         with driver.session() as session:
             session.run("""
@@ -1719,15 +1677,16 @@ def write_departure_fork_episode_sync(driver, episode) -> None:
             f"Ariadne: Departure-fork Episode {str(episode.episode_id)[:8]}... "
             f"created ACTIVE (origin={str(episode.fork_origin_episode_id)[:8] if episode.fork_origin_episode_id else '?'}...)"
         )
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write departure-fork episode: {e}")
+        logger.error(f"Ariadne: Failed to write departure-fork episode: {e}")
+        raise AdapterWriteError(f"write_departure_fork_episode_sync: {e}") from e
 
 
 def write_departure_fork_point_sync(driver, fp) -> None:
     """Write a DepartureForkPointNode to the origin spine + FORK_ORIGIN edge
     (origin Episode -> departure fork point). Single node (no siblings)."""
-    if not _ariadne_guard():
-        return
     try:
         from astp.core.schema import ARIADNE_SCHEMA_VERSION
         with driver.session() as session:
@@ -1781,14 +1740,15 @@ def write_departure_fork_point_sync(driver, fp) -> None:
             f"Ariadne: DepartureForkPoint {str(fp.fork_point_id)[:8]}... "
             f"[{fp.fork_creation_trigger.value}] (fork={str(fp.fork_id)[:8]}...)"
         )
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write DepartureForkPoint: {e}")
+        logger.error(f"Ariadne: Failed to write DepartureForkPoint: {e}")
+        raise AdapterWriteError(f"write_departure_fork_point_sync: {e}") from e
 
 
 def mark_departure_fork_status_sync(driver, fork_episode_id: str, status: str) -> None:
     """Update a departure-fork Episode's fork_status (ACTIVE -> COMPLETED | ABANDONED)."""
-    if not _ariadne_guard():
-        return
     try:
         from datetime import datetime, timezone
         with driver.session() as session:
@@ -1801,8 +1761,11 @@ def mark_departure_fork_status_sync(driver, fork_episode_id: str, status: str) -
                 "ts": datetime.now(timezone.utc).isoformat(),
             })
         logger.info(f"Ariadne: DepartureFork {str(fork_episode_id)[:8]}... -> {status}")
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to update departure-fork status: {e}")
+        logger.error(f"Ariadne: Failed to update departure-fork status: {e}")
+        raise AdapterWriteError(f"mark_departure_fork_status_sync: {e}") from e
 
 
 def set_departure_fork_anchor_index_sync(driver, fork_episode_id: str, anchor_index: int) -> None:
@@ -1814,8 +1777,6 @@ def set_departure_fork_anchor_index_sync(driver, fork_episode_id: str, anchor_in
     Class-B corruption indicator). Idempotent — re-patching to the same value is safe, so
     a patch-only retry after a STEP-5-done/STEP-6-missing partial failure is a clean fix.
     A write primitive; the host application's recovery orchestration may call it directly."""
-    if not _ariadne_guard():
-        return
     try:
         with driver.session() as session:
             session.run("""
@@ -1829,15 +1790,16 @@ def set_departure_fork_anchor_index_sync(driver, fork_episode_id: str, anchor_in
             f"Ariadne: DepartureFork {str(fork_episode_id)[:8]}... "
             f"fork_anchor_index -> {anchor_index}"
         )
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to patch fork_anchor_index: {e}")
+        logger.error(f"Ariadne: Failed to patch fork_anchor_index: {e}")
+        raise AdapterWriteError(f"set_departure_fork_anchor_index_sync: {e}") from e
 
 
 def write_fork_return_node_sync(driver, frn) -> None:
     """Write a ForkReturnNode to the ORIGIN spine + FORK_RETURN edge (origin -> return
     node) + RETURNED_FROM edge (return node -> fork episode). Declarative return."""
-    if not _ariadne_guard():
-        return
     try:
         from astp.core.schema import ARIADNE_SCHEMA_VERSION
         with driver.session() as session:
@@ -1892,8 +1854,11 @@ def write_fork_return_node_sync(driver, frn) -> None:
             f"Ariadne: ForkReturn {str(frn.fork_return_id)[:8]}... "
             f"[{frn.return_type.value}] (fork={str(frn.fork_id)[:8]}...)"
         )
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write ForkReturn: {e}")
+        logger.error(f"Ariadne: Failed to write ForkReturn: {e}")
+        raise AdapterWriteError(f"write_fork_return_node_sync: {e}") from e
 
 
 # ── Phase D — Orphan-recovery write primitives (§19.3.7) ─────────────────────
@@ -1907,8 +1872,6 @@ def write_fork_orphan_marker_sync(driver, marker) -> None:
     the origin spine's Merkle chain — writing it does not alter origin spine integrity. Dedup:
     MERGE on fork_id → ONE marker per orphaned fork (a re-detection sweep never piles up
     duplicates). Read-only after write; excluded from departure-registry queries."""
-    if not _ariadne_guard():
-        return
     try:
         from astp.core.schema import ARIADNE_SCHEMA_VERSION
         with driver.session() as session:
@@ -1951,16 +1914,17 @@ def write_fork_orphan_marker_sync(driver, marker) -> None:
             f"Ariadne: ForkOrphanMarker [{marker.orphan_class.value}] "
             f"(fork={str(marker.fork_id)[:8]}...) review={marker.requires_operator_review}"
         )
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write ForkOrphanMarker: {e}")
+        logger.error(f"Ariadne: Failed to write ForkOrphanMarker: {e}")
+        raise AdapterWriteError(f"write_fork_orphan_marker_sync: {e}") from e
 
 
 def mark_departure_fork_point_orphaned_sync(driver, fork_point_id: str) -> None:
     """Class-A recovery: flag a dangling DepartureForkPointNode (its fork episode is missing)
     as orphaned. Append-only — the point is NEVER deleted; the flag + the ForkOrphanMarker are
     the resolution artifacts."""
-    if not _ariadne_guard():
-        return
     try:
         with driver.session() as session:
             session.run("""
@@ -1968,8 +1932,11 @@ def mark_departure_fork_point_orphaned_sync(driver, fork_point_id: str) -> None:
                 SET fp.orphaned = true
             """, {"fork_point_id": str(fork_point_id)})
         logger.info(f"Ariadne: DepartureForkPoint {str(fork_point_id)[:8]}... flagged orphaned (Class A)")
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to flag departure fork point orphaned: {e}")
+        logger.error(f"Ariadne: Failed to flag departure fork point orphaned: {e}")
+        raise AdapterWriteError(f"mark_departure_fork_point_orphaned_sync: {e}") from e
 
 
 def write_retroactive_departure_fork_point_sync(driver, dfp, orphan_recovery_timestamp) -> None:
@@ -1987,8 +1954,6 @@ def write_retroactive_departure_fork_point_sync(driver, dfp, orphan_recovery_tim
     The point's content_hash is computed exactly as an on-time write, so a recovered point is
     byte-identical to one written on time (the retroactive flag is diagnostic metadata, outside
     the hash preimage)."""
-    if not _ariadne_guard():
-        return
     try:
         from astp.core.schema import ARIADNE_SCHEMA_VERSION
         ts = orphan_recovery_timestamp.isoformat() if hasattr(orphan_recovery_timestamp, "isoformat") else orphan_recovery_timestamp
@@ -2045,15 +2010,16 @@ def write_retroactive_departure_fork_point_sync(driver, dfp, orphan_recovery_tim
             f"Ariadne: RETROACTIVE DepartureForkPoint {str(dfp.fork_point_id)[:8]}... "
             f"written (Class-B recovery, fork={str(dfp.fork_id)[:8]}...)"
         )
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed retroactive departure fork point write: {e}")
+        logger.error(f"Ariadne: Failed retroactive departure fork point write: {e}")
+        raise AdapterWriteError(f"write_retroactive_departure_fork_point_sync: {e}") from e
 
 
 def mark_fork_episode_unanchored_sync(driver, fork_episode_id: str) -> None:
     """Class-B recovery (origin-unreachable path): a fork with no recoverable origin. Sets
     fork_orphaned=true + fork_orphan_class=UNANCHORED on the fork episode."""
-    if not _ariadne_guard():
-        return
     try:
         with driver.session() as session:
             session.run("""
@@ -2061,8 +2027,11 @@ def mark_fork_episode_unanchored_sync(driver, fork_episode_id: str) -> None:
                 SET e.fork_orphaned = true, e.fork_orphan_class = 'UNANCHORED'
             """, {"episode_id": str(fork_episode_id)})
         logger.info(f"Ariadne: Fork episode {str(fork_episode_id)[:8]}... marked UNANCHORED (Class B)")
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to mark fork episode unanchored: {e}")
+        logger.error(f"Ariadne: Failed to mark fork episode unanchored: {e}")
+        raise AdapterWriteError(f"mark_fork_episode_unanchored_sync: {e}") from e
 
 
 def correct_fork_status_by_orphan_recovery_sync(driver, fork_episode_id: str) -> None:
@@ -2071,8 +2040,6 @@ def correct_fork_status_by_orphan_recovery_sync(driver, fork_episode_id: str) ->
     status_corrected_by_orphan_recovery=true + status_corrected_at. The ABANDONED sub-case is a
     data-integrity violation (operator review, NOT auto-corrected) and is intentionally not
     written by this primitive — the caller guards on status before calling."""
-    if not _ariadne_guard():
-        return
     try:
         from datetime import datetime, timezone
         with driver.session() as session:
@@ -2086,8 +2053,11 @@ def correct_fork_status_by_orphan_recovery_sync(driver, fork_episode_id: str) ->
                 "ts": datetime.now(timezone.utc).isoformat(),
             })
         logger.info(f"Ariadne: Fork episode {str(fork_episode_id)[:8]}... status corrected -> COMPLETED (Class C)")
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to correct fork status by orphan recovery: {e}")
+        logger.error(f"Ariadne: Failed to correct fork status by orphan recovery: {e}")
+        raise AdapterWriteError(f"correct_fork_status_by_orphan_recovery_sync: {e}") from e
 
 
 def mark_fork_point_status_sync(driver, fork_point_id: str, status: str) -> None:
@@ -2095,9 +2065,6 @@ def mark_fork_point_status_sync(driver, fork_point_id: str, status: str) -> None
 
     status: 'ACTIVE' | 'PROMOTED' | 'DISCARDED'
     """
-    if not _ariadne_guard():
-        return
-
     try:
         from datetime import datetime, timezone
 
@@ -2111,15 +2078,15 @@ def mark_fork_point_status_sync(driver, fork_point_id: str, status: str) -> None
                 "status": status,
                 "resolved_at": datetime.now(timezone.utc).isoformat(),
             })
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to update fork point status: {e}")
+        logger.error(f"Ariadne: Failed to update fork point status: {e}")
+        raise AdapterWriteError(f"mark_fork_point_status_sync: {e}") from e
 
 
 def write_merge_point_sync(driver, merge_point) -> None:
     """Write a MergePointNode on the target spine with all three Merkle roots."""
-    if not _ariadne_guard():
-        return
-
     try:
         from astp.core.schema import ARIADNE_SCHEMA_VERSION
 
@@ -2204,15 +2171,15 @@ def write_merge_point_sync(driver, merge_point) -> None:
             f"target={merge_point.target_episode_id[:8]}...)"
         )
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write MergePoint: {e}")
+        logger.error(f"Ariadne: Failed to write MergePoint: {e}")
+        raise AdapterWriteError(f"write_merge_point_sync: {e}") from e
 
 
 def write_branch_return_edge_sync(driver, branch_return) -> None:
     """Write BRANCH_RETURN edge from BranchTerminus(MERGED) to MergePoint."""
-    if not _ariadne_guard():
-        return
-
     try:
         with driver.session() as session:
             session.run("""
@@ -2237,8 +2204,11 @@ def write_branch_return_edge_sync(driver, branch_return) -> None:
                 "timestamp_utc": branch_return.timestamp_utc.isoformat(),
             })
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write BranchReturnEdge: {e}")
+        logger.error(f"Ariadne: Failed to write BranchReturnEdge: {e}")
+        raise AdapterWriteError(f"write_branch_return_edge_sync: {e}") from e
 
 
 def find_common_ancestor_sync(
@@ -2251,9 +2221,6 @@ def find_common_ancestor_sync(
     Returns dict with common_ancestor_node_id (the BranchPoint's source segment)
     or None if no common ancestor found.
     """
-    if not _ariadne_guard():
-        return None
-
     try:
         with driver.session() as session:
             result = session.run("""
@@ -2278,9 +2245,11 @@ def find_common_ancestor_sync(
                 "anchor_merkle": record["anchor_merkle"],
             }
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: find_common_ancestor failed: {e}")
-        return None
+        logger.error(f"Ariadne: find_common_ancestor failed: {e}")
+        raise AdapterWriteError(f"find_common_ancestor_sync: {e}") from e
 
 
 # ── Phase 3 — Aside / Soliloquy Writers ─────────────────────────────────────
@@ -2288,9 +2257,6 @@ def find_common_ancestor_sync(
 
 def write_aside_sync(driver, aside) -> None:
     """Write an AsideSegmentNode + ASIDE_OPEN edge from parent episode."""
-    if not _ariadne_guard():
-        return
-
     try:
         from astp.core.schema import ARIADNE_SCHEMA_VERSION
 
@@ -2347,15 +2313,15 @@ def write_aside_sync(driver, aside) -> None:
             f"(episode={str(aside.parent_episode_id)[:8]}...)"
         )
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write Aside: {e}")
+        logger.error(f"Ariadne: Failed to write Aside: {e}")
+        raise AdapterWriteError(f"write_aside_sync: {e}") from e
 
 
 def write_aside_terminus_sync(driver, terminus) -> None:
     """Write an AsideTerminusNode closing an aside."""
-    if not _ariadne_guard():
-        return
-
     try:
         with driver.session() as session:
             session.run("""
@@ -2402,15 +2368,15 @@ def write_aside_terminus_sync(driver, terminus) -> None:
                 "termination_status": terminus.termination_status.value,
             })
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write AsideTerminus: {e}")
+        logger.error(f"Ariadne: Failed to write AsideTerminus: {e}")
+        raise AdapterWriteError(f"write_aside_terminus_sync: {e}") from e
 
 
 def load_aside_sync(driver, aside_id: str) -> Optional[dict]:
     """Load an aside node with its closure state."""
-    if not _ariadne_guard():
-        return None
-
     try:
         with driver.session() as session:
             result = session.run("""
@@ -2425,9 +2391,11 @@ def load_aside_sync(driver, aside_id: str) -> Optional[dict]:
                 "aside": dict(record["aside"]),
                 "is_closed": record["is_closed"],
             }
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: load_aside failed: {e}")
-        return None
+        logger.error(f"Ariadne: load_aside failed: {e}")
+        raise AdapterWriteError(f"load_aside_sync: {e}") from e
 
 
 def scan_aside_external_references_sync(
@@ -2438,9 +2406,6 @@ def scan_aside_external_references_sync(
     The spec requires this check on close: internal state must not leak
     into external constructs. Returns a list of offending external segment IDs.
     """
-    if not _ariadne_guard():
-        return []
-
     if not content_refs:
         return []
 
@@ -2456,9 +2421,11 @@ def scan_aside_external_references_sync(
             if not record:
                 return []
             return list(record["offenders"] or [])
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: aside reference scan failed: {e}")
-        return []
+        logger.error(f"Ariadne: aside reference scan failed: {e}")
+        raise AdapterWriteError(f"scan_aside_external_references_sync: {e}") from e
 
 
 def write_soliloquy_sync(driver, soliloquy) -> None:
@@ -2467,9 +2434,6 @@ def write_soliloquy_sync(driver, soliloquy) -> None:
     Content hash is computed per the visibility policy (HASH_PLACEHOLDER
     preserves the Merkle chain without exposing content).
     """
-    if not _ariadne_guard():
-        return
-
     try:
         from astp.core.schema import ARIADNE_SCHEMA_VERSION
         import json
@@ -2527,15 +2491,15 @@ def write_soliloquy_sync(driver, soliloquy) -> None:
             f"(episode={str(soliloquy.parent_episode_id)[:8]}...)"
         )
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write Soliloquy: {e}")
+        logger.error(f"Ariadne: Failed to write Soliloquy: {e}")
+        raise AdapterWriteError(f"write_soliloquy_sync: {e}") from e
 
 
 def write_soliloquy_conclusion_sync(driver, conclusion) -> None:
     """Write a SoliloquyConclusionNode that merges back to the spine."""
-    if not _ariadne_guard():
-        return
-
     try:
         with driver.session() as session:
             session.run("""
@@ -2580,15 +2544,15 @@ def write_soliloquy_conclusion_sync(driver, conclusion) -> None:
                 "termination_status": conclusion.termination_status.value,
             })
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write SoliloquyConclusion: {e}")
+        logger.error(f"Ariadne: Failed to write SoliloquyConclusion: {e}")
+        raise AdapterWriteError(f"write_soliloquy_conclusion_sync: {e}") from e
 
 
 def load_soliloquy_sync(driver, soliloquy_id: str) -> Optional[dict]:
     """Load a soliloquy with its conclusion state."""
-    if not _ariadne_guard():
-        return None
-
     try:
         with driver.session() as session:
             result = session.run("""
@@ -2603,9 +2567,11 @@ def load_soliloquy_sync(driver, soliloquy_id: str) -> Optional[dict]:
                 "soliloquy": dict(record["soliloquy"]),
                 "is_concluded": record["is_concluded"],
             }
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: load_soliloquy failed: {e}")
-        return None
+        logger.error(f"Ariadne: load_soliloquy failed: {e}")
+        raise AdapterWriteError(f"load_soliloquy_sync: {e}") from e
 
 
 # ── Phase 4 — Coherence Fingerprint Registry ────────────────────────────────
@@ -2618,9 +2584,6 @@ def write_coherence_fingerprint_sync(driver, fingerprint) -> None:
     the list primitive. For high-dimensional vectors (128+), consider
     an external vector store and store only a reference here.
     """
-    if not _ariadne_guard():
-        return
-
     try:
         from astp.core.schema import ARIADNE_SCHEMA_VERSION
 
@@ -2664,17 +2627,17 @@ def write_coherence_fingerprint_sync(driver, fingerprint) -> None:
                 "sequence_index": fingerprint.sequence_index,
             })
 
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: Failed to write CoherenceFingerprint: {e}")
+        logger.error(f"Ariadne: Failed to write CoherenceFingerprint: {e}")
+        raise AdapterWriteError(f"write_coherence_fingerprint_sync: {e}") from e
 
 
 def query_recent_fingerprints_sync(
     driver, episode_id: str, limit: int = 10,
 ) -> List[dict]:
     """Return the N most recent fingerprints for an episode, newest first."""
-    if not _ariadne_guard():
-        return []
-
     try:
         with driver.session() as session:
             result = session.run("""
@@ -2684,9 +2647,11 @@ def query_recent_fingerprints_sync(
                 LIMIT $limit
             """, {"episode_id": episode_id, "limit": limit})
             return [dict(r["fingerprint"]) for r in result]
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: query_recent_fingerprints failed: {e}")
-        return []
+        logger.error(f"Ariadne: query_recent_fingerprints failed: {e}")
+        raise AdapterWriteError(f"query_recent_fingerprints_sync: {e}") from e
 
 
 def get_last_fingerprint_sync(driver, episode_id: str) -> Optional[dict]:
@@ -2701,9 +2666,6 @@ def get_last_nominal_segment_sync(driver, episode_id: str) -> Optional[str]:
     Used to anchor a RETROACTIVE branch declaration at the last point
     before drift began.
     """
-    if not _ariadne_guard():
-        return None
-
     try:
         with driver.session() as session:
             result = session.run("""
@@ -2715,9 +2677,11 @@ def get_last_nominal_segment_sync(driver, episode_id: str) -> Optional[str]:
             """, {"episode_id": episode_id})
             record = result.single()
             return record["segment_id"] if record else None
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"Ariadne: get_last_nominal_segment failed: {e}")
-        return None
+        logger.error(f"Ariadne: get_last_nominal_segment failed: {e}")
+        raise AdapterWriteError(f"get_last_nominal_segment_sync: {e}") from e
 
 
 # ── Cross-Episode Linking (SPEC §20) ────────────────────────────────────────
@@ -2744,9 +2708,6 @@ def write_episode_link_sync(driver, link) -> None:
         LinkGovernanceError: if mutual-exclusivity rules are violated.
         ValueError: if source or target episode does not exist.
     """
-    if not _ariadne_guard():
-        return
-
     # Imports deferred to call time so the writer module stays
     # importable in environments where the core has not yet loaded
     # (e.g. schema-init bootstrap before episode types are wired).
@@ -2909,9 +2870,6 @@ def write_membership_record_sync(driver, record) -> None:
         ValueError: target episode not found, or prior record missing /
             already superseded.
     """
-    if not _ariadne_guard():
-        return
-
     from astp.core.grouping import (
         MembershipRecord,
         compute_membership_record_content_hash,
@@ -3063,9 +3021,6 @@ def write_conformance_declaration_sync(driver, declaration) -> None:
     group_id, version) and is referenced by MembershipRecords implicitly
     via shared (group_id, group_system).
     """
-    if not _ariadne_guard():
-        return
-
     from astp.core.grouping import (
         ConformanceDeclaration,
         compute_conformance_declaration_hash,
@@ -3143,9 +3098,6 @@ def supersede_conformance_declaration_sync(
     declaration_hash per §10, so this mutation does NOT invalidate the
     integrity of the prior declaration.
     """
-    if not _ariadne_guard():
-        return
-
     with driver.session() as session:
         result = session.run(
             """

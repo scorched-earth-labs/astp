@@ -29,6 +29,7 @@ from typing import Optional
 from uuid import uuid4
 
 from astp.core.wil import WILOperation
+from astp.protocol.errors import AdapterWriteError, BranchOperationError
 from astp.core.branching import (
     BranchPointNode,
     BranchTerminusNode,
@@ -287,7 +288,7 @@ def create_branch(
         raise
     except Exception as e:
         logger.error(f"create_branch failed: {e}", exc_info=True)
-        return None
+        raise BranchOperationError(f"create_branch failed: {e}") from e
 
 
 def abandon_branch(
@@ -445,7 +446,7 @@ def abandon_branch(
         raise
     except Exception as e:
         logger.error(f"abandon_branch failed: {e}", exc_info=True)
-        return None
+        raise BranchOperationError(f"abandon_branch failed: {e}") from e
 
 
 # ── Internal Helpers ─────────────────────────────────────────────────────────
@@ -659,7 +660,7 @@ def create_fork(
         raise
     except Exception as e:
         logger.error(f"create_fork failed: {e}", exc_info=True)
-        return None
+        raise BranchOperationError(f"create_fork failed: {e}") from e
 
 
 def create_departure_fork(
@@ -936,7 +937,7 @@ def create_departure_fork(
         raise
     except Exception as e:
         logger.error(f"create_departure_fork failed: {e}", exc_info=True)
-        return None
+        raise BranchOperationError(f"create_departure_fork failed: {e}") from e
 
 
 def _get_departure_fork_episode(driver, fork_episode_id=None, fork_id=None):
@@ -1007,7 +1008,7 @@ def complete_departure_fork(driver, fork_episode_id, actor="system", note="") ->
         return True
     except Exception as e:
         logger.error(f"complete_departure_fork failed: {e}", exc_info=True)
-        return False
+        raise BranchOperationError(f"complete_departure_fork failed: {e}") from e
 
 
 def abandon_departure_fork(driver, fork_episode_id, actor="system", reason="") -> bool:
@@ -1032,7 +1033,7 @@ def abandon_departure_fork(driver, fork_episode_id, actor="system", reason="") -
         return True
     except Exception as e:
         logger.error(f"abandon_departure_fork failed: {e}", exc_info=True)
-        return False
+        raise BranchOperationError(f"abandon_departure_fork failed: {e}") from e
 
 
 def declare_fork_return(
@@ -1146,7 +1147,7 @@ def declare_fork_return(
         raise
     except Exception as e:
         logger.error(f"declare_fork_return failed: {e}", exc_info=True)
-        return None
+        raise BranchOperationError(f"declare_fork_return failed: {e}") from e
 
 
 def resolve_fork(
@@ -1287,7 +1288,7 @@ def resolve_fork(
         raise
     except Exception as e:
         logger.error(f"resolve_fork failed: {e}", exc_info=True)
-        return None
+        raise BranchOperationError(f"resolve_fork failed: {e}") from e
 
 
 # ============================================================================
@@ -1670,7 +1671,7 @@ def execute_merge(
         raise
     except Exception as e:
         logger.error(f"execute_merge failed: {e}", exc_info=True)
-        return None
+        raise BranchOperationError(f"execute_merge failed: {e}") from e
 
 
 def verify_merge_integrity(driver, merge_id: str):
@@ -1736,7 +1737,7 @@ def verify_merge_integrity(driver, merge_id: str):
 
     except Exception as e:
         logger.error(f"verify_merge_integrity failed: {e}", exc_info=True)
-        return None
+        raise BranchOperationError(f"verify_merge_integrity failed: {e}") from e
 
 
 def _compute_branch_duration_ms(created_at_str: str) -> int:
@@ -1797,7 +1798,7 @@ def _write_merge_failure_audit(
         )
         write_audit_record_sync(driver, audit)
     except Exception as e:
-        logger.warning(f"Failed to write merge failure audit: {e}")
+        raise AdapterWriteError(f"merge failure audit: {e}") from e
 
 
 # ============================================================================
@@ -1949,7 +1950,7 @@ def create_aside(
         raise
     except Exception as e:
         logger.error(f"create_aside failed: {e}", exc_info=True)
-        return None
+        raise BranchOperationError(f"create_aside failed: {e}") from e
 
 
 def close_aside(
@@ -2105,7 +2106,7 @@ def close_aside(
         raise
     except Exception as e:
         logger.error(f"close_aside failed: {e}", exc_info=True)
-        return None
+        raise BranchOperationError(f"close_aside failed: {e}") from e
 
 
 # ============================================================================
@@ -2262,7 +2263,7 @@ def create_soliloquy(
         raise
     except Exception as e:
         logger.error(f"create_soliloquy failed: {e}", exc_info=True)
-        return None
+        raise BranchOperationError(f"create_soliloquy failed: {e}") from e
 
 
 def conclude_soliloquy(
@@ -2415,7 +2416,7 @@ def conclude_soliloquy(
         raise
     except Exception as e:
         logger.error(f"conclude_soliloquy failed: {e}", exc_info=True)
-        return None
+        raise BranchOperationError(f"conclude_soliloquy failed: {e}") from e
 
 
 def _write_branch_wil(
@@ -2426,12 +2427,11 @@ def _write_branch_wil(
     `operation` is a WILOperation, not a str, so a call site cannot ledger a
     value that is absent from the authoritative operation list.
 
-    The coercion below sits OUTSIDE the try on purpose. The blanket handler
-    exists so a Neo4j hiccup cannot fail a branch operation — the ledger write
-    is best-effort. It must not also swallow a bad operation value: that is a
-    programmer error, it is deterministic, and hiding it would leave the typing
-    on this signature decorative. Infrastructure failures stay non-fatal;
-    vocabulary violations raise.
+    The coercion sits OUTSIDE the try on purpose: a bad operation value is a
+    programmer error, deterministic, and must not be reported as a store
+    failure. Since 5.1.0 the store failure raises too — a COMPLETE ledger entry
+    is never written for a write that did not happen, and a ledger entry that
+    cannot be written fails the operation that needed it (G-39).
     """
     operation = WILOperation(operation)
 
@@ -2461,4 +2461,4 @@ def _write_branch_wil(
                 "ts": datetime.now(timezone.utc).isoformat(),
             })
     except Exception as e:
-        logger.debug(f"Branch WIL write failed (non-fatal): {e}")
+        raise AdapterWriteError(f"branch WIL entry: {e}") from e

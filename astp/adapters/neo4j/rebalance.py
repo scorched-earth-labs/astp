@@ -17,7 +17,7 @@ Ariadne Neo4j Rebalance Adapter
 Persistence for RebalanceEventNode — forensic audit trail for
 tree rebalancing operations. Stored on AriadneRebalanceEvent nodes.
 
-All operations gated on ARIADNE_ENABLED.
+Every operation raises AdapterWriteError on failure; nothing is gated by a flag.
 """
 
 import asyncio
@@ -30,7 +30,6 @@ from astp.protocol.rebalance import RebalanceEventNode
 
 logger = logging.getLogger("astp.adapters.neo4j.rebalance")
 
-ARIADNE_ENABLED = os.getenv("ARIADNE_ENABLED", "false").lower() == "true"
 
 
 REBALANCE_SCHEMA = [
@@ -45,8 +44,6 @@ REBALANCE_SCHEMA = [
 
 async def initialize_rebalance_schema(driver) -> None:
     """Create constraints and indexes for rebalance event nodes."""
-    if not ARIADNE_ENABLED:
-        return
     async with driver.session() as session:
         for stmt in REBALANCE_SCHEMA:
             await session.run(stmt)
@@ -55,9 +52,6 @@ async def initialize_rebalance_schema(driver) -> None:
 
 async def write_rebalance_event(driver, event: RebalanceEventNode) -> None:
     """Persist a rebalance event to Neo4j."""
-    if not ARIADNE_ENABLED:
-        return
-
     def _write():
         with driver.session() as session:
             session.run("""
@@ -116,9 +110,6 @@ async def list_rebalance_events(
     limit: int = 20,
 ) -> list[dict[str, Any]]:
     """List rebalance events for a cognitive node, most recent first."""
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             result = session.run("""

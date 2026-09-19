@@ -15,7 +15,7 @@
 Ariadne Neo4j Crystallization Adapter
 
 Neo4j-specific persistence operations for the crystallization protocol.
-All operations are gated by ARIADNE_ENABLED feature flag.
+Every operation raises AdapterWriteError on failure; nothing is gated by a flag.
 
 Protocol-level models, hashes, and guards live in astp.core.crystallization.
 This module handles only the database operations.
@@ -38,7 +38,6 @@ from astp.core.crystallization import (
 
 logger = logging.getLogger("astp.adapters.neo4j.crystallization")
 
-ARIADNE_ENABLED = os.getenv("ARIADNE_ENABLED", "false").lower() == "true"
 IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE = os.getenv(
     "ARIADNE_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE", "true"
 ).lower() == "true"
@@ -57,8 +56,6 @@ async def acquire_crystallization_lock(driver, episode_id: str) -> bool:
     Returns True if the lock was acquired, False if the episode is in none of
     those states or has unresolved blocking HITL events.
     """
-    if not ARIADNE_ENABLED:
-        return False
     async with driver.session() as session:
         # Check for pending HITL events before acquiring lock
         hitl_check = await session.run("""
@@ -117,8 +114,6 @@ async def release_crystallization_lock(driver, episode_id: str, success: bool) -
     Falls back to ACTIVE when no prior status was recorded — for example a
     lock acquired by a caller with its own Cypher.
     """
-    if not ARIADNE_ENABLED:
-        return
     async with driver.session() as session:
         result = await session.run("""
             MATCH (e:AriadneEpisode {episode_id: $episode_id})
@@ -145,9 +140,6 @@ async def write_crystallization_delta(driver, delta: CrystallizationDeltaNode) -
     PRECONDITION: CRYSTALLIZATION_PENDING lock must be held.
     POSTCONDITION: caller must call release_crystallization_lock(success=True).
     """
-    if not ARIADNE_ENABLED:
-        return
-
     content_json = json.dumps({
         "predecessor_hash": delta.content.predecessor_hash,
         "sealed_chain_root": delta.content.sealed_chain_root,
@@ -244,13 +236,6 @@ async def verify_crystallization_delta(
     Fetches stored crystallization data from Neo4j and delegates
     to the protocol-level verification function.
     """
-    if not ARIADNE_ENABLED:
-        return CrystallizationVerificationResult(
-            episode_id="", delta_id=delta_id,
-            phase_1_passed=False, phase_2_passed=False, verified=False,
-            failure_reason="ARIADNE_ENABLED is false"
-        )
-
     async with driver.session() as session:
         result = await session.run("""
             MATCH (cd:AriadneCrystallizationDelta {delta_id: $delta_id})
@@ -290,8 +275,6 @@ async def get_next_valid_chain_position(driver, episode_id: str) -> int:
     Returns the next valid chain_position for a crystallization delta.
     Raises if no new content since last crystallization.
     """
-    if not ARIADNE_ENABLED:
-        return 0
     async with driver.session() as session:
         result = await session.run("""
             MATCH (cd:AriadneCrystallizationDelta {episode_id: $episode_id})
@@ -322,8 +305,6 @@ async def get_next_valid_chain_position(driver, episode_id: str) -> int:
 
 async def get_chain_crystallization_count(driver, episode_id: str) -> int:
     """Returns count of CRYSTALLIZATION_DELTA events in a chain."""
-    if not ARIADNE_ENABLED:
-        return 0
     async with driver.session() as session:
         result = await session.run("""
             MATCH (cd:AriadneCrystallizationDelta {episode_id: $episode_id})
@@ -335,8 +316,6 @@ async def get_chain_crystallization_count(driver, episode_id: str) -> int:
 
 async def is_episode_crystallized(driver, episode_id: str) -> bool:
     """Fast path query: 'Is this episode crystallized?' O(1) via index."""
-    if not ARIADNE_ENABLED:
-        return False
     async with driver.session() as session:
         result = await session.run("""
             MATCH (cd:AriadneCrystallizationDelta {episode_id: $episode_id})
@@ -369,9 +348,6 @@ async def archive_episode(
     archive entry. When omitted, behaviour is exactly as before: the
     crystallization happens unledgered.
     """
-    if not ARIADNE_ENABLED:
-        return
-
     is_cryst = await is_episode_crystallized(driver, episode_id)
 
     if not is_cryst:

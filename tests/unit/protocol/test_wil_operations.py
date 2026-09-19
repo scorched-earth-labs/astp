@@ -445,6 +445,9 @@ class TestBranchWILWrite:
         with pytest.raises(ValueError):
             _write_branch_wil(_FakeDriver(), "ep-1", "node-1", "NOT_A_REAL_OP")
 
-    def test_driver_failure_stays_non_fatal(self):
-        """A ledger hiccup must never fail the branch operation around it."""
-        _write_branch_wil(_BrokenDriver(), "ep-1", "node-1", WILOperation.BRANCH_CREATE)
+    def test_driver_failure_raises(self):
+        """5.1.0: a ledger entry that cannot be written fails the operation that
+        needed it (G-39) — it is never silently skipped."""
+        from astp.protocol.errors import AdapterWriteError
+        with pytest.raises(AdapterWriteError):
+            _write_branch_wil(_BrokenDriver(), "ep-1", "node-1", WILOperation.BRANCH_CREATE)

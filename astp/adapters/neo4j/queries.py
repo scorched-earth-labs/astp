@@ -27,7 +27,6 @@ from typing import Any, Optional
 
 logger = logging.getLogger("astp.adapters.neo4j.queries")
 
-ARIADNE_ENABLED = os.getenv("ARIADNE_ENABLED", "false").lower() == "true"
 
 
 # ── Episode Queries ──────────────────────────────────────────────────────────
@@ -44,9 +43,6 @@ async def list_episodes_for_workspace(
 
     If user_name is provided, only returns episodes where that user is a participant.
     """
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             # Build WHERE clauses
@@ -85,9 +81,6 @@ async def list_episodes_for_user(
     not by workspace membership. Optional status filter matches the workspace-scoped
     variant's semantics.
     """
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             where_clauses = ["$user_name IN e.participants"]
@@ -119,9 +112,6 @@ async def list_shared_episodes_for_user(
 
     Used to surface episodes shared with the user across workspace boundaries.
     """
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             params: dict[str, Any] = {"user_name": user_name, "limit": limit}
@@ -148,9 +138,6 @@ async def list_all_episodes(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """List all episodes across workspaces, ordered by most recent activity."""
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             if status:
@@ -175,9 +162,6 @@ async def list_all_episodes(
 
 async def get_episode_detail(driver, episode_id: str) -> Optional[dict[str, Any]]:
     """Get full episode detail including segment/signal/intention counts."""
-    if not ARIADNE_ENABLED:
-        return None
-
     def _query():
         with driver.session() as session:
             result = session.run("""
@@ -224,9 +208,6 @@ async def get_execution_dag_for_episode(driver, episode_id: str) -> dict[str, An
           "edges":     [{source, target, edge_type, sequence_gap}],  # PRECEDES
         }
     """
-    if not ARIADNE_ENABLED:
-        return {"workflows": [], "steps": [], "edges": []}
-
     def _query():
         with driver.session() as session:
             workflows = [
@@ -280,9 +261,6 @@ async def list_segments_for_episode(
     episode_id: str,
 ) -> list[dict[str, Any]]:
     """List segments for an episode, ordered by sequence index."""
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             result = session.run("""
@@ -303,9 +281,6 @@ async def list_signals_for_episode(
     episode_id: str,
 ) -> list[dict[str, Any]]:
     """List signals for an episode, ordered by received time."""
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             result = session.run("""
@@ -326,9 +301,6 @@ async def list_intentions_for_episode(
     episode_id: str,
 ) -> list[dict[str, Any]]:
     """List intentions linked to an episode via ACTIVE_DURING edges."""
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             result = session.run("""
@@ -365,9 +337,6 @@ async def list_wil_entries_for_episode(
     episode_id: str,
 ) -> list[dict[str, Any]]:
     """List WIL entries for an episode (from Neo4j — completed entries only)."""
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             result = session.run("""
@@ -386,9 +355,6 @@ async def list_recent_wil_entries_for_workspace(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """List recent WIL entries across episodes in a workspace."""
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             result = session.run("""
@@ -409,9 +375,6 @@ async def get_wil_entries_with_episode_context(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """WIL entries enriched with episode title and status."""
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             result = session.run("""
@@ -444,9 +407,6 @@ async def get_workspace_state(
     workspace_id: str,
 ) -> dict[str, Any]:
     """Get workspace state: active episodes + recent activity signals."""
-    if not ARIADNE_ENABLED:
-        return {"active_episodes": [], "recent_activity": []}
-
     def _query():
         with driver.session() as session:
             # Active episodes
@@ -484,9 +444,6 @@ async def get_crystallization_progress(
     episode_id: str,
 ) -> dict[str, Any]:
     """Get crystallization status and chain position for an episode."""
-    if not ARIADNE_ENABLED:
-        return {"status": "disabled", "chain_position": 0, "version_vector": None}
-
     def _query():
         with driver.session() as session:
             # Episode crystallization status
@@ -546,9 +503,6 @@ async def list_codicils_for_episode(
     episode_id: str,
 ) -> list[dict[str, Any]]:
     """List codicils for a sealed episode, ordered by creation time."""
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             result = session.run("""
@@ -566,9 +520,6 @@ async def get_closure_record(
     episode_id: str,
 ) -> Optional[dict[str, Any]]:
     """Get the closure record for a sealed episode."""
-    if not ARIADNE_ENABLED:
-        return None
-
     def _query():
         with driver.session() as session:
             result = session.run("""
@@ -593,11 +544,8 @@ async def get_spine_snapshot_index(
     Used to capture a spine snapshot — all segments at or below
     this index are guaranteed stable (segments are append-only).
 
-    Returns None if no segments exist or ARIADNE_ENABLED is false.
+    Returns None if no segments exist.
     """
-    if not ARIADNE_ENABLED:
-        return None
-
     def _query():
         with driver.session() as session:
             result = session.run("""
@@ -624,9 +572,6 @@ async def get_segment_by_id(
     max_sequence_index: if provided, rejects segments above this index
     (snapshot isolation — only return segments visible at snapshot time).
     """
-    if not ARIADNE_ENABLED:
-        return None
-
     def _query():
         with driver.session() as session:
             params = {"episode_id": episode_id, "segment_id": segment_id}
@@ -673,9 +618,6 @@ async def get_segment_range(
     max_sequence_index: snapshot isolation cap (only return segments at or below).
     Returns ordered by sequence_index ASC.
     """
-    if not ARIADNE_ENABLED:
-        return []
-
     # Snapshot isolation: cap to_index at snapshot boundary
     effective_to = to_index
     if max_sequence_index is not None:
@@ -739,9 +681,6 @@ async def get_episode_spine(
     max_sequence_index: snapshot isolation cap (only return segments at or below).
     Returns ordered by sequence_index ASC.
     """
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             params: dict[str, Any] = {
@@ -809,9 +748,6 @@ async def list_active_branches(
 
     Active = BranchPointNode exists with no matching BranchTerminusNode.
     """
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             result = session.run("""
@@ -833,9 +769,6 @@ async def get_branch_history(
     branch_id: str,
 ) -> list[dict[str, Any]]:
     """Get audit records related to a specific branch."""
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             # Find audit records that reference this branch
@@ -862,9 +795,6 @@ async def derive_branch_lifecycle_state(
     ABANDONED: BranchTerminusNode with terminus_type=abandoned
     NOT_FOUND: No BranchPointNode exists
     """
-    if not ARIADNE_ENABLED:
-        return "NOT_FOUND"
-
     def _query():
         with driver.session() as session:
             result = session.run("""
@@ -894,9 +824,6 @@ async def get_audit_trail(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """Get the full audit trail for an episode."""
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             result = session.run("""
@@ -941,9 +868,6 @@ async def list_links_for_episode(
     `other_episode_id` (the non-self endpoint). Empty list if Ariadne
     disabled or no matching links.
     """
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         params: dict[str, Any] = {"episode_id": episode_id, "limit": limit}
         where_clauses = []
@@ -1006,9 +930,6 @@ async def list_links_for_episode(
 async def get_episode_link(driver, link_id: str) -> Optional[dict[str, Any]]:
     """Fetch a single EpisodeLink by id. Returns None when not found or
     when Ariadne is disabled."""
-    if not ARIADNE_ENABLED:
-        return None
-
     def _query():
         with driver.session() as session:
             result = session.run(
@@ -1052,9 +973,6 @@ async def list_pending_link_candidates(
     Empty list if Ariadne disabled. forward_delta JSON is decoded in
     Python (rather than via APOC) to keep the query dependency-free.
     """
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         import json as _json
 
@@ -1146,9 +1064,6 @@ async def list_memberships_for_episode(
     superseded_by_record_id). Set `include_superseded=True` to walk the
     full history including prior records.
     """
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         where_extra = "" if include_superseded else "AND m.superseded_by_record_id IS NULL"
         cypher = f"""
@@ -1178,9 +1093,6 @@ async def list_memberships_for_group(
 
     By default returns ACTIVE memberships only. Optional role filter.
     """
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         params: dict[str, Any] = {
             "group_id": group_id,
@@ -1218,9 +1130,6 @@ async def get_active_membership(
     (episode, group_id, group_system) tuple. Returns None if no membership
     exists or all are superseded (should not happen — succession always
     creates a new active record)."""
-    if not ARIADNE_ENABLED:
-        return None
-
     def _query():
         with driver.session() as session:
             result = session.run(
@@ -1255,9 +1164,6 @@ async def list_membership_history(
     ordered oldest → newest. Used when reconstructing membership role
     history for audit / display.
     """
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             result = session.run(
@@ -1289,9 +1195,6 @@ async def get_active_conformance_declaration(
     """Return the active (unsuperseded) ConformanceDeclaration for a
     (group_system, group_id) pair. Returns None if no declaration is
     registered or all are superseded."""
-    if not ARIADNE_ENABLED:
-        return None
-
     def _query():
         with driver.session() as session:
             result = session.run(
@@ -1322,9 +1225,6 @@ async def list_conformance_declarations(
 ) -> list[dict[str, Any]]:
     """List ConformanceDeclarations, optionally filtered by group_system.
     Returns active only by default."""
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         params: dict[str, Any] = {"limit": limit}
         where_clauses = []

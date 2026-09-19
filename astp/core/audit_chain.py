@@ -44,6 +44,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from astp.protocol.errors import AdapterWriteError, AriadneProtocolError
+
 logger = logging.getLogger("astp.core.audit_chain")
 
 
@@ -59,13 +61,10 @@ def next_delta_sequence(driver: Any, chain_key: str) -> int:
     Returns 1 for an empty chain. Sequences are scoped per chain_key
     and never reset within that chain.
 
-    Failures fall through to returning 1 — under the protocol's "audit
-    chain advance must not block operations" rule, a transient query
-    error should not stop the calling operation from emitting its audit
-    record. The returned sequence may collide with an existing record
-    in that pathological case; integrity is still verifiable via the
-    hash chain, and the duplicate sequence is itself an auditable
-    anomaly.
+    A failure to read the chain head raises ``AdapterWriteError``: a writer
+    that cannot read the head MUST NOT guess a sequence (SPEC §8.2). Until
+    5.1.0 this fell through to 1, which manufactured a second genesis
+    mid-chain on any transient error.
     """
     try:
         with driver.session() as session:
@@ -86,9 +85,11 @@ def next_delta_sequence(driver: Any, chain_key: str) -> int:
             record = result.single()
             current_max = record["max_seq"] if record and record["max_seq"] is not None else 0
             return current_max + 1
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"audit_chain.next_delta_sequence fallback: {e}")
-        return 1
+        logger.error(f"audit_chain.next_delta_sequence: cannot read chain head: {e}")
+        raise AdapterWriteError(f"next_delta_sequence: {e}") from e
 
 
 def prior_audit_hash(driver: Any, chain_key: str) -> str:
@@ -98,11 +99,9 @@ def prior_audit_hash(driver: Any, chain_key: str) -> str:
     as the `prior_audit_hash` field on the new AuditRecord it's about
     to write, forming the hash chain.
 
-    Same fallback semantics as `next_delta_sequence` — a transient
-    query error returns GENESIS rather than blocking the operation.
-    The integrity check that catches this is the chain-completeness
-    proof (SPEC §20 →11.2.3); a spurious GENESIS in the middle
-    of a chain shows up as a hash mismatch at the next record.
+    A failure to read the chain head raises ``AdapterWriteError`` (see
+    ``next_delta_sequence``): returning GENESIS on a transient error, as
+    this did until 5.1.0, forged a chain restart.
     """
     try:
         with driver.session() as session:
@@ -118,6 +117,8 @@ def prior_audit_hash(driver: Any, chain_key: str) -> str:
             )
             record = result.single()
             return record["hash"] if record and record["hash"] else GENESIS_HASH
+    except AriadneProtocolError:
+        raise
     except Exception as e:
-        logger.warning(f"audit_chain.prior_audit_hash fallback: {e}")
-        return GENESIS_HASH
+        logger.error(f"audit_chain.prior_audit_hash: cannot read chain head: {e}")
+        raise AdapterWriteError(f"prior_audit_hash: {e}") from e

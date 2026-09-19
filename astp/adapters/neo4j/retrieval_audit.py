@@ -18,7 +18,7 @@ Persistence for RetrievalAuditRecord — side-channel storage of
 agent retrieval operations. Stored on AriadneRetrievalAudit nodes,
 linked to episodes via RETRIEVAL_AUDIT edges.
 
-All operations gated on ARIADNE_ENABLED.
+Every operation raises AdapterWriteError on failure; nothing is gated by a flag.
 """
 
 import asyncio
@@ -29,9 +29,10 @@ from typing import Any
 
 from astp.protocol.retrieval_audit import RetrievalAuditRecord
 
+from astp.protocol.errors import AdapterWriteError, AriadneProtocolError
+
 logger = logging.getLogger("astp.adapters.neo4j.retrieval_audit")
 
-ARIADNE_ENABLED = os.getenv("ARIADNE_ENABLED", "false").lower() == "true"
 
 
 RETRIEVAL_AUDIT_SCHEMA = [
@@ -48,8 +49,6 @@ RETRIEVAL_AUDIT_SCHEMA = [
 
 async def initialize_retrieval_audit_schema(driver) -> None:
     """Create constraints and indexes for retrieval audit nodes."""
-    if not ARIADNE_ENABLED:
-        return
     async with driver.session() as session:
         for stmt in RETRIEVAL_AUDIT_SCHEMA:
             await session.run(stmt)
@@ -62,9 +61,6 @@ async def write_retrieval_audit(driver, record: RetrievalAuditRecord) -> None:
     Non-fatal: failures are logged but do not propagate.
     Retrieval must never fail because audit logging failed.
     """
-    if not ARIADNE_ENABLED:
-        return
-
     def _write():
         try:
             with driver.session() as session:
@@ -102,8 +98,11 @@ async def write_retrieval_audit(driver, record: RetrievalAuditRecord) -> None:
                     "episode_id": record.episode_id,
                     "wall_clock": record.wall_clock.isoformat(),
                 })
+        except AriadneProtocolError:
+            raise
         except Exception as e:
-            logger.warning(f"Retrieval audit write failed (non-fatal): {e}")
+            logger.error(f"Retrieval audit write failed (non-fatal): {e}")
+            raise AdapterWriteError(f"_write: {e}") from e
 
     await asyncio.to_thread(_write)
 
@@ -114,9 +113,6 @@ async def list_retrieval_audits_for_episode(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """List retrieval audit records for an episode, most recent first."""
-    if not ARIADNE_ENABLED:
-        return []
-
     def _query():
         with driver.session() as session:
             result = session.run("""
