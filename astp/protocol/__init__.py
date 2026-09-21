@@ -69,7 +69,8 @@ from astp.protocol.governance import (
     enforce_node_type_registered,
 )
 from astp.protocol.errors import (
-    AriadneProtocolError,
+    ASTPProtocolError,
+    AriadneProtocolError,  # retained alias
     GovernanceViolation,
     ReparentingViolation,
     VerificationError,
@@ -142,7 +143,8 @@ __all__ = [
     "enforce_logical_clock_monotonicity",
     "enforce_node_type_registered",
     # Errors
-    "AriadneProtocolError",
+    "ASTPProtocolError",
+    "AriadneProtocolError",  # retained alias
     "GovernanceViolation",
     "ReparentingViolation",
     "VerificationError",

@@ -30,7 +30,7 @@ Pure unit tests (no driver). Verifies:
 import pytest
 
 from astp.core.branching import (
-    AriadneGovernanceError,
+    ASTPGovernanceError,
     CoherenceFingerprint,
     ConfirmationCache,
     ConfirmedAction,
@@ -206,7 +206,7 @@ class TestConfirmationCache:
 
 class TestWriteTimeGuard:
     def test_rejects_none_fingerprint(self):
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_write_time_fingerprint(None)
 
     def test_accepts_fingerprint(self):

@@ -27,7 +27,7 @@ from uuid import uuid4
 
 import pytest
 
-from astp.protocol.errors import AdapterWriteError, AriadneProtocolError, BranchOperationError
+from astp.protocol.errors import AdapterWriteError, ASTPProtocolError, BranchOperationError
 
 PKG = Path(__file__).resolve().parents[3] / "astp"
 ADAPTER_MODULES = [
@@ -105,7 +105,7 @@ def test_governance_violations_pass_through_unwrapped():
     from astp.adapters.neo4j.writer import write_branch_point_sync
 
     class _GovSession(_BrokenSession):
-        def run(self, *a, **k): raise AriadneProtocolError("G-1")
+        def run(self, *a, **k): raise ASTPProtocolError("G-1")
 
     class _GovDriver:
         def session(self, *a, **k): return _GovSession()
@@ -115,7 +115,7 @@ def test_governance_violations_pass_through_unwrapped():
     bp = BranchPointNode(episode_id=ep, parent_episode_id=ep, branch_label="x", source_segment_id="seg",
                          branch_type=BranchType.EXPLORATORY, declaration_type=BranchDeclarationType.EXPLICIT,
                          trigger_context=TriggerType.HUMAN_EXPLICIT, initiated_by="devin", spine_merkle_snapshot="ab" * 32)
-    with pytest.raises(AriadneProtocolError, match="G-1") as ei:
+    with pytest.raises(ASTPProtocolError, match="G-1") as ei:
         write_branch_point_sync(_GovDriver(), bp)
     assert not isinstance(ei.value, AdapterWriteError)
 

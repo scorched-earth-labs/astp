@@ -23,7 +23,7 @@ protocol package. Centralized here so that:
 2. Adding a new node type with a content hash is a one-call boilerplate
    via `hash_preimage(model, ordered_fields)` rather than re-implementing
    the canonicalizer.
-3. Cross-implementation interop: any conforming Ariadne implementation
+3. Cross-implementation interop: any conforming ASTP implementation
    that uses the same canonicalization rules produces the same hash
    for the same input. This is wire-tier conformance per SPEC §20
    →12.1.

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Branch/Fork/Merge Schema — Phase 1: Branch Lifecycle
+ASTP Branch/Fork/Merge Schema — Phase 1: Branch Lifecycle
 
 Foundation schema types for the branch/fork/merge taxonomy:
 - BranchPointNode, BranchTerminusNode — structural nodes
@@ -38,7 +38,7 @@ from astp.core.drift_fsm import DriftDetectionState
 
 from pydantic import BaseModel, Field
 
-from astp.core.schema import sha3_256, AriadneGovernanceError, ARIADNE_SCHEMA_VERSION
+from astp.core.schema import sha3_256, ASTPGovernanceError, ASTP_SCHEMA_VERSION
 
 
 # ============================================================================
@@ -223,7 +223,7 @@ class BranchPointNode(BaseModel):
     content_hash: str = ""                           # Computed after creation
     parent_hash: str = ""                            # Hash of preceding spine node
     timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
     # Retroactive declaration fields (only populated when declaration_type=RETROACTIVE)
     pre_declaration_merkle_root: Optional[str] = None
@@ -244,7 +244,7 @@ class BranchTerminusNode(BaseModel):
     final_merkle_root: str                           # Branch state at terminus
     duration_ms: int = 0                             # Branch lifespan
     timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
     # Abandonment fields (populated when terminus_type=ABANDONED)
     abandonment_reason: Optional[str] = None
@@ -297,7 +297,7 @@ class AuditRecord(BaseModel):
 
     # Episode reference
     episode_id: str = ""
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 # ============================================================================
@@ -482,11 +482,11 @@ def enforce_branch_depth_limit(
 ) -> None:
     """Enforce soft limit on branch nesting depth.
 
-    Raises AriadneGovernanceError if depth exceeds max_depth.
+    Raises ASTPGovernanceError if depth exceeds max_depth.
     The limit is soft — callers may catch and log the override.
     """
     if current_depth >= max_depth:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             f"Branch depth limit exceeded: depth={current_depth}, "
             f"max={max_depth}. Override requires explicit logging."
         )
@@ -521,7 +521,7 @@ def enforce_access_policy(
 def enforce_abandonment_reason_required(reason: Optional[str]) -> None:
     """Abandonment reason must be non-empty."""
     if not reason or not reason.strip():
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "Branch abandonment requires a non-empty reason. "
             "ABANDONED is terminal — the reason is the audit trail."
         )
@@ -628,7 +628,7 @@ class ForkPointNode(BaseModel):
     content_hash: str = ""
     parent_hash: str = ""
     timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 class MergePointNode(BaseModel):
@@ -656,7 +656,7 @@ class MergePointNode(BaseModel):
     content_hash: str = ""
     parent_hash: str = ""
     timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 class BranchReturnEdge(BaseModel):
@@ -840,7 +840,7 @@ class ForkReturnType(str, Enum):
 
 
 class OrphanClass(str, Enum):
-    """Which structural inconsistency a ForkOrphanMarker records (Ariadne BFM Phase D,
+    """Which structural inconsistency a ForkOrphanMarker records (BFM Phase D,
     orphan detection). A/B/C are the partial-failure classes; D is the stale-ACTIVE
     hygiene class. Tags the MARKER (distinct from ForkOrphanClass, set on the episode)."""
     CLASS_A = "CLASS_A"    # dangling DepartureForkPointNode — no fork episode
@@ -873,7 +873,7 @@ class DepartureForkPointNode(BaseModel):
     content_hash: str = ""
     parent_hash: str = ""
     timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
     # Orphan-recovery diagnostic flags — set by recovery only; NOT part of content_hash,
     # so a retroactively-recovered point hashes identically to one written on time (§19.3.7).
     orphaned: Optional[bool] = None                       # Class-A: dangling point (no fork episode)
@@ -937,7 +937,7 @@ class ForkReturnNode(BaseModel):
     COMPLETED departure fork's work is formally brought back. DECLARATIVE (the origin
     asserts incorporation across two independent spines) — never the branch's
     structural merge. Only written on an explicit return; resumption writes nothing.
-    (Ariadne BFM Phase D.)"""
+    (BFM Phase D.)"""
     fork_return_id: UUID = Field(default_factory=uuid4)
     fork_id: UUID                                     # the returned departure fork
     fork_episode_id: UUID                             # the (COMPLETED) fork episode
@@ -949,7 +949,7 @@ class ForkReturnNode(BaseModel):
     content_hash: str = ""
     parent_hash: str = ""
     timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 class ForkReturnResult(BaseModel):
@@ -988,7 +988,7 @@ def compute_fork_return_hash(
 
 class ForkOrphanMarker(BaseModel):
     """A non-chained diagnostic satellite recording that a departure fork was found in a
-    structurally-inconsistent state (Ariadne BFM Phase D, orphan detection). Written to the
+    structurally-inconsistent state (BFM Phase D, orphan detection). Written to the
     ORIGIN spine by orphan recovery. Self-hashed for tamper-evidence (domain
     FORK_ORPHAN_MARKER:) but NOT a member of the origin spine's Merkle chain — it has no
     parent_hash and writing it never changes the origin episode's root/tip. Read-only after
@@ -1004,7 +1004,7 @@ class ForkOrphanMarker(BaseModel):
     requires_operator_review: bool                    # true for Class A; false for auto-recovered
     detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     content_hash: str = ""                            # self-tamper-evidence (NOT a spine chain link)
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 def compute_fork_orphan_marker_hash(
@@ -1079,7 +1079,7 @@ def compute_conflict_manifest_hash(
 def enforce_fork_objective_required(objective: Optional[str]) -> None:
     """Fork objective must be non-empty — a fork without objective is a branch."""
     if not objective or not objective.strip():
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "Fork creation requires a non-empty fork_objective. "
             "A fork without an objective is indistinguishable from a branch."
         )
@@ -1088,7 +1088,7 @@ def enforce_fork_objective_required(objective: Optional[str]) -> None:
 def enforce_fork_sibling_count(count: int) -> None:
     """Fork must have at least 2 alternatives — a 1-path fork is a branch."""
     if count < 2:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             f"Fork requires at least 2 alternatives (got {count}). "
             "Single-path divergence is a branch, not a fork."
         )
@@ -1097,7 +1097,7 @@ def enforce_fork_sibling_count(count: int) -> None:
 def enforce_merge_summary_required(summary: Optional[str]) -> None:
     """Merge summary must be non-empty — the synthesis is the audit trail."""
     if not summary or not summary.strip():
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "Merge execution requires a non-empty merge_summary. "
             "The synthesis is the audit trail of what the merge produced."
         )
@@ -1224,7 +1224,7 @@ class AsideSegmentNode(BaseModel):
     content_hash: str = ""
     parent_hash: str = ""
     timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 class AsideTerminusNode(BaseModel):
@@ -1245,7 +1245,7 @@ class AsideTerminusNode(BaseModel):
     duration_ms: int = 0
     termination_status: AsideTerminationStatus = AsideTerminationStatus.CLOSED
     timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 class SoliloquySegmentNode(BaseModel):
@@ -1269,7 +1269,7 @@ class SoliloquySegmentNode(BaseModel):
     content_hash: str = ""                                      # Computed via policy (placeholder or full)
     parent_hash: str = ""
     timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 class SoliloquyConclusionNode(BaseModel):
@@ -1288,7 +1288,7 @@ class SoliloquyConclusionNode(BaseModel):
     duration_ms: int = 0
     termination_status: SoliloquyTerminationStatus = SoliloquyTerminationStatus.ABSORBED
     timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 # ============================================================================
@@ -1433,7 +1433,7 @@ def enforce_aside_human_initiated(initiated_by_human: Optional[str]) -> None:
     """Asides are ALWAYS human-initiated. An agent-initiated internal branch
     is a soliloquy, not an aside."""
     if not initiated_by_human or not initiated_by_human.strip():
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "Asides must be human-initiated — initiated_by_human is required. "
             "Agent-initiated internal branches are soliloquies."
         )
@@ -1442,7 +1442,7 @@ def enforce_aside_human_initiated(initiated_by_human: Optional[str]) -> None:
 def enforce_aside_target_agent(target_agent_id: Optional[str]) -> None:
     """Aside runs with a specific target agent — required."""
     if not target_agent_id or not target_agent_id.strip():
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "Asides require a target_agent_id — aside runs with exactly one agent."
         )
 
@@ -1450,7 +1450,7 @@ def enforce_aside_target_agent(target_agent_id: Optional[str]) -> None:
 def enforce_aside_close_reason(reason: Optional[str]) -> None:
     """Asides must be closed with a non-empty reason."""
     if not reason or not reason.strip():
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "Closing an aside requires a non-empty close_reason. "
             "Return obligation is part of the audit trail."
         )
@@ -1459,7 +1459,7 @@ def enforce_aside_close_reason(reason: Optional[str]) -> None:
 def enforce_soliloquy_purpose_required(purpose: Optional[str]) -> None:
     """Soliloquies must have a non-empty purpose."""
     if not purpose or not purpose.strip():
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "Soliloquy creation requires a non-empty purpose. "
             "A soliloquy without purpose is indistinguishable from silence."
         )
@@ -1468,7 +1468,7 @@ def enforce_soliloquy_purpose_required(purpose: Optional[str]) -> None:
 def enforce_soliloquy_human_accessible(policy: SoliloquyVisibilityPolicy) -> None:
     """Non-negotiable: humans always have read access to soliloquies."""
     if not policy.human_accessible:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "Soliloquy visibility policy violation: human_accessible=false. "
             "Humans ALWAYS have read access — this is non-negotiable. "
             "Deliberation content can be private to other agents, never to humans."
@@ -1479,7 +1479,7 @@ def enforce_soliloquy_conclusion_required(summary: Optional[str]) -> None:
     """Concluding a soliloquy requires a non-empty summary — only the
     conclusion merges back to the spine."""
     if not summary or not summary.strip():
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "Soliloquy conclusion requires a non-empty summary. "
             "Only the conclusion merges back — silence is not an exit."
         )
@@ -1488,7 +1488,7 @@ def enforce_soliloquy_conclusion_required(summary: Optional[str]) -> None:
 def check_aside_return_obligation(aside_open: bool, episode_sealing: bool = False) -> None:
     """On episode seal, any still-open aside is an audit violation."""
     if aside_open and episode_sealing:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "Return obligation violated: aside is still OPEN at episode seal. "
             "Unclosed asides are audit violations — close or explicitly abandon."
         )
@@ -1499,7 +1499,7 @@ def check_soliloquy_return_obligation(
 ) -> None:
     """On episode seal, any still-active soliloquy is an audit violation."""
     if soliloquy_active and episode_sealing:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "Return obligation violated: soliloquy is still ACTIVE at episode seal. "
             "Unconcluded soliloquies are audit violations — conclude or explicitly abandon."
         )
@@ -1559,7 +1559,7 @@ class CoherenceFingerprint(BaseModel):
     consecutive_drift_count: int = 0                            # Persisted across turns
     detection_state: DetectionState = DetectionState.NOMINAL
     timestamp_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 # ============================================================================
@@ -1797,7 +1797,7 @@ def enforce_write_time_fingerprint(fingerprint: Optional[CoherenceFingerprint]) 
     Spec §7.1: retroactive fingerprinting defeats the detection window.
     """
     if fingerprint is None:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "Coherence fingerprint must be computed at segment write time. "
             "Retroactive fingerprinting defeats the detection window."
         )

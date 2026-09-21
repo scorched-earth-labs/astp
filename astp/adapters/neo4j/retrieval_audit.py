@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Neo4j Retrieval Audit Adapter
+ASTP Neo4j Retrieval Audit Adapter
 
 Persistence for RetrievalAuditRecord — side-channel storage of
 agent retrieval operations. Stored on AriadneRetrievalAudit nodes,
@@ -29,7 +29,7 @@ from typing import Any
 
 from astp.protocol.retrieval_audit import RetrievalAuditRecord
 
-from astp.protocol.errors import AdapterWriteError, AriadneProtocolError
+from astp.protocol.errors import AdapterWriteError, ASTPProtocolError
 
 logger = logging.getLogger("astp.adapters.neo4j.retrieval_audit")
 
@@ -52,7 +52,7 @@ async def initialize_retrieval_audit_schema(driver) -> None:
     async with driver.session() as session:
         for stmt in RETRIEVAL_AUDIT_SCHEMA:
             await session.run(stmt)
-    logger.info("Ariadne retrieval audit schema initialized")
+    logger.info("ASTP retrieval audit schema initialized")
 
 
 async def write_retrieval_audit(driver, record: RetrievalAuditRecord) -> None:
@@ -98,7 +98,7 @@ async def write_retrieval_audit(driver, record: RetrievalAuditRecord) -> None:
                     "episode_id": record.episode_id,
                     "wall_clock": record.wall_clock.isoformat(),
                 })
-        except AriadneProtocolError:
+        except ASTPProtocolError:
             raise
         except Exception as e:
             logger.error(f"Retrieval audit write failed (non-fatal): {e}")

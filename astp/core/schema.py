@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field, model_validator
 # sha3_256 is defined in the protocol layer and re-exported here so that
 # ``from astp.core.schema import sha3_256`` keeps working.
 from astp.protocol.hashing import sha3_256
-from astp.protocol.errors import AriadneProtocolError
+from astp.protocol.errors import ASTPProtocolError
 
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
@@ -167,7 +167,7 @@ def hitl_terminal_status(decision: str) -> str:
     return HITLNodeStatus.RESOLVED.value
 
 
-class EpisodeIdentifierError(AriadneProtocolError):
+class EpisodeIdentifierError(ASTPProtocolError):
     """G-40: an Episode identifier that is not a UUID is refused where Episodes are created."""
 
 
@@ -188,12 +188,13 @@ def require_episode_uuid(value) -> UUID:
 
 # ── Node Models ───────────────────────────────────────────────────────────────
 
-ARIADNE_SCHEMA_VERSION = "1.2.0"
+ASTP_SCHEMA_VERSION = "1.2.0"
+ARIADNE_SCHEMA_VERSION = ASTP_SCHEMA_VERSION  # name retained for callers written before astp 0.6.0
 
 
 class EpisodeNode(BaseModel):
     episode_id: UUID = Field(default_factory=uuid4)
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
     agent_id: str  # FK to agent identity
     opened_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     sealed_at: Optional[datetime] = None
@@ -217,7 +218,7 @@ class EpisodeNode(BaseModel):
     # --- Departure-fork provenance (Phase D) ---------------------------------
     # Set once, immutably, when this episode is created via create_departure_fork().
     # Null on non-fork episodes. Provenance metadata ("how did this come to exist"),
-    # not identity — a departure fork IS an episode. (Ariadne BFM Phase D.)
+    # not identity — a departure fork IS an episode. (BFM Phase D.)
     fork_origin_episode_id: Optional[UUID] = None      # episode this departed from
     fork_anchor_index: Optional[int] = None            # sequence_index of the ORIGIN SEGMENT where the departure anchored (the point is a satellite, not a spine-sequence member); null during in-progress creation (two-phase)
     fork_id: Optional[UUID] = None                     # shared id linking the fork point to this episode
@@ -318,7 +319,7 @@ class ExclusionRecord(BaseModel):
 
 class ConsultationNode(BaseModel):
     """
-    First-class Ariadne node representing a cross-agent consultation.
+    First-class ASTP node representing a cross-agent consultation.
     Lives in the initiating agent's episode as a branch.
     A branch event, not a spine append; created BEFORE the exchange begins.
     """
@@ -335,7 +336,7 @@ class ConsultationNode(BaseModel):
     resolution_type: Optional[str] = None  # synthesized | abandoned | deferred | escalated
     resolution_hash: Optional[str] = None
     consultation_node_hash: Optional[str] = None  # H(initiation_hash || resolution_hash)
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 class ExchangeEntry(BaseModel):
@@ -369,7 +370,7 @@ class ConsultationParticipantNode(BaseModel):
     participated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     resolved_at: Optional[datetime] = None
     consultation_type: ConsultationType
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 class AttachmentNode(BaseModel):
@@ -402,7 +403,7 @@ class AttachmentNode(BaseModel):
     content_ref: Optional[str] = None  # implementation-defined locator
     attached_by: str = ""  # agent_id or user_id
     attached_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 class DocumentNode(BaseModel):
@@ -431,7 +432,7 @@ class DocumentNode(BaseModel):
     char_count: int = 0
     attached_by: str = ""  # user_id
     attached_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 class CodicilNode(BaseModel):
@@ -446,7 +447,7 @@ class CodicilNode(BaseModel):
     content: str  # stored directly in Neo4j
     content_hash: str  # SHA3-256
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
 
 class EpisodeClosureRecord(BaseModel):
@@ -658,9 +659,12 @@ def compute_episode_root_hash(spine_hash: str, signal_manifest_hash: str, exclus
 
 # ── Governance Rule Enforcement ───────────────────────────────────────────────
 
-class AriadneGovernanceError(Exception):
+class ASTPGovernanceError(Exception):
     """Raised when a governance rule (G-1 through G-7) would be violated."""
     pass
+
+
+AriadneGovernanceError = ASTPGovernanceError  # name retained for callers written before astp 0.6.0
 
 
 # States in which an Episode admits no new segments or signals (SPEC §4.4.1,
@@ -683,7 +687,7 @@ def enforce_G1_write_guard(episode_status: EpisodeStatus) -> None:
     path and are not subject to this guard (SPEC §6, G-1).
     """
     if episode_status in G1_FROZEN_STATES:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             f"G-1 violation: Cannot write to episode in {episode_status} state."
         )
 
@@ -691,7 +695,7 @@ def enforce_G1_write_guard(episode_status: EpisodeStatus) -> None:
 def enforce_G5_placement_rationale(signal: SignalNode) -> None:
     """Rule G-5: placement_rationale is required when placement=EXCLUDED_MANIFEST."""
     if signal.placement == SignalPlacement.EXCLUDED_MANIFEST and not signal.placement_rationale:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             f"G-5 violation: Signal {signal.signal_id} has placement=EXCLUDED_MANIFEST "
             f"but no placement_rationale."
         )
@@ -700,7 +704,7 @@ def enforce_G5_placement_rationale(signal: SignalNode) -> None:
 def enforce_G7_triggered_edge(signal: SignalNode, has_triggered_edge: bool) -> None:
     """Rule G-7: causal signals require a TRIGGERED edge to at least one segment."""
     if signal.signal_class == SignalClass.causal and not has_triggered_edge:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             f"G-7 violation: Signal {signal.signal_id} has signal_class=causal "
             f"but no TRIGGERED edge. Add the TRIGGERED edge before committing."
         )
@@ -713,14 +717,14 @@ def validate_signal_classification(signal: SignalNode) -> None:
     STRUCTURAL type must have signal_class=causal (structural signals are by definition causal).
     """
     if signal.signal_type == SignalType.STRUCTURAL and signal.signal_class != SignalClass.causal:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             f"G-taxonomy violation: STRUCTURAL signals must have signal_class=causal. "
             f"Signal {signal.signal_id} has signal_class={signal.signal_class}."
         )
     if (signal.signal_type == SignalType.EPHEMERAL
             and signal.signal_class == SignalClass.causal
             and signal.placement == SignalPlacement.SPINE):
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             f"G-taxonomy violation: EPHEMERAL/causal signals must use BRANCH_LEAF placement, "
             f"not SPINE. Signal {signal.signal_id}."
         )
@@ -739,14 +743,14 @@ def compute_exchange_chain_hash(entries: list[ExchangeEntry]) -> str:
     for i, entry in enumerate(entries):
         if i == 0:
             if entry.previous_hash != "GENESIS":
-                raise AriadneGovernanceError(
+                raise ASTPGovernanceError(
                     f"Exchange chain integrity violation: entry 0 previous_hash "
                     f"must be 'GENESIS', got '{entry.previous_hash}'"
                 )
         else:
             expected = entries[i - 1].content_hash
             if entry.previous_hash != expected:
-                raise AriadneGovernanceError(
+                raise ASTPGovernanceError(
                     f"Exchange chain integrity violation at entry {i}: "
                     f"previous_hash {entry.previous_hash!r} != "
                     f"prior entry content_hash {expected!r}"
@@ -777,7 +781,7 @@ def enforce_G8_initiation_before_exchange(
 ) -> None:
     """Rule G-8: Exchange entries may not exist without a prior initiation hash."""
     if has_exchange_entries and initiation_hash is None:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "G-8 violation: Exchange entries exist but no initiation_hash is set."
         )
 
@@ -787,7 +791,7 @@ def enforce_G9_resolution_requires_entries(
 ) -> None:
     """Rule G-9: A consultation cannot be resolved without at least one exchange entry."""
     if resolution_hash is not None and len(exchange_entries) == 0:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "G-9 violation: resolution_hash is set but exchange_entries is empty."
         )
 
@@ -796,7 +800,7 @@ def enforce_G9_resolution_requires_entries(
 
 
 class HITLEventNode(BaseModel):
-    """First-class HITL event in the Ariadne State Tree.
+    """First-class HITL event in the AI State Tree.
 
     Represents a two-phase human-in-the-loop decision:
       Phase 1 (INVOKED): Gate raised, context captured, awaiting human decision.
@@ -810,7 +814,7 @@ class HITLEventNode(BaseModel):
     hitl_event_id: UUID = Field(default_factory=uuid4)
     episode_id: UUID
     hitl_request_id: str            # FK to HITLRequest.id in operational store
-    schema_version: str = ARIADNE_SCHEMA_VERSION
+    schema_version: str = ASTP_SCHEMA_VERSION
 
     # Gate classification
     gate_type: HITLGateType
@@ -895,7 +899,7 @@ def enforce_G17_hitl_invocation_before_resolution(
     during the INVOKED → RESOLVED/TIMED_OUT/ESCALATED transition.
     """
     if status == HITLNodeStatus.INVOKED and resolution_hash is not None:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             "G-17 violation: resolution_hash is set but HITL event "
             "is still in INVOKED status."
         )

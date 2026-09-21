@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Episode Node Type — the Phase 1 instantiation.
+ASTP Episode Node Type — the Phase 1 instantiation.
 
 Episodes are bounded units of agent work with a formal lifecycle.
 This is the first parameterization of CognitiveNode; the protocol

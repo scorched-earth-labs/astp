@@ -19,12 +19,15 @@ errors indicating protocol non-conformance, not application errors.
 """
 
 
-class AriadneProtocolError(Exception):
+class ASTPProtocolError(Exception):
     """Base exception for all ASTP protocol violations."""
     pass
 
 
-class GovernanceViolation(AriadneProtocolError):
+AriadneProtocolError = ASTPProtocolError  # name retained for callers written before astp 0.6.0
+
+
+class GovernanceViolation(ASTPProtocolError):
     """A governance rule has been violated."""
     pass
 
@@ -40,12 +43,12 @@ class ReparentingViolation(GovernanceViolation):
     pass
 
 
-class VerificationError(AriadneProtocolError):
+class VerificationError(ASTPProtocolError):
     """Hash verification or integrity check failed."""
     pass
 
 
-class StaleRootError(AriadneProtocolError):
+class StaleRootError(ASTPProtocolError):
     """Compare-and-swap failed on spine_root — concurrent writer detected."""
     pass
 
@@ -55,7 +58,7 @@ class MonotonicityViolation(GovernanceViolation):
     pass
 
 
-class AdapterWriteError(AriadneProtocolError):
+class AdapterWriteError(ASTPProtocolError):
     """An adapter operation did not complete (SPEC §15 item 7: fail loudly).
 
     Raised, chained to the underlying driver or store error, by every reference
@@ -66,7 +69,7 @@ class AdapterWriteError(AriadneProtocolError):
     """
 
 
-class BranchOperationError(AriadneProtocolError):
+class BranchOperationError(ASTPProtocolError):
     """A branch, fork, merge, aside or soliloquy operation failed after it began.
 
     Raised, chained, in place of the ``return None`` the 4.x operations used

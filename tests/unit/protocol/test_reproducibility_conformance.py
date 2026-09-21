@@ -30,7 +30,7 @@ from astp.core.schema import (
     ORDERING_VERSION_CURRENT,
     ORDERING_VERSION_LEGACY,
     SPINE_ALGORITHM_VERSION_CURRENT,
-    AriadneGovernanceError,
+    ASTPGovernanceError,
     compute_episode_root_hash,
     compute_exclusion_hash,
     compute_signal_manifest_hash,
@@ -180,7 +180,7 @@ class TestRP004FixedRecordRefusesContent:
 
     @pytest.mark.parametrize("state", RP004_FIXED_STATES)
     def test_frozen_states_refuse(self, state):
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_G1_write_guard(state)
 
     @pytest.mark.parametrize("state", RP004_OPEN_STATES)

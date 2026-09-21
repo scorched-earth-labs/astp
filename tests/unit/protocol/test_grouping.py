@@ -74,7 +74,7 @@ class TestGroupingSystem:
     def test_only_the_protocol_native_value_is_reserved(self):
         # Open-ended: any group_system string is valid; vendors are named by
         # their ConformanceDeclaration, not by a protocol enum member.
-        assert [m.value for m in GroupingSystem] == ["ariadne_native"]
+        assert [m.value for m in GroupingSystem] == ["astp_native", "ariadne_native"]
 
 
 class TestCognitiveDeltaTypeAdditions:

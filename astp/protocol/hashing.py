@@ -23,5 +23,5 @@ import hashlib
 
 
 def sha3_256(data: bytes) -> str:
-    """Canonical hash function for all Ariadne content hashing. Returns hex string."""
+    """Canonical hash function for all ASTP content hashing. Returns hex string."""
     return hashlib.sha3_256(data).hexdigest()

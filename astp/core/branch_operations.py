@@ -79,7 +79,7 @@ from astp.core.branching import (
     compute_intent_idempotency_key,
     enforce_branch_depth_limit,
     enforce_abandonment_reason_required,
-    AriadneGovernanceError,
+    ASTPGovernanceError,
     DEFAULT_ACCESS_POLICIES,
 )
 from astp.core.audit_chain import (
@@ -131,12 +131,12 @@ def create_branch(
     try:
         # STEP 1: Validate preconditions
         if not branch_intent or not branch_intent.strip():
-            raise AriadneGovernanceError("Branch intent must be non-empty")
+            raise ASTPGovernanceError("Branch intent must be non-empty")
 
         # Check branch depth (soft limit)
         try:
             enforce_branch_depth_limit(branch_depth)
-        except AriadneGovernanceError:
+        except ASTPGovernanceError:
             logger.warning(
                 f"Branch depth limit exceeded ({branch_depth}) — "
                 f"proceeding with override logged"
@@ -314,7 +314,7 @@ def create_branch(
             audit_record_id=str(audit.audit_id),
         )
 
-    except AriadneGovernanceError:
+    except ASTPGovernanceError:
         raise
     except Exception as e:
         logger.error(f"create_branch failed: {e}", exc_info=True)
@@ -472,7 +472,7 @@ def abandon_branch(
             artifacts_preserved=artifacts_preserved,
         )
 
-    except AriadneGovernanceError:
+    except ASTPGovernanceError:
         raise
     except Exception as e:
         logger.error(f"abandon_branch failed: {e}", exc_info=True)
@@ -547,7 +547,7 @@ def create_fork(
         enforce_fork_sibling_count(len(alternatives))
 
         if not fork_intent or not fork_intent.strip():
-            raise AriadneGovernanceError("Fork intent must be non-empty")
+            raise ASTPGovernanceError("Fork intent must be non-empty")
 
         with driver.session() as session:
             ep_check = session.run("""
@@ -686,7 +686,7 @@ def create_fork(
             audit_record_id=str(audit.audit_id),
         )
 
-    except AriadneGovernanceError:
+    except ASTPGovernanceError:
         raise
     except Exception as e:
         logger.error(f"create_fork failed: {e}", exc_info=True)
@@ -711,7 +711,7 @@ def create_departure_fork(
     fork_episode_id: Optional[str] = None,
     fork_id: Optional[str] = None,
 ) -> Optional["object"]:
-    """Create a DEPARTURE fork (Ariadne BFM Phase D): one directional departure into a
+    """Create a DEPARTURE fork (BFM Phase D): one directional departure into a
     new episode while the ORIGIN CONTINUES. Single node, no siblings, no resolve.
 
     Atomically writes: the fork Episode (ACTIVE + immutable provenance), a
@@ -744,7 +744,7 @@ def create_departure_fork(
             fork_creation_trigger = ForkCreationTrigger(fork_creation_trigger)
         if (fork_creation_trigger == ForkCreationTrigger.AGENT_ESCALATION
                 and not fork_trigger_segment_id):
-            raise AriadneGovernanceError(
+            raise ASTPGovernanceError(
                 "fork_trigger_segment_id is required for AGENT_ESCALATION"
             )
         with driver.session() as session:
@@ -875,7 +875,7 @@ def create_departure_fork(
         # refactor that separates the two sources fails loudly instead of silently
         # corrupting the cross-verifiable anchor.
         if dfp.spine_tip_hash_at_departure != fork_ep.fork_origin_spine_tip_hash:
-            raise AriadneGovernanceError(
+            raise ASTPGovernanceError(
                 "G-30 backdating invariant violated: fork-point tip "
                 f"{dfp.spine_tip_hash_at_departure!r} != fork-episode tip "
                 f"{fork_ep.fork_origin_spine_tip_hash!r}"
@@ -963,7 +963,7 @@ def create_departure_fork(
             audit_record_id=str(audit.audit_id),
         )
 
-    except AriadneGovernanceError:
+    except ASTPGovernanceError:
         raise
     except Exception as e:
         logger.error(f"create_departure_fork failed: {e}", exc_info=True)
@@ -1099,7 +1099,7 @@ def declare_fork_return(
             logger.error(f"Departure fork {fork_id} not found")
             return None
         if status != DepartureForkStatus.COMPLETED.value:
-            raise AriadneGovernanceError(
+            raise ASTPGovernanceError(
                 f"declare_fork_return requires a COMPLETED fork (got {status})"
             )
 
@@ -1111,7 +1111,7 @@ def declare_fork_return(
                 {"fid": str(fork_id)},
             ).single()
         if prior_ret:
-            raise AriadneGovernanceError(
+            raise ASTPGovernanceError(
                 f"Departure fork {fork_id} already has a return declaration"
             )
 
@@ -1173,7 +1173,7 @@ def declare_fork_return(
             origin_episode_id=str(origin_episode_id), return_type=return_type.value,
             delta_id=str(audit.audit_id), audit_record_id=str(audit.audit_id),
         )
-    except AriadneGovernanceError:
+    except ASTPGovernanceError:
         raise
     except Exception as e:
         logger.error(f"declare_fork_return failed: {e}", exc_info=True)
@@ -1209,7 +1209,7 @@ def resolve_fork(
 
     try:
         if not resolution_rationale or not resolution_rationale.strip():
-            raise AriadneGovernanceError(
+            raise ASTPGovernanceError(
                 "Fork resolution requires a non-empty rationale. "
                 "Discarded alternatives deserve an audit trail."
             )
@@ -1314,7 +1314,7 @@ def resolve_fork(
             audit_record_id=str(audit.audit_id),
         )
 
-    except AriadneGovernanceError:
+    except ASTPGovernanceError:
         raise
     except Exception as e:
         logger.error(f"resolve_fork failed: {e}", exc_info=True)
@@ -1416,7 +1416,7 @@ def execute_merge(
         try:
             _ = MergeStrategy(merge_strategy)
         except ValueError:
-            raise AriadneGovernanceError(f"Unknown merge_strategy: {merge_strategy}")
+            raise ASTPGovernanceError(f"Unknown merge_strategy: {merge_strategy}")
 
         conflict_segments = conflict_segments or []
         conflict_resolutions = conflict_resolutions or []
@@ -1697,7 +1697,7 @@ def execute_merge(
             audit_record_id=str(audit.audit_id),
         )
 
-    except AriadneGovernanceError:
+    except ASTPGovernanceError:
         raise
     except Exception as e:
         logger.error(f"execute_merge failed: {e}", exc_info=True)
@@ -1877,7 +1877,7 @@ def create_aside(
         enforce_aside_human_initiated(initiated_by_human)
         enforce_aside_target_agent(target_agent_id)
         if not aside_label or not aside_label.strip():
-            raise AriadneGovernanceError("Aside requires a non-empty label")
+            raise ASTPGovernanceError("Aside requires a non-empty label")
 
         # Verify parent episode is ACTIVE
         with driver.session() as session:
@@ -1979,7 +1979,7 @@ def create_aside(
             audit_record_id=str(audit.audit_id),
         )
 
-    except AriadneGovernanceError:
+    except ASTPGovernanceError:
         raise
     except Exception as e:
         logger.error(f"create_aside failed: {e}", exc_info=True)
@@ -2138,7 +2138,7 @@ def close_aside(
             audit_record_id=str(audit.audit_id),
         )
 
-    except AriadneGovernanceError:
+    except ASTPGovernanceError:
         raise
     except Exception as e:
         logger.error(f"close_aside failed: {e}", exc_info=True)
@@ -2192,7 +2192,7 @@ def create_soliloquy(
         # STEP 1: Validate preconditions
         enforce_soliloquy_purpose_required(soliloquy_purpose)
         if not initiated_by_agent or not initiated_by_agent.strip():
-            raise AriadneGovernanceError("Soliloquy requires initiated_by_agent")
+            raise ASTPGovernanceError("Soliloquy requires initiated_by_agent")
 
         policy = SoliloquyVisibilityPolicy(**(visibility_policy or {}))
         enforce_soliloquy_human_accessible(policy)
@@ -2297,7 +2297,7 @@ def create_soliloquy(
             audit_record_id=str(audit.audit_id),
         )
 
-    except AriadneGovernanceError:
+    except ASTPGovernanceError:
         raise
     except Exception as e:
         logger.error(f"create_soliloquy failed: {e}", exc_info=True)
@@ -2342,7 +2342,7 @@ def conclude_soliloquy(
         # STEP 1: Validate preconditions
         enforce_soliloquy_conclusion_required(conclusion_summary)
         if not merged_into_segment_id or not merged_into_segment_id.strip():
-            raise AriadneGovernanceError(
+            raise ASTPGovernanceError(
                 "Conclusion must specify merged_into_segment_id — "
                 "only the conclusion merges back"
             )
@@ -2459,7 +2459,7 @@ def conclude_soliloquy(
             audit_record_id=str(audit.audit_id),
         )
 
-    except AriadneGovernanceError:
+    except ASTPGovernanceError:
         raise
     except Exception as e:
         logger.error(f"conclude_soliloquy failed: {e}", exc_info=True)

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Episode Payload — Episode-specific extension of NodePayload.
+ASTP Episode Payload — Episode-specific extension of NodePayload.
 
 EpisodePayload carries episode metadata (title, participants, mode, etc.)
 that the protocol layer never inspects. The protocol calls only

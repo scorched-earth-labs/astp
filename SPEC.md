@@ -1154,7 +1154,7 @@ A conforming adapter MUST persist rebalance events and link them to the rebalanc
 
 A conforming adapter MUST:
 
-1. Implement the `AriadneAdapter` interface
+1. Implement the `ASTPAdapter` interface
 2. Enforce all governance rules
 3. Preserve hash chain integrity — never modify leaf_hash, spine_root, or content_hash after creation
 4. Enforce the dual-index invariant: `tree_leaf_index` never in any hash preimage
@@ -1537,7 +1537,7 @@ Branches create non-linear Episode graphs that must remain verifiable:
 - **Merge verification (Phase 2).** Requires three Merkle roots — see §19.3.3.
 
 **Depth constraint.** `branch_depth` maximum of 4 (soft). Exceeding it
-raises `AriadneGovernanceError`; callers may catch and record an
+raises `ASTPGovernanceError`; callers may catch and record an
 override in the audit trail.
 
 #### 19.2.4 Derived Lifecycle State
@@ -1753,7 +1753,7 @@ An aside is a channel between one human and one agent, opened from one Segment. 
 
 **G-25 (Aside Human-Initiation Invariant).** Asides are ALWAYS
 human-initiated. `initiated_by_human` is required; an attempt to create
-an aside without a human actor raises `AriadneGovernanceError`.
+an aside without a human actor raises `ASTPGovernanceError`.
 Agent-initiated internal branches are soliloquies (§19.4.2).
 
 **G-26 (Aside Return Obligation).** An aside that remains OPEN at
@@ -1786,7 +1786,7 @@ The soliloquy node binds what is true at open: who opened it (`initiated_by_agen
 
 **G-27 (Soliloquy Human Accessibility Invariant).** Humans
 ALWAYS have read access. `SoliloquyVisibilityPolicy.human_accessible`
-defaulting or being set to `false` raises `AriadneGovernanceError`.
+defaulting or being set to `false` raises `ASTPGovernanceError`.
 Deliberation content can be private to other agents, never private to
 humans.
 
@@ -2099,7 +2099,7 @@ MembershipRecord {
   record_id:             UUID
   episode_id:            EpisodeID
   group_id:              GroupID
-  group_system:          String           // "claude_project" | "notion_database" | "ariadne_native" | ...
+  group_system:          String           // "claude_project" | "notion_database" | "astp_native" | ...
   asserted_at:           Timestamp
   asserted_by:           AgentID
 

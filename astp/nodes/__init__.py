@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Node Types — domain-specific extensions of CognitiveNode.
+ASTP Node Types — domain-specific extensions of CognitiveNode.
 
 Each node type implements NodePayload and registers with the
 NodeTypeRegistry. The protocol layer never imports from here.

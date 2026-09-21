@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Neo4j+Redis WIL Adapter
+ASTP Neo4j+Redis WIL Adapter
 
 Persistence operations for the Write Intent Log protocol.
 Coordinates writes across Redis (ephemeral) and Neo4j (durable).
@@ -39,7 +39,7 @@ from astp.core.wil import (
     get_redis_ttl,
 )
 
-from astp.protocol.errors import AdapterWriteError, AriadneProtocolError
+from astp.protocol.errors import AdapterWriteError, ASTPProtocolError
 
 logger = logging.getLogger("astp.adapters.neo4j.wil")
 
@@ -180,7 +180,7 @@ async def find_incomplete_wil_entries(redis_client) -> list[WriteIntentEntry]:
             entry = WriteIntentEntry.model_validate_json(raw)
             if entry.completed_at is None:
                 incomplete.append(entry)
-        except AriadneProtocolError:
+        except ASTPProtocolError:
             raise
         except Exception as e:
             logger.error(f"WIL recovery scan: Could not parse entry {key}: {e}")

@@ -30,7 +30,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from astp.core.schema import (
-    AriadneGovernanceError,
+    ASTPGovernanceError,
     compute_spine_hash,
     sha3_256,
 )
@@ -265,7 +265,7 @@ def build_crystallization_delta(
 
 # ── CRYSTALLIZATION_PENDING Lock (Protocol-Level Guards) ────────────────────
 
-class CrystallizationLockError(AriadneGovernanceError):
+class CrystallizationLockError(ASTPGovernanceError):
     """Raised when a write is attempted on an episode with CRYSTALLIZATION_PENDING."""
     pass
 
@@ -301,7 +301,7 @@ async def attempt_amend_crystallization_delta(driver, delta_id: str, correcting_
     explicit. Erroneous crystallizations are corrected via successor episodes,
     not in-place amendment.
     """
-    raise AriadneGovernanceError(
+    raise ASTPGovernanceError(
         f"Immutability violation: CrystallizationDelta {delta_id} cannot be amended. "
         f"Crystallization nodes are immutable by architectural requirement. "
         f"To correct an erroneous crystallization: open a successor episode and "

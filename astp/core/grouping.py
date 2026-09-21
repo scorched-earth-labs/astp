@@ -67,13 +67,18 @@ class MembershipRole(str, Enum):
 
 
 class GroupingSystem(str, Enum):
-    """The one grouping-system identifier the protocol itself reserves. Any
-    other `group_system` is a string the implementation declares — a vendor's
-    construct is named by the vendor's `ConformanceDeclaration` (SPEC §20 →8),
-    not by a member of a protocol enum. (5.0.0 removed the illustrative vendor
-    values that lived here.)
+    """The one grouping-system identifier the protocol itself reserves, and its
+    retained predecessor. Any other `group_system` is a string the
+    implementation declares — a vendor's construct is named by the vendor's
+    `ConformanceDeclaration` (SPEC §20 →8), not by a member of a protocol enum.
+    (5.0.0 removed the illustrative vendor values that lived here.)
+
+    `ariadne_native` is the value carried by records written before astp 0.6.0.
+    `group_system` is in the MembershipRecord hash preimage (SPEC §20 →7), so
+    those records keep it; a new record uses `astp_native`.
     """
-    ARIADNE_NATIVE = "ariadne_native"   # protocol's own internal grouping (if used)
+    ASTP_NATIVE = "astp_native"         # the protocol's own grouping (current)
+    ARIADNE_NATIVE = "ariadne_native"   # retained: records written before astp 0.6.0
 
 
 # ── Capability ──────────────────────────────────────────────────────────────
@@ -109,7 +114,7 @@ class MembershipRecord(BaseModel):
     record_id: UUID = Field(default_factory=uuid4)
     episode_id: UUID
     group_id: str                       # External identifier (UUID or implementation-specific)
-    group_system: str                   # e.g., "ariadne_native", "vendor:Collection"
+    group_system: str                   # e.g., "astp_native", "vendor:Collection"
     asserted_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     asserted_by: str                    # agent_id or user_id
 

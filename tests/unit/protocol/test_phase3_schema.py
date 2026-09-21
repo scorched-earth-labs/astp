@@ -25,7 +25,7 @@ import pytest
 
 from astp.core.branching import (
     AccessLevel,
-    AriadneGovernanceError,
+    ASTPGovernanceError,
     AsideOpenedDelta,
     AsideSegmentNode,
     AsideStatus,
@@ -178,44 +178,44 @@ class TestHashDomainSeparation:
 
 class TestGovernanceRules:
     def test_aside_must_be_human_initiated(self):
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_aside_human_initiated(None)
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_aside_human_initiated("")
         enforce_aside_human_initiated("human-1")  # no raise
 
     def test_aside_target_agent_required(self):
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_aside_target_agent(None)
         enforce_aside_target_agent("agent-a")
 
     def test_aside_close_reason_required(self):
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_aside_close_reason("")
         enforce_aside_close_reason("completed")
 
     def test_soliloquy_purpose_required(self):
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_soliloquy_purpose_required(None)
         enforce_soliloquy_purpose_required("decide")
 
     def test_soliloquy_human_accessible_non_negotiable(self):
         """Humans ALWAYS have read access — deployment cannot turn this off silently."""
         bad = SoliloquyVisibilityPolicy(human_accessible=False)
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_soliloquy_human_accessible(bad)
         good = SoliloquyVisibilityPolicy()
         enforce_soliloquy_human_accessible(good)
 
     def test_soliloquy_conclusion_summary_required(self):
         """Only the conclusion merges back — silence is not an exit."""
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_soliloquy_conclusion_required("")
         enforce_soliloquy_conclusion_required("decided")
 
     def test_aside_return_obligation_enforced_at_seal(self):
         # Open aside at seal → violation
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             check_aside_return_obligation(aside_open=True, episode_sealing=True)
         # Closed aside at seal → OK
         check_aside_return_obligation(aside_open=False, episode_sealing=True)
@@ -223,7 +223,7 @@ class TestGovernanceRules:
         check_aside_return_obligation(aside_open=True, episode_sealing=False)
 
     def test_soliloquy_return_obligation_enforced_at_seal(self):
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             check_soliloquy_return_obligation(
                 soliloquy_active=True, episode_sealing=True,
             )

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Segment Payload — segment-specific extension of NodePayload.
+ASTP Segment Payload — segment-specific extension of NodePayload.
 
 A segment is a point-in-time record of one action within an episode (a chat
 turn, a tool call, an annotation). This reference-implementation payload is

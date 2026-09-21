@@ -21,7 +21,7 @@ Key properties that distinguish this from a standard static Merkle tree:
 4. THRESHOLD SIGNIFICANCE: Fingerprint comparison reveals change importance
 5. INCREMENTAL GROWTH: Tree extends naturally as data is appended
 
-Applied to Ariadne:
+Applied to ASTP:
 - Episode segments are leaves, ordered chronologically (default) or by importance
 - As segments are appended, only the affected branch path is recalculated
 - The leftmost branch fingerprint is the Episode's compact external proof
@@ -46,7 +46,7 @@ logger = logging.getLogger("astp.core.merkle")
 # ============================================================================
 
 def _sha3_256(data: bytes) -> str:
-    """Canonical hash function for all Ariadne content hashing. Returns hex string."""
+    """Canonical hash function for all ASTP content hashing. Returns hex string."""
     return hashlib.sha3_256(data).hexdigest()
 
 

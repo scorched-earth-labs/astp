@@ -25,11 +25,11 @@ Packages:
     astp.core                — episode schema and governance rules, adaptive Merkle
                                tree, crystallization, Write Intent Log, branching,
                                grouping, cross-episode linking, workflow execution
-    astp.adapters            — AriadneAdapter interface
+    astp.adapters            — ASTPAdapter interface
     astp.adapters.neo4j      — reference implementation (Neo4j graph database)
 """
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 # The SPEC.md version this package implements.
 PROTOCOL_VERSION = "5.1.0"

@@ -32,7 +32,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from astp.core.schema import AriadneGovernanceError
+from astp.core.schema import ASTPGovernanceError
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,9 @@ logger = logging.getLogger(__name__)
 # PROVISIONAL_WINDOW_PENDING_EMPIRICAL_VALIDATION
 # 4 hours is the conservative upper bound.
 # Measurement target: T_wil_p99 = P99(delta write initiated -> Neo4j write confirmed)
-PROVISIONAL_WINDOW_HOURS = float(os.getenv("ARIADNE_PROVISIONAL_WINDOW_HOURS", "4"))
+PROVISIONAL_WINDOW_HOURS = float(
+    os.getenv("ASTP_PROVISIONAL_WINDOW_HOURS", os.getenv("ARIADNE_PROVISIONAL_WINDOW_HOURS", "4"))
+)  # the ARIADNE_ name is honoured for deployments configured before astp 0.6.0
 PROVISIONAL_WINDOW_SECONDS = int(PROVISIONAL_WINDOW_HOURS * 3600)
 
 
@@ -190,12 +192,12 @@ QDRANT_DEGRADATION_RECOVERABLE = True  # Invariant — must remain True
 def enforce_write_order(stores: list[StoreLayer]) -> list[StoreLayer]:
     """
     Returns stores sorted in mandatory write order (Blob -> Neo4j -> Redis -> QDrant).
-    Raises AriadneGovernanceError for unknown store layers.
+    Raises ASTPGovernanceError for unknown store layers.
     """
     ordered = [s for s in WRITE_ORDER if s in stores]
     if set(ordered) != set(stores):
         unknown = set(stores) - set(WRITE_ORDER)
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             f"Write ordering violation: Unknown store layer(s) {unknown}. "
             f"All stores must be declared in WRITE_ORDER."
         )
@@ -218,13 +220,13 @@ REDIS_TTL_POLICY: dict[str, int] = {
 def get_redis_ttl(key_pattern: str) -> int:
     """
     Returns the mandatory TTL in seconds for a given Redis key pattern.
-    Raises AriadneGovernanceError if not in the policy.
+    Raises ASTPGovernanceError if not in the policy.
     """
     for pattern, ttl in REDIS_TTL_POLICY.items():
         prefix = pattern.split("{")[0]
         if key_pattern.startswith(prefix):
             return ttl
-    raise AriadneGovernanceError(
+    raise ASTPGovernanceError(
         f"Redis TTL policy violation: No TTL defined for key '{key_pattern}'. "
         f"All ariadne::* Redis keys must have an explicit TTL. "
         f"Add this key pattern to REDIS_TTL_POLICY before writing."
@@ -259,11 +261,11 @@ def enforce_provisional_state_guard(
     data_description: str,
 ) -> None:
     """
-    Raises AriadneGovernanceError if provisional data is written to a persistent store.
+    Raises ASTPGovernanceError if provisional data is written to a persistent store.
     Provisional data may only live in Redis during the provisional window.
     """
     if is_provisional and target_store in PROVISIONAL_PERSISTENT_STORES:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             f"Provisional state invariant violation: Attempted to write provisional "
             f"data '{data_description}' to persistent store '{target_store.value}'. "
             f"Provisional state may only exist in Redis during the provisional window "
