@@ -41,7 +41,7 @@ class RetrievalAuditRecord(BaseModel):
     """Records a single agent retrieval operation.
 
     Created after each successful retrieval tool call. Stored on
-    separate AriadneRetrievalAudit nodes in Neo4j — never on
+    separate retrieval-audit nodes in the structural store — never on
     segment nodes, never in any hash preimage.
     """
     record_id: UUID = Field(default_factory=uuid4)

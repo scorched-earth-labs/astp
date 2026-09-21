@@ -22,8 +22,8 @@ Covers the protocol-core surface of `astp.core.cross_episode`:
 - `LinkAcceptedDelta` payload shape
 - `CognitiveDeltaType` additions (LINK_PROPOSED, LINK_ACCEPTED, LINK_REJECTED)
 
-Adapter-layer behavior (Neo4j writes, audit emission, chain integrity) is
-exercised by integration smoke tests against a live Neo4j during
+Adapter-layer behavior (graph writes, audit emission, chain integrity) is
+exercised by integration smoke tests against a live store during
 development — protocol-core tests here are pure / mock-free.
 """
 

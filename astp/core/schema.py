@@ -331,7 +331,7 @@ class ConsultationNode(BaseModel):
     initiated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     resolved_at: Optional[datetime] = None
     initiating_context_hash: str
-    consultation_prompt: str  # stored directly in Neo4j
+    consultation_prompt: str  # stored on the node
     consultation_prompt_hash: str
     resolution_type: Optional[str] = None  # synthesized | abandoned | deferred | escalated
     resolution_hash: Optional[str] = None
@@ -343,7 +343,7 @@ class ExchangeEntry(BaseModel):
     """
     A single turn within a ConsultationNode exchange.
     Forms a hash chain: each entry's previous_hash references the prior entry's content_hash.
-    Content stored directly in Neo4j per D5.
+    Content stored on the node per D5.
     """
     entry_id: UUID = Field(default_factory=uuid4)
     consultation_id: UUID
@@ -351,7 +351,7 @@ class ExchangeEntry(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     speaker: str
     role: ExchangeRole
-    content: str  # stored directly in Neo4j
+    content: str  # stored on the node
     content_hash: str
     previous_hash: str  # "GENESIS" for entry 0
     round_number: Optional[int] = None  # populated for COLLABORATIVE type
@@ -444,7 +444,7 @@ class CodicilNode(BaseModel):
     codicil_id: UUID = Field(default_factory=uuid4)
     episode_id: UUID
     author: str  # user_id or agent_id
-    content: str  # stored directly in Neo4j
+    content: str  # stored on the node
     content_hash: str  # SHA3-256
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     schema_version: str = ASTP_SCHEMA_VERSION

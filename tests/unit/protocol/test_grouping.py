@@ -25,7 +25,7 @@ Covers the protocol-core surface of `astp.core.grouping`:
   MEMBERSHIP_RECORD_SUPERSEDED, DECLARATION_VERSION_BUMPED,
   DECLARATION_SUPERSEDED)
 
-Adapter behavior (Neo4j writes, succession chain integrity, audit
+Adapter behavior (graph writes, succession chain integrity, audit
 emission) is exercised by integration smoke tests during development —
 protocol-core tests here are pure / mock-free.
 """

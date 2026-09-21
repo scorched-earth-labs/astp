@@ -5,7 +5,7 @@ include SPEC.md
 include GLOSSARY.md
 include VERSIONING.md
 include CONFORMANCE*.md
-include IMPLEMENTATION*.md
+include IMPLEMENTATION-PHASE3.md
 graft docs
 graft tests
 global-exclude *.py[cod]

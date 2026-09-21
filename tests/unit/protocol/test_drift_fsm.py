@@ -15,9 +15,9 @@
 detect_branch_candidate.
 
 Pins the FSM's transitions on fixed drift sequences. The FSM is pure
-(no Neo4j/Redis), so the bulk runs without a driver; detect_branch_candidate's
+(no store), so the bulk runs without one; detect_branch_candidate's
 routing (legacy when fsm_state is None, FSM when provided) is checked on a
-non-materializing turn so no driver is touched.
+non-materializing turn so the store is not touched.
 """
 from __future__ import annotations
 
@@ -117,30 +117,22 @@ def test_running_floor_accumulates_over_scored_turns():
 
 
 def test_detect_branch_candidate_legacy_when_no_fsm_state():
-    # fsm_state=None → legacy streak path; FSM fields stay empty. driver unused
-    # on this non-materializing call (drift below legacy thresholds).
-    # Use a minimal stub driver that yields no prior fingerprint.
-    class _NoRowsSession:
-        def run(self, *a, **k):
-            class _R:
-                def single(self_): return None
-                def __iter__(self_): return iter([])
-            return _R()
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-    class _Driver:
-        def session(self, *a, **k): return _NoRowsSession()
-    res = detect_branch_candidate(_Driver(), "ep", "seg", 4, drift_from_spine=0.1)
+    # fsm_state=None → legacy streak path; FSM fields stay empty. The store holds
+    # no prior fingerprint, and this non-materializing call (drift below the
+    # legacy thresholds) writes nothing.
+    from astp.adapters.memory import InMemoryStore
+    res = detect_branch_candidate(InMemoryStore(), "ep", "seg", 3, drift_from_spine=0.10)
     assert res.new_fsm_state is None
     assert res.triggered_on_derivative is False
 
 
 def test_detect_branch_candidate_fsm_path_returns_new_state():
     # fsm_state provided → FSM path; a non-materializing turn never touches the
-    # driver, so driver=None is safe.
+    # store, and an empty one is all that is needed.
+    from astp.adapters.memory import InMemoryStore
     st = DriftDetectionState(prev_drift=0.20, warmed=True, scored_turns=3,
                              drift_sum=0.9, drift_sq_sum=0.3)
-    res = detect_branch_candidate(None, "ep", "seg", 6, drift_from_spine=0.18,
+    res = detect_branch_candidate(InMemoryStore(), "ep", "seg", 6, drift_from_spine=0.18,
                                   fsm_state=st)
     assert res.new_fsm_state is not None
     assert res.delta_drift is not None

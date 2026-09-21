@@ -26,10 +26,10 @@ Packages:
                                tree, crystallization, Write Intent Log, branching,
                                grouping, cross-episode linking, workflow execution
     astp.adapters            — ASTPAdapter interface
-    astp.adapters.neo4j      — reference implementation (Neo4j graph database)
+    astp.adapters.memory     — reference implementation (both contracts, in memory)
 """
 
-__version__ = "0.8.0"
+__version__ = "1.0.0"
 
 # The SPEC.md version this package implements.
 PROTOCOL_VERSION = "5.1.0"

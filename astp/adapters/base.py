@@ -17,9 +17,9 @@ ASTP Adapter Service Interface (ASI)
 Abstract base class defining the contract that any database adapter must
 implement to be a conforming ASTP persistence backend.
 
-The Neo4j adapter in astp.adapters.neo4j is the reference implementation.
-Other adapters (PostgreSQL/AGE, Neptune, ArangoDB, SQL-based) must implement
-this interface to guarantee protocol compliance.
+astp.adapters.memory.InMemoryStore is the reference implementation — both
+contracts over plain dicts. Any storage backend implements this interface
+to guarantee protocol compliance; the protocol names no provider.
 
 Protocol guarantees that adapters must preserve:
 - Governance rules G1-G9 (enforced at the protocol layer, but adapters
@@ -287,7 +287,7 @@ AriadneAdapter = ASTPAdapter  # name retained for callers written before astp 0.
 # coherence (astp.core.coherence) and the audit-chain helpers (astp.core.audit_chain)
 # read and write the structural record through this contract and nothing else.
 # No store is named in the operations layer: an implementation supplies one of
-# these, and the reference Neo4j implementation is astp.adapters.neo4j.store.
+# these. The reference implementation is astp.adapters.memory.InMemoryStore.
 #
 # Every method is synchronous. A method that cannot complete raises — a store
 # failure as AdapterWriteError (chained), a governance violation as its own
@@ -506,11 +506,16 @@ class StructuralStore(ABC):
         ...
 
 
-def as_structural_store(store_or_driver: Any) -> "StructuralStore":
-    """Accept either a ``StructuralStore`` or, for callers written before astp
-    0.7.0, a raw driver of the reference store — which is wrapped in the
-    reference implementation. The raw-driver form is retained for one release."""
-    if isinstance(store_or_driver, StructuralStore):
-        return store_or_driver
-    from astp.adapters.neo4j.store import Neo4jStructuralStore
-    return Neo4jStructuralStore(store_or_driver)
+def as_structural_store(store: Any) -> "StructuralStore":
+    """The ``StructuralStore`` an operation was given. Until 1.0.0 a raw driver
+    of the reference deployment's store was accepted and wrapped; that store
+    now lives with the deployment, so a caller passes its ``StructuralStore``
+    (the deployment wraps its own driver). Anything else is refused here, at
+    the boundary, rather than failing inside the operation."""
+    if isinstance(store, StructuralStore):
+        return store
+    raise TypeError(
+        f"an operation needs a StructuralStore, got {type(store).__name__}: "
+        "wrap your store's driver in your StructuralStore implementation "
+        "(astp.adapters.memory.InMemoryStore is the reference)"
+    )

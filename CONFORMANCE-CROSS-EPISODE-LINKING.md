@@ -16,7 +16,7 @@ This document specifies the conformance test vectors for the **Cross-Episode Lin
 
 These are **cross-implementation-consistency** vectors, not hardcoded golden-hash values. A hash vector specifies the canonical byte layout (ordered field set + canonicalization rules) and asserts that **two conforming implementations MUST produce identical bytes for the same input tuple**. This is wire-tier conformance (§20 →12.1): the protocol fixes the preimage, not a specific digest. Where a vector references SPEC §20, it uses the amendment's internal §1–§12 numbering scoped within §20 (cited as `§20 →N`).
 
-Cross-Episode Linking & Grouping is organized into the following scopes, matching `IMPLEMENTATION-CROSS-EPISODE-LINKING.md`:
+Cross-Episode Linking & Grouping is organized into the following scopes (the reference deployment's adapter guide, `IMPLEMENTATION-CROSS-EPISODE-LINKING.md`, which lives with that adapter, follows the same order):
 
 | Scope | Coverage | Vector Prefix |
 |-------|----------|---------------|
@@ -248,7 +248,7 @@ Signal-combination algorithm, embedding-model selection, threshold-calibration s
 ## 9. Cross-Reference
 
 - **SPEC.md §20** — normative protocol surface (v3.2.1); internal §1–§12 numbering cited as `§20 →N`.
-- **IMPLEMENTATION-CROSS-EPISODE-LINKING.md** — Neo4j reference adapter (non-normative).
+- **IMPLEMENTATION-CROSS-EPISODE-LINKING.md** — the reference deployment's adapter guide (non-normative; shipped with that adapter, not with the protocol).
 - **CONFORMANCE-BFM.md** — sibling BFM vector set (SPEC §19); shares the cross-implementation-consistency vector format.
 - **`astp/core/hash_canonical.py`** — the shared canonicalizer that every `CEL-`/`MR-`/`CD-` hash vector references.
 

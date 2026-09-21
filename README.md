@@ -55,10 +55,8 @@ astp/
 │   ├── workflow_execution.py# Layer 3 — Workflow & Execution DAG
 │   └── hash_canonical.py    # Reference canonicalizer for content hashes
 └── adapters/
-    ├── base.py              # ASTPAdapter abstract interface (ASI)
-    └── neo4j/               # Reference implementation
-        ├── writer.py, queries.py, crystallization.py, wil.py
-        └── rebalance.py, retrieval_audit.py
+    ├── base.py              # ASTPAdapter + StructuralStore contracts
+    └── memory.py            # InMemoryStore — the reference implementation of both
 ```
 
 Two invariants shape the tree. The **namespace firewall**: `astp.protocol.*` never imports from `astp.nodes.*` (enforced by test). And the dependency is strictly one-directional: adapters import the protocol core; the protocol core has no database dependencies.
@@ -118,7 +116,7 @@ A conforming adapter must:
 4. Support idempotent writes for WIL recovery
 5. Fail loudly on errors — never silently swallow writes
 
-The operations layer — branch, fork, merge, aside, soliloquy, cross-episode linking, grouping, coherence, the audit chain — reads and writes through a second, synchronous contract, `StructuralStore` (also in `astp.adapters.base`), and names no store of its own. An implementation supplies one. `astp.adapters.memory.InMemoryStore` implements both contracts over plain dicts — the simplest conforming implementation, and the store the protocol's own tests run the operations against; `astp.adapters.neo4j.store.Neo4jStructuralStore` is the graph-backed reference. See `SPEC.md` for the full conformance requirements.
+The operations layer — branch, fork, merge, aside, soliloquy, cross-episode linking, grouping, coherence, the audit chain — reads and writes through a second, synchronous contract, `StructuralStore` (also in `astp.adapters.base`), and names no store of its own. An implementation supplies one. `astp.adapters.memory.InMemoryStore` implements both contracts over plain dicts — the reference implementation, and the store the protocol's own tests run the operations against. The protocol names no storage provider: a graph database, a relational store or anything else is a deployment's choice behind these two contracts. See `SPEC.md` for the full conformance requirements.
 
 ---
 
@@ -142,7 +140,7 @@ Requires Python >= 3.11. The distribution name and the import name are both `ast
 The package is not yet published to a package index. Install from a checkout:
 
 ```bash
-pip install -e ".[neo4j,dev]"   # editable install with the Neo4j reference adapter and test dependencies
+pip install -e ".[dev]"         # editable install with test dependencies
 pytest                          # run the reference test suite
 ```
 
@@ -179,13 +177,13 @@ Each feature surface (§19, §20, §21) has a companion implementation guide and
 
 ## Specification Documents
 
-The protocol is one normative document (`SPEC.md`) plus, per feature surface, a non-normative implementation guide (reference Neo4j adapter) and a conformance document (test vectors stated as inputs and required properties, with pinned expected digests in `vectors/`).
+The protocol is one normative document (`SPEC.md`) plus, per feature surface, a conformance document (test vectors stated as inputs and required properties, with pinned expected digests in `vectors/`).
 
 | Surface | SPEC | Implementation guide | Conformance vectors |
 |---------|------|----------------------|---------------------|
-| Branch / Fork / Merge + **Departure Fork** | §19 | [`IMPLEMENTATION-BFM.md`](./IMPLEMENTATION-BFM.md) | [`CONFORMANCE-BFM.md`](./CONFORMANCE-BFM.md) |
-| Cross-Episode Linking & Grouping | §20 | [`IMPLEMENTATION-CROSS-EPISODE-LINKING.md`](./IMPLEMENTATION-CROSS-EPISODE-LINKING.md) | [`CONFORMANCE-CROSS-EPISODE-LINKING.md`](./CONFORMANCE-CROSS-EPISODE-LINKING.md) |
-| Layer 3 — Workflow & Execution DAG | §21 | [`IMPLEMENTATION-LAYER3.md`](./IMPLEMENTATION-LAYER3.md) | [`CONFORMANCE-LAYER3.md`](./CONFORMANCE-LAYER3.md) |
+| Branch / Fork / Merge + **Departure Fork** | §19 | — | [`CONFORMANCE-BFM.md`](./CONFORMANCE-BFM.md) |
+| Cross-Episode Linking & Grouping | §20 | — | [`CONFORMANCE-CROSS-EPISODE-LINKING.md`](./CONFORMANCE-CROSS-EPISODE-LINKING.md) |
+| Layer 3 — Workflow & Execution DAG | §21 | — | [`CONFORMANCE-LAYER3.md`](./CONFORMANCE-LAYER3.md) |
 | Reproducibility — spine leaf set, episode root, version identifiers | §5.6–§5.8, §9.3, G-1 | — | [`CONFORMANCE-REPRODUCIBILITY.md`](./CONFORMANCE-REPRODUCIBILITY.md) |
 | Trust Infrastructure — keys, anchoring, witnesses, chain proofs | §16 | [`IMPLEMENTATION-PHASE3.md`](./IMPLEMENTATION-PHASE3.md) | [`CONFORMANCE.md`](./CONFORMANCE.md) |
 | Seal constructions — encoding, leaf hash, spine, manifests, Episode root, inclusion proofs | §5, §9.2 | — | [`CONFORMANCE-REPRODUCIBILITY.md`](./CONFORMANCE-REPRODUCIBILITY.md) RP-009–011, [`vectors/5.0.0/`](./vectors/5.0.0/) |

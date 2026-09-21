@@ -45,14 +45,14 @@ def _imports(path: Path):
                 yield a.name
 
 
-def test_operations_layer_never_imports_the_reference_adapter():
+def test_operations_layer_never_imports_a_store_package():
     offenders = sorted(
         f"{p.relative_to(PKG)}: {m}"
         for p in OPERATIONS_LAYER
         for m in _imports(p)
-        if m.startswith("astp.adapters.neo4j")
+        if m.startswith("astp.adapters.") and not m.startswith("astp.adapters.base")
     )
-    assert offenders == [], f"the operations layer imports the reference adapter: {offenders}"
+    assert offenders == [], f"the operations layer imports a store: {offenders}"
 
 
 def test_operations_layer_never_opens_a_store_session():
@@ -65,6 +65,24 @@ def test_operations_layer_never_opens_a_store_session():
     assert offenders == [], f"raw store access in the operations layer: {offenders}"
 
 
+RETAINED_STORED_DATA = ("LEGACY_STORE_VALUES", "StoreRole.")  # SPEC §12.1: the 4.x provider names a reader maps
+
+
+def test_no_store_provider_is_named_anywhere_in_the_package():
+    """The protocol names roles, not providers (SPEC §12.1). The one place a
+    provider name may appear is the fixed 4.x correspondence ``store_role_of``
+    publishes — stored data a reader maps, never something a writer emits."""
+    offenders = []
+    for p in list(PKG.rglob("*.py")) + list((PKG.parent / "tests").rglob("*.py")):
+        if p.name == "test_structural_store.py":
+            continue
+        for i, line in enumerate(p.read_text().splitlines(), 1):
+            low = line.lower()
+            if any(w in low for w in VENDOR_WORDS) and not any(k in line for k in RETAINED_STORED_DATA):
+                offenders.append(f"{p.relative_to(PKG.parent)}:{i}")
+    assert offenders == [], f"a store provider is named: {offenders}"
+
+
 def test_in_memory_store_implements_both_contracts():
     from astp.adapters.base import ASTPAdapter
     from astp.adapters.memory import InMemoryStore
@@ -73,10 +91,10 @@ def test_in_memory_store_implements_both_contracts():
 
 
 def test_reference_store_implements_the_whole_contract():
-    from astp.adapters.neo4j.store import Neo4jStructuralStore
+    from astp.adapters.memory import InMemoryStore
     abstract = {n for n, m in inspect.getmembers(StructuralStore) if getattr(m, "__isabstractmethod__", False)}
     assert abstract, "the contract declares nothing"
-    store = Neo4jStructuralStore(object())  # instantiation fails if any abstract method is missing
+    store = InMemoryStore()  # instantiation fails if any abstract method is missing
     assert isinstance(store, StructuralStore)
     for name in abstract:
         assert not getattr(getattr(store, name), "__isabstractmethod__", False)
@@ -111,11 +129,10 @@ def test_coercion_returns_a_structural_store_unchanged():
     assert as_structural_store(store) is store
 
 
-def test_coercion_wraps_a_raw_driver_in_the_reference_store():
-    from astp.adapters.neo4j.store import Neo4jStructuralStore
-    driver = object()
-    wrapped = as_structural_store(driver)
-    assert isinstance(wrapped, Neo4jStructuralStore) and wrapped.driver is driver
+def test_anything_but_a_structural_store_is_refused_at_the_boundary():
+    """1.0.0: a raw driver is no longer wrapped — the deployment wraps its own."""
+    with pytest.raises(TypeError, match="needs a StructuralStore"):
+        as_structural_store(object())
 
 
 def test_an_operation_runs_against_any_structural_store():

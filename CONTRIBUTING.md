@@ -10,11 +10,11 @@ Python 3.11 or later.
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
-pip install -e ".[neo4j,dev]"
+pip install -e ".[dev]"
 pytest
 ```
 
-The suite needs no database and no network. The Neo4j adapter takes a driver object from the caller; nothing in this repository starts one.
+The suite needs no database and no network: the operations run against the in-memory reference store. A deployment's adapter lives with that deployment, and so do its integration tests.
 
 Run a single file or test the usual way:
 

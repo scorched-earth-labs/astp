@@ -26,7 +26,7 @@ Covers the protocol-core surface of `astp.core.workflow_execution`:
   SKILL_INVOKED, WORKFLOW_CLOSED)
 - Delta payload shapes
 
-Adapter-layer behavior (Neo4j writes, audit emission, CIA enforcement) is
+Adapter-layer behavior (graph writes, audit emission, CIA enforcement) is
 exercised by integration tests against a live implementation — protocol-core
 tests here are pure / mock-free.
 """

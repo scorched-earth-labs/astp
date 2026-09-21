@@ -15,7 +15,7 @@
 Phase 3 — Aside + Soliloquy Operations Unit Tests (in-memory store)
 
 Exercises create_aside, close_aside, create_soliloquy, conclude_soliloquy
-against an in-memory fake Neo4j store. Verifies:
+against the in-memory reference store. Verifies:
   - asides rejected when not human-initiated
   - reference scan surfaces external leaks without blocking the close
   - soliloquy default policy enforces G-27 (human-accessible,

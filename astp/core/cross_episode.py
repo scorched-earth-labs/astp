@@ -408,7 +408,7 @@ def assert_episode_link(
     directly, because doing so bypasses the audit chain.
 
     Args:
-        store: a StructuralStore (a raw driver of the reference store is accepted for one release).
+        store: a StructuralStore.
         link: EpisodeLink to assert. `created_by` must be set (audit
             chain requires an actor). `content_hash` will be stamped if
             not already present.

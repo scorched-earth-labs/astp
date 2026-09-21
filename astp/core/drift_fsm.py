@@ -17,7 +17,7 @@ Absolute per-turn drift is not thresholdable (EWM centroid chasing + compressed
 embedding space); the signal lives in the *rate of change* (derivative) plus
 *sustained elevation*, with a *hysteresis cooldown* to suppress re-fires.
 
-This module is PURE: no Neo4j, no Redis, no I/O. `DriftDetectionState` is the
+This module is PURE: no store, no I/O. `DriftDetectionState` is the
 working state; the caller persists it between turns (the reference deployment
 keeps it in the ephemeral coordinator under
 `ariadne::drift_fsm_state::{episode_id}`) — this package has no coordinator of
@@ -50,7 +50,7 @@ DEFAULT_DRIFT_FSM_THRESHOLDS = DriftFSMThresholds()
 
 
 class DriftDetectionState(BaseModel):
-    """Per-episode FSM working state. Caller serializes to/from Redis.
+    """Per-episode FSM working state. Caller serializes to/from its ephemeral coordinator.
 
     Holds everything the transition needs across turns — it cannot be
     reconstructed from a single drift value. Running stats (`drift_sum`,
