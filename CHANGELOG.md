@@ -6,6 +6,12 @@ All notable changes to ASTP (the AI State Tree Protocol). Version numbering foll
 
 The next change-set queues here.
 
+### Changed (reference package 0.7.0 — the operations layer names no store)
+- **`StructuralStore`** (`astp.adapters.base`): the storage contract of the operations layer — 47 synchronous operations covering what branch, fork, merge, aside, soliloquy, cross-episode linking, grouping, coherence and the audit-chain helpers read and write. The reference implementation is `astp.adapters.neo4j.store.Neo4jStructuralStore`, which delegates to the existing writer and runs, unchanged, the reads the operations layer used to run itself.
+- `astp.core.branch_operations`, `cross_episode`, `grouping`, `coherence` and `audit_chain` take a `store` (any `StructuralStore`) where they took a driver, and import nothing from the adapter package. A raw driver of the reference store is still accepted — it is wrapped — for one release. `CoherenceFingerprintRegistry` likewise. Two structural tests guard the cut: nothing under `astp/core`, `astp/protocol` or `astp/nodes` imports `astp.adapters.neo4j` or opens a store session.
+- `astp.core.ordering.content_hashes_in_sequence_order` — the pure helper moved out of the adapter's query module (still importable from there).
+- Not in this release: `astp.core.wil` still carries the vendor store enum and the coordinator key policy; they leave with the adapter.
+
 ### Changed (reference package 0.6.0 — the public API carries the protocol's name)
 - `ASTPAdapter`, `ASTPProtocolError`, `ASTPGovernanceError`, `ASTP_SCHEMA_VERSION` and `initialize_astp_schema` replace the `Ariadne*` / `ARIADNE_*` / `initialize_ariadne_schema` names. The old names remain importable as aliases of the new ones for callers written before 0.6.0; no behaviour changes. Docstrings, comments and log prefixes say ASTP.
 - `GroupingSystem.ASTP_NATIVE` (`"astp_native"`) is the protocol's reserved grouping value. `ARIADNE_NATIVE` (`"ariadne_native"`) is retained as the value carried by records written before 0.6.0 — `group_system` is in the MembershipRecord hash preimage (SPEC §20 →7), so those records keep it.

@@ -21,13 +21,14 @@ Phase 4 makes detection active:
     fire MATERIALIZED recommendations
   - intercept_segment_write(): Write Intercept Protocol — compute
     fingerprint at write time, persist it, advance the detection state
-  - CoherenceFingerprintRegistry: convenience wrapper around the Neo4j
+  - CoherenceFingerprintRegistry: convenience wrapper around the structural store
     fingerprint queries
 """
 
 import logging
 from typing import Any, Dict, List, Optional
 
+from astp.adapters.base import as_structural_store
 from astp.core.branching import (
     CoherenceFingerprint,
     DetectionResult,
@@ -57,7 +58,7 @@ _FSM_TO_DETECTION = {
 
 
 def _detect_via_fsm(
-    driver,
+    store,
     episode_id: str,
     segment_id: str,
     sequence_index: int,
@@ -69,11 +70,12 @@ def _detect_via_fsm(
 
     Pure transition (no fingerprint read) except the materialized-recommendation
     lookup, which mirrors the legacy path. The new FSM state is returned on
-    `new_fsm_state` for the caller to persist in Redis.
+    `new_fsm_state` for the caller to persist in its ephemeral coordinator.
 
     `drift_vs_anchor` (caller-supplied, the pre-pivot centroid snapshot) is the
     sustain-gate input; None falls back to live drift.
     """
+    store = as_structural_store(store)
     res = advance_drift_fsm(
         fsm_state, drift_from_spine, sequence_index, drift_vs_anchor=drift_vs_anchor
     )
@@ -85,7 +87,7 @@ def _detect_via_fsm(
 
     recommendation = None
     if res.materialized:
-        registry = CoherenceFingerprintRegistry(driver)
+        registry = CoherenceFingerprintRegistry(store)
         last_nominal = registry.last_nominal_segment(episode_id)
         recommendation = compute_materialized_recommendation(
             episode_id=episode_id,
@@ -120,31 +122,27 @@ def _detect_via_fsm(
 
 
 class CoherenceFingerprintRegistry:
-    """Read/write facade over the AriadneCoherenceFingerprint graph nodes.
+    """Read/write facade over the stored coherence fingerprints.
 
-    Backed by the Neo4j writer module; callable with a driver reference.
-    Use this instead of the raw writer functions from application code.
+    Backed by a ``StructuralStore``; a raw driver of the reference store is
+    accepted for one release. Use this instead of store calls from application code.
     """
 
-    def __init__(self, driver):
-        self.driver = driver
+    def __init__(self, store):
+        self.store = as_structural_store(store)
 
     def write(self, fingerprint: CoherenceFingerprint) -> None:
         enforce_write_time_fingerprint(fingerprint)
-        from astp.adapters.neo4j.writer import write_coherence_fingerprint_sync
-        write_coherence_fingerprint_sync(self.driver, fingerprint)
+        self.store.write_coherence_fingerprint(fingerprint)
 
     def recent(self, episode_id: str, limit: int = 10) -> List[Dict[str, Any]]:
-        from astp.adapters.neo4j.writer import query_recent_fingerprints_sync
-        return query_recent_fingerprints_sync(self.driver, episode_id, limit)
+        return self.store.recent_fingerprints(episode_id, limit)
 
     def last(self, episode_id: str) -> Optional[Dict[str, Any]]:
-        from astp.adapters.neo4j.writer import get_last_fingerprint_sync
-        return get_last_fingerprint_sync(self.driver, episode_id)
+        return self.store.last_fingerprint(episode_id)
 
     def last_nominal_segment(self, episode_id: str) -> Optional[str]:
-        from astp.adapters.neo4j.writer import get_last_nominal_segment_sync
-        return get_last_nominal_segment_sync(self.driver, episode_id)
+        return self.store.last_nominal_segment(episode_id)
 
 
 # ============================================================================
@@ -153,7 +151,7 @@ class CoherenceFingerprintRegistry:
 
 
 def detect_branch_candidate(
-    driver,
+    store,
     episode_id: str,
     segment_id: str,
     sequence_index: int,
@@ -178,13 +176,14 @@ def detect_branch_candidate(
       - `fsm_state` provided: the derivative+hysteresis FSM. The caller owns
         the persisted DriftDetectionState and passes it in; the new state comes back on `result.new_fsm_state`.
     """
+    store = as_structural_store(store)
     if fsm_state is not None:
         return _detect_via_fsm(
-            driver, episode_id, segment_id, sequence_index,
+            store, episode_id, segment_id, sequence_index,
             drift_from_spine, fsm_state, drift_vs_anchor=drift_vs_anchor,
         )
 
-    registry = CoherenceFingerprintRegistry(driver)
+    registry = CoherenceFingerprintRegistry(store)
     last = registry.last(episode_id)
 
     prior_state = DetectionState.NOMINAL
@@ -246,7 +245,7 @@ def detect_branch_candidate(
 
 
 def intercept_segment_write(
-    driver,
+    store,
     episode_id: str,
     segment_id: str,
     sequence_index: int,
@@ -271,10 +270,11 @@ def intercept_segment_write(
     write path and act on `result.materialized_recommendation` when
     present (typically: call create_branch with declaration_type=RETROACTIVE).
     """
+    store = as_structural_store(store)
     objective_hash = compute_objective_hash(current_objective)
 
     result = detect_branch_candidate(
-        driver=driver,
+        store=store,
         episode_id=episode_id,
         segment_id=segment_id,
         sequence_index=sequence_index,
@@ -298,7 +298,7 @@ def intercept_segment_write(
         detection_state=result.new_state,
     )
 
-    registry = CoherenceFingerprintRegistry(driver)
+    registry = CoherenceFingerprintRegistry(store)
     registry.write(fingerprint)
 
     return result

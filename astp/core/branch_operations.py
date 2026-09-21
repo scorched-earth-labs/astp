@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
+from astp.core.ordering import content_hashes_in_sequence_order
+from astp.adapters.base import as_structural_store
 from astp.core.wil import WILOperation
 from astp.protocol.errors import AdapterWriteError, BranchOperationError
 from astp.core.content_hash_v2 import (
@@ -47,15 +49,15 @@ def _is_uuid(value) -> bool:
         return False
 
 
-def _parent_segment_for_side_channel(driver, parent_segment_id):
+def _parent_segment_for_side_channel(store, parent_segment_id):
     """(UUID, content_hash) of the Segment an aside or soliloquy opens from, or
     None — logged — when it is not a UUID or does not exist. SPEC §19.4 binds the
     parent by identity and by content, so both must be real."""
-    from astp.adapters.neo4j.queries import segment_content_hashes_sync
+    store = as_structural_store(store)
     if not _is_uuid(parent_segment_id):
         logger.error(f"parent_segment_id {parent_segment_id!r} is not a UUID")
         return None
-    found = segment_content_hashes_sync(driver, [parent_segment_id])
+    found = store.segment_content_hashes([parent_segment_id])
     if str(parent_segment_id) not in found:
         logger.error(f"parent segment {parent_segment_id} not found or has no content hash")
         return None
@@ -95,7 +97,7 @@ logger = logging.getLogger("astp.branch_operations")
 
 
 def create_branch(
-    driver,
+    store,
     source_episode_id: str,
     source_segment_id: str,
     branch_intent: str,
@@ -113,7 +115,7 @@ def create_branch(
     or compensated. Writes: BranchPointNode + CognitiveDelta + AuditRecord.
 
     Args:
-        driver: Neo4j sync driver
+        store: a StructuralStore (a raw driver of the reference store is accepted for one release)
         source_episode_id: Episode to branch from
         source_segment_id: Exact divergence point (segment ID)
         branch_intent: Required, non-empty — why this branch exists
@@ -128,6 +130,7 @@ def create_branch(
     Returns:
         BranchResult on success, None on failure
     """
+    store = as_structural_store(store)
     try:
         # STEP 1: Validate preconditions
         if not branch_intent or not branch_intent.strip():
@@ -143,28 +146,20 @@ def create_branch(
             )
 
         # Verify source episode exists and is ACTIVE
-        with driver.session() as session:
-            ep_check = session.run("""
-                MATCH (e:AriadneEpisode {episode_id: $eid})
-                RETURN e.episode_status AS status
-            """, {"eid": source_episode_id})
-            ep_record = ep_check.single()
-            if not ep_record:
-                logger.error(f"Source episode {source_episode_id} not found")
-                return None
-            status = ep_record["status"]
-            if status not in ("ACTIVE", "PENDING_HITL"):
-                logger.error(f"Source episode not in ACTIVE state: {status}")
-                return None
+        status = store.episode_status(source_episode_id)
+        if status is None:
+            logger.error(f"Source episode {source_episode_id} not found")
+            return None
+        if status not in ("ACTIVE", "PENDING_HITL"):
+            logger.error(f"Source episode not in ACTIVE state: {status}")
+            return None
 
         # STEP 2: Acquire intent record (idempotency guard)
-        from astp.adapters.neo4j.writer import acquire_intent_sync, complete_intent_sync
 
         idempotency_key = compute_intent_idempotency_key(
             source_episode_id, source_segment_id, branch_intent
         )
-        intent, is_new = acquire_intent_sync(
-            driver, idempotency_key, IntentType.CREATE_BRANCH.value, initiator
+        intent, is_new = store.acquire_intent(idempotency_key, IntentType.CREATE_BRANCH.value, initiator
         )
         if intent and intent.get("status") == "COMPLETE":
             logger.info(f"Branch already created (idempotent): {intent.get('result_node_id')}")
@@ -181,15 +176,7 @@ def create_branch(
         # Access policy enforcement is not wired into this step.
 
         # STEP 4: Capture spine Merkle snapshot
-        spine_merkle_snapshot = ""
-        with driver.session() as session:
-            spine_result = session.run("""
-                MATCH (e:AriadneEpisode {episode_id: $eid})
-                RETURN e.spine_hash AS spine_hash
-            """, {"eid": source_episode_id})
-            spine_record = spine_result.single()
-            if spine_record and spine_record["spine_hash"]:
-                spine_merkle_snapshot = spine_record["spine_hash"]
+        spine_merkle_snapshot = store.episode_spine_hash(source_episode_id) or ""
 
         # STEP 5: Create BranchPointNode
         branch_point = BranchPointNode(
@@ -225,8 +212,7 @@ def create_branch(
             branch_point.declared_by = initiator
 
         # STEP 6: Write BranchPointNode + BRANCH_ORIGIN edge
-        from astp.adapters.neo4j.writer import write_branch_point_sync
-        write_branch_point_sync(driver, branch_point)
+        store.write_branch_point(branch_point)
 
         # STEP 7: Write CognitiveDelta (as part of AuditRecord)
         forward_delta = {
@@ -242,10 +228,10 @@ def create_branch(
         }
 
         # STEP 8: Get next delta sequence
-        delta_sequence = next_delta_sequence(driver, source_episode_id)
+        delta_sequence = next_delta_sequence(store, source_episode_id)
 
         # Get prior audit hash for chain integrity
-        prior_audit_hash = fetch_prior_audit_hash(driver, source_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(store, source_episode_id)
 
         # Create audit record
         audit = AuditRecord(
@@ -276,8 +262,7 @@ def create_branch(
         )
 
         # Write audit record
-        from astp.adapters.neo4j.writer import write_audit_record_sync
-        write_audit_record_sync(driver, audit)
+        store.write_audit_record(audit)
 
         # STEP 9: Write AccessPolicy for new branch
         policy = AccessPolicy(
@@ -291,12 +276,11 @@ def create_branch(
         # Full policy enforcement comes in Phase 4
 
         # STEP 10: Mark intent record COMPLETE
-        complete_intent_sync(
-            driver, idempotency_key, str(branch_point.branch_point_id)
+        store.complete_intent(idempotency_key, str(branch_point.branch_point_id)
         )
 
         # STEP 11: Write WIL entry
-        _write_branch_wil(driver, source_episode_id, str(branch_point.branch_point_id), WILOperation.BRANCH_CREATE)
+        _write_branch_wil(store, source_episode_id, str(branch_point.branch_point_id), WILOperation.BRANCH_CREATE)
 
         logger.info(
             f"Branch created: {str(branch_point.branch_id)[:8]}... "
@@ -322,7 +306,7 @@ def create_branch(
 
 
 def abandon_branch(
-    driver,
+    store,
     branch_id: str,
     initiator: str,
     abandonment_reason: str,
@@ -334,7 +318,7 @@ def abandon_branch(
     the branch cannot be reopened. All writes are atomic.
 
     Args:
-        driver: Neo4j sync driver
+        store: a StructuralStore (a raw driver of the reference store is accepted for one release)
         branch_id: UUID of the branch to abandon
         initiator: AgentID or UserID performing the abandonment
         abandonment_reason: Required, non-empty — why the branch is being abandoned
@@ -343,43 +327,27 @@ def abandon_branch(
     Returns:
         AbandonResult on success, None on failure
     """
+    store = as_structural_store(store)
     try:
         # STEP 1: Validate preconditions
         enforce_abandonment_reason_required(abandonment_reason)
 
         # Verify branch is ACTIVE (derived: BranchPoint exists, no Terminus)
-        with driver.session() as session:
-            bp_result = session.run("""
-                MATCH (bp:AriadneBranchPoint {branch_id: $bid})
-                OPTIONAL MATCH (bp)-[:BRANCH_TERMINUS]->(bt:AriadneBranchTerminus)
-                RETURN bp {.*} AS branch_point, bt IS NOT NULL AS has_terminus
-            """, {"bid": branch_id})
-            bp_record = bp_result.single()
-
-            if not bp_record or not bp_record["branch_point"]:
-                logger.error(f"Branch {branch_id} not found")
-                return None
-
-            if bp_record["has_terminus"]:
-                logger.error(f"Branch {branch_id} already terminated")
-                return None
-
-            branch_point_data = dict(bp_record["branch_point"])
+        loaded = store.branch_point_with_terminus(branch_id)
+        if loaded is None:
+            logger.error(f"Branch {branch_id} not found")
+            return None
+        branch_point_data, has_terminus = loaded
+        if has_terminus:
+            logger.error(f"Branch {branch_id} already terminated")
+            return None
 
         episode_id = branch_point_data.get("episode_id", "")
         branch_point_hash = branch_point_data.get("content_hash", "")
 
         # STEP 2: Capture final branch state
-        final_merkle_root = ""  # Branch-specific Merkle root
-        with driver.session() as session:
-            # Get the spine hash as proxy for branch state
-            spine_result = session.run("""
-                MATCH (e:AriadneEpisode {episode_id: $eid})
-                RETURN e.spine_hash AS spine_hash
-            """, {"eid": episode_id})
-            spine_record = spine_result.single()
-            if spine_record and spine_record["spine_hash"]:
-                final_merkle_root = spine_record["spine_hash"]
+        # The spine hash stands in for the branch state
+        final_merkle_root = store.episode_spine_hash(episode_id) or ""  # Branch-specific Merkle root
 
         # Compute duration
         created_at_str = branch_point_data.get("timestamp_utc", "")
@@ -402,8 +370,7 @@ def abandon_branch(
             abandonment_reason=abandonment_reason,
         )
 
-        from astp.adapters.neo4j.writer import write_branch_terminus_sync
-        write_branch_terminus_sync(driver, terminus)
+        store.write_branch_terminus(terminus)
 
         # STEP 4: Write CognitiveDelta + AuditRecord
         forward_delta = {
@@ -416,8 +383,8 @@ def abandon_branch(
             "clear_abandon_record": str(terminus.terminus_id),
         }
 
-        delta_sequence = next_delta_sequence(driver, episode_id)
-        prior_audit_hash = fetch_prior_audit_hash(driver, episode_id)
+        delta_sequence = next_delta_sequence(store, episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(store, episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -444,8 +411,7 @@ def abandon_branch(
         )
 
         # STEP 5: Write AuditRecord
-        from astp.adapters.neo4j.writer import write_audit_record_sync
-        write_audit_record_sync(driver, audit)
+        store.write_audit_record(audit)
 
         # STEP 6: Preserve artifacts (default behavior — no deletion)
         artifacts_preserved = []
@@ -454,7 +420,7 @@ def abandon_branch(
             pass
 
         # STEP 7: Write WIL entry
-        _write_branch_wil(driver, episode_id, str(terminus.terminus_id), WILOperation.BRANCH_ABANDON)
+        _write_branch_wil(store, episode_id, str(terminus.terminus_id), WILOperation.BRANCH_ABANDON)
 
         logger.info(
             f"Branch abandoned: {branch_id[:8]}... "
@@ -492,7 +458,7 @@ def abandon_branch(
 
 
 def create_fork(
-    driver,
+    store,
     origin_episode_id: str,
     origin_segment_id: str,
     fork_objective: str,
@@ -505,7 +471,7 @@ def create_fork(
     """Create N ForkPointNodes + FORK_CREATED delta + AuditRecord.
 
     Args:
-        driver: Neo4j sync driver
+        store: a StructuralStore (a raw driver of the reference store is accepted for one release)
         origin_episode_id: Episode the fork originates from
         origin_segment_id: Provenance anchor
         fork_objective: New Episode's objective (required, non-empty)
@@ -520,6 +486,7 @@ def create_fork(
     Returns:
         ForkResult on success, None on failure
     """
+    store = as_structural_store(store)
     from astp.core.branching import (
         ForkPointNode,
         AuditRecord,
@@ -533,12 +500,6 @@ def create_fork(
         enforce_fork_sibling_count,
         ForkResult,
     )
-    from astp.adapters.neo4j.writer import (
-        write_fork_point_sync,
-        write_audit_record_sync,
-        acquire_intent_sync,
-        complete_intent_sync,
-    )
     from uuid import uuid4
 
     try:
@@ -549,25 +510,19 @@ def create_fork(
         if not fork_intent or not fork_intent.strip():
             raise ASTPGovernanceError("Fork intent must be non-empty")
 
-        with driver.session() as session:
-            ep_check = session.run("""
-                MATCH (e:AriadneEpisode {episode_id: $eid})
-                RETURN e.episode_status AS status
-            """, {"eid": origin_episode_id})
-            ep_record = ep_check.single()
-            if not ep_record:
-                logger.error(f"Origin episode {origin_episode_id} not found")
-                return None
-            if ep_record["status"] not in ("ACTIVE", "PENDING_HITL"):
-                logger.error(f"Origin episode not in ACTIVE state: {ep_record['status']}")
-                return None
+        status = store.episode_status(origin_episode_id)
+        if status is None:
+            logger.error(f"Origin episode {origin_episode_id} not found")
+            return None
+        if status not in ("ACTIVE", "PENDING_HITL"):
+            logger.error(f"Origin episode not in ACTIVE state: {status}")
+            return None
 
         # STEP 2: Acquire intent record
         idempotency_key = compute_intent_idempotency_key(
             origin_episode_id, origin_segment_id, f"FORK:{fork_objective}:{len(alternatives)}"
         )
-        intent, _is_new = acquire_intent_sync(
-            driver, idempotency_key, IntentType.CREATE_FORK.value, initiator
+        intent, _is_new = store.acquire_intent(idempotency_key, IntentType.CREATE_FORK.value, initiator
         )
         if intent and intent.get("status") == "COMPLETE":
             logger.info(f"Fork already created (idempotent): {intent.get('result_node_id')}")
@@ -619,7 +574,7 @@ def create_fork(
 
         # STEP 5: Write all ForkPointNodes
         for fp in fork_points:
-            write_fork_point_sync(driver, fp)
+            store.write_fork_point(fp)
 
         # STEP 6: Write FORK_CREATED AuditRecord
         fork_point_ids = [str(fp.fork_point_id) for fp in fork_points]
@@ -637,8 +592,8 @@ def create_fork(
             "delete_fork_point_ids": fork_point_ids,
         }
 
-        delta_sequence = next_delta_sequence(driver, origin_episode_id)
-        prior_audit_hash = fetch_prior_audit_hash(driver, origin_episode_id)
+        delta_sequence = next_delta_sequence(store, origin_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(store, origin_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -663,13 +618,13 @@ def create_fork(
             json.dumps(forward_delta, default=str),
             prior_audit_hash,
         )
-        write_audit_record_sync(driver, audit)
+        store.write_audit_record(audit)
 
         # STEP 7: Mark intent complete
-        complete_intent_sync(driver, idempotency_key, str(fork_id))
+        store.complete_intent(idempotency_key, str(fork_id))
 
         # STEP 8: WIL entry
-        _write_branch_wil(driver, origin_episode_id, str(fork_id), WILOperation.FORK_CREATE)
+        _write_branch_wil(store, origin_episode_id, str(fork_id), WILOperation.FORK_CREATE)
 
         logger.info(
             f"Fork created: {str(fork_id)[:8]}... "
@@ -694,7 +649,7 @@ def create_fork(
 
 
 def create_departure_fork(
-    driver,
+    store,
     origin_episode_id: str,
     origin_segment_id: str,
     fork_objective: str,
@@ -722,6 +677,7 @@ def create_departure_fork(
 
     Returns DepartureForkResult on success, None on failure.
     """
+    store = as_structural_store(store)
     from astp.core.branching import (
         DepartureForkPointNode, DepartureForkResult, DepartureForkStatus,
         ForkCreationTrigger, AuditRecord, CognitiveDeltaType, TriggerType, IntentType,
@@ -729,11 +685,6 @@ def create_departure_fork(
         compute_intent_idempotency_key, enforce_fork_objective_required,
     )
     from astp.core.schema import EpisodeNode, EpisodeStatus
-    from astp.adapters.neo4j.writer import (
-        write_departure_fork_point_sync, write_departure_fork_episode_sync,
-        write_audit_record_sync, acquire_intent_sync, complete_intent_sync,
-        set_departure_fork_anchor_index_sync,
-    )
     from uuid import uuid4, UUID
     from datetime import datetime, timezone
 
@@ -747,24 +698,19 @@ def create_departure_fork(
             raise ASTPGovernanceError(
                 "fork_trigger_segment_id is required for AGENT_ESCALATION"
             )
-        with driver.session() as session:
-            ep = session.run(
-                "MATCH (e:AriadneEpisode {episode_id: $eid}) RETURN e.episode_status AS status",
-                {"eid": origin_episode_id},
-            ).single()
-            if not ep:
-                logger.error(f"Origin episode {origin_episode_id} not found")
-                return None
-            if ep["status"] not in ("ACTIVE", "PENDING_HITL"):
-                logger.error(f"Origin episode not in ACTIVE state: {ep['status']}")
-                return None
+        status = store.episode_status(origin_episode_id)
+        if status is None:
+            logger.error(f"Origin episode {origin_episode_id} not found")
+            return None
+        if status not in ("ACTIVE", "PENDING_HITL"):
+            logger.error(f"Origin episode not in ACTIVE state: {status}")
+            return None
 
         # STEP 2: Idempotency guard
         idempotency_key = compute_intent_idempotency_key(
             origin_episode_id, origin_segment_id, f"DEPARTURE_FORK:{fork_objective}"
         )
-        intent, _is_new = acquire_intent_sync(
-            driver, idempotency_key, IntentType.CREATE_DEPARTURE_FORK.value, initiator
+        intent, _is_new = store.acquire_intent(idempotency_key, IntentType.CREATE_DEPARTURE_FORK.value, initiator
         )
         if intent and intent.get("status") == "COMPLETE":
             _fid = intent.get("result_node_id", "")
@@ -772,15 +718,7 @@ def create_departure_fork(
             # Reconstruct the FULL original result from the existing point rather than
             # returning a degraded (empty) shell — a replay must be indistinguishable
             # from the first return so callers can rely on the ids.
-            with driver.session() as session:
-                prow = session.run(
-                    """
-                    MATCH (fp:AriadneDepartureForkPoint {fork_id: $fid})
-                    RETURN fp.fork_point_id AS pid, fp.fork_episode_id AS eid,
-                           fp.spine_tip_hash_at_departure AS tip
-                    """,
-                    {"fid": _fid},
-                ).single()
+            prow = store.departure_fork_point_by_fork(_fid)
             if prow is not None:
                 return DepartureForkResult(
                     fork_id=_fid, fork_point_id=prow["pid"] or "",
@@ -800,15 +738,7 @@ def create_departure_fork(
         # duplicates the fork even when the prior attempt crashed before its intent reached
         # COMPLETE (the one case the STEP-2 intent guard misses).
         if fork_id:
-            with driver.session() as session:
-                erow = session.run(
-                    """
-                    MATCH (fp:AriadneDepartureForkPoint {fork_id: $fid})
-                    RETURN fp.fork_point_id AS pid, fp.fork_episode_id AS eid,
-                           fp.spine_tip_hash_at_departure AS tip
-                    """,
-                    {"fid": str(fork_id)},
-                ).single()
+            erow = store.departure_fork_point_by_fork(str(fork_id))
             if erow is not None:
                 logger.info(f"Departure fork {fork_id} already anchored (idempotent re-drive)")
                 return DepartureForkResult(
@@ -825,7 +755,7 @@ def create_departure_fork(
         fork_id = UUID(fork_id) if fork_id else uuid4()
         fork_ep_id = fork_episode_id or str(uuid4())
         now = datetime.now(timezone.utc)
-        spine_tip_hash = fetch_prior_audit_hash(driver, origin_episode_id)
+        spine_tip_hash = fetch_prior_audit_hash(store, origin_episode_id)
 
         # STEP 4: Create the fork EPISODE (ACTIVE + immutable provenance)
         fork_ep = EpisodeNode(
@@ -848,7 +778,7 @@ def create_departure_fork(
             fork_status=DepartureForkStatus.ACTIVE.value,
             fork_anchor_index=None,  # two-phase: null now; patched in STEP 6 post point-write
         )
-        write_departure_fork_episode_sync(driver, fork_ep)
+        store.write_departure_fork_episode(fork_ep)
 
         # STEP 5: Write the DepartureForkPointNode on the origin spine (+ FORK_ORIGIN)
         dfp = DepartureForkPointNode(
@@ -880,7 +810,7 @@ def create_departure_fork(
                 f"{dfp.spine_tip_hash_at_departure!r} != fork-episode tip "
                 f"{fork_ep.fork_origin_spine_tip_hash!r}"
             )
-        write_departure_fork_point_sync(driver, dfp)
+        store.write_departure_fork_point(dfp)
 
         # STEP 6: two-phase fork_anchor_index — now the point exists on the origin spine,
         # patch the fork episode's anchor to the ORIGIN SEGMENT's sequence_index (where the
@@ -888,16 +818,9 @@ def create_departure_fork(
         # non-null anchor with no DepartureForkPointNode is the Class-B corruption signal
         # the orphan detector keys on. If the origin segment has no resolvable index, leave
         # the anchor null (point written, anchor unresolved) — a patch-only retry can fix it.
-        anchor_index = None
-        with driver.session() as session:
-            arow = session.run(
-                "MATCH (s:AriadneSegment {segment_id: $sid}) RETURN s.sequence_index AS idx",
-                {"sid": origin_segment_id},
-            ).single()
-            if arow is not None:
-                anchor_index = arow["idx"]
+        anchor_index = store.segment_sequence_index(origin_segment_id)
         if anchor_index is not None:
-            set_departure_fork_anchor_index_sync(driver, fork_ep_id, anchor_index)
+            store.set_departure_fork_anchor_index(fork_ep_id, anchor_index)
         else:
             logger.warning(
                 f"Departure fork {str(fork_id)[:8]}...: origin segment "
@@ -920,8 +843,8 @@ def create_departure_fork(
             "delete_fork_point_id": str(dfp.fork_point_id),
             "delete_fork_episode_id": fork_ep_id,
         }
-        delta_sequence = next_delta_sequence(driver, origin_episode_id)
-        prior_audit_hash = fetch_prior_audit_hash(driver, origin_episode_id)
+        delta_sequence = next_delta_sequence(store, origin_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(store, origin_episode_id)
         audit = AuditRecord(
             delta_sequence=delta_sequence,
             agent_id=initiator,
@@ -941,11 +864,11 @@ def create_departure_fork(
             audit.agent_id, audit.wall_clock_time.isoformat(),
             json.dumps(forward_delta, default=str), prior_audit_hash,
         )
-        write_audit_record_sync(driver, audit)
+        store.write_audit_record(audit)
 
         # STEP 8: intent complete + WIL entry
-        complete_intent_sync(driver, idempotency_key, str(fork_id))
-        _write_branch_wil(driver, origin_episode_id, str(fork_id), WILOperation.DEPARTURE_FORK_CREATE)
+        store.complete_intent(idempotency_key, str(fork_id))
+        _write_branch_wil(store, origin_episode_id, str(fork_id), WILOperation.DEPARTURE_FORK_CREATE)
 
         logger.info(
             f"Departure fork created: {str(fork_id)[:8]}... "
@@ -970,37 +893,23 @@ def create_departure_fork(
         raise BranchOperationError(f"create_departure_fork failed: {e}") from e
 
 
-def _get_departure_fork_episode(driver, fork_episode_id=None, fork_id=None):
+def _get_departure_fork_episode(store, fork_episode_id=None, fork_id=None):
     """Return (episode_id, fork_status) for a departure fork, or (None, None)."""
-    with driver.session() as session:
-        if fork_episode_id:
-            r = session.run(
-                "MATCH (e:AriadneEpisode {episode_id: $eid}) "
-                "RETURN e.episode_id AS eid, e.fork_status AS st",
-                {"eid": str(fork_episode_id)},
-            ).single()
-        else:
-            r = session.run(
-                "MATCH (e:AriadneEpisode {fork_id: $fid}) "
-                "RETURN e.episode_id AS eid, e.fork_status AS st",
-                {"fid": str(fork_id)},
-            ).single()
-    if not r:
-        return (None, None)
-    return (r["eid"], r["st"])
+    store = as_structural_store(store)
+    return store.departure_fork_episode(fork_episode_id=fork_episode_id, fork_id=fork_id)
 
 
-def _audit_departure_transition(driver, episode_id, delta_type, actor, reason, caught_by="HUMAN"):
+def _audit_departure_transition(store, episode_id, delta_type, actor, reason, caught_by="HUMAN"):
     """Write an audit record for a departure-fork status transition on its own chain."""
+    store = as_structural_store(store)
     from astp.core.branching import (
         AuditRecord, TriggerType, compute_audit_record_hash,
     )
-    from astp.adapters.neo4j.writer import write_audit_record_sync
     forward = {"episode_id": str(episode_id), "actor": actor, "reason": reason,
                "transition": delta_type.value}
     reverse = {"note": "departure-fork status transition"}
-    ds = next_delta_sequence(driver, episode_id)
-    prior = fetch_prior_audit_hash(driver, episode_id)
+    ds = next_delta_sequence(store, episode_id)
+    prior = fetch_prior_audit_hash(store, episode_id)
     audit = AuditRecord(
         delta_sequence=ds, agent_id=actor, session_id=f"departure-status-{episode_id}",
         delta_type=delta_type, forward_delta=forward, reverse_delta=reverse,
@@ -1013,26 +922,26 @@ def _audit_departure_transition(driver, episode_id, delta_type, actor, reason, c
         audit.agent_id, audit.wall_clock_time.isoformat(),
         json.dumps(forward, default=str), prior,
     )
-    write_audit_record_sync(driver, audit)
+    store.write_audit_record(audit)
     return audit
 
 
-def complete_departure_fork(driver, fork_episode_id, actor="system", note="") -> bool:
+def complete_departure_fork(store, fork_episode_id, actor="system", note="") -> bool:
     """ACTIVE -> COMPLETED. First-person declaration by the fork episode's own agent
     ("the work I came here to do is done"). Guards the fork is ACTIVE. (Phase D FSM.)"""
+    store = as_structural_store(store)
     from astp.core.branching import CognitiveDeltaType, DepartureForkStatus
-    from astp.adapters.neo4j.writer import mark_departure_fork_status_sync
     try:
-        eid, status = _get_departure_fork_episode(driver, fork_episode_id=fork_episode_id)
+        eid, status = _get_departure_fork_episode(store, fork_episode_id=fork_episode_id)
         if not eid:
             logger.error(f"Departure fork episode {fork_episode_id} not found")
             return False
         if status != DepartureForkStatus.ACTIVE.value:
             logger.error(f"Cannot complete departure fork in status {status} (must be ACTIVE)")
             return False
-        mark_departure_fork_status_sync(driver, eid, DepartureForkStatus.COMPLETED.value)
+        store.mark_departure_fork_status(eid, DepartureForkStatus.COMPLETED.value)
         _audit_departure_transition(
-            driver, eid, CognitiveDeltaType.DEPARTURE_FORK_COMPLETED, actor, note
+            store, eid, CognitiveDeltaType.DEPARTURE_FORK_COMPLETED, actor, note
         )
         logger.info(f"Departure fork completed: {str(eid)[:8]}...")
         return True
@@ -1041,23 +950,23 @@ def complete_departure_fork(driver, fork_episode_id, actor="system", note="") ->
         raise BranchOperationError(f"complete_departure_fork failed: {e}") from e
 
 
-def abandon_departure_fork(driver, fork_episode_id, actor="system", reason="") -> bool:
+def abandon_departure_fork(store, fork_episode_id, actor="system", reason="") -> bool:
     """ACTIVE -> ABANDONED (terminal). The originating agent's judgment that the thread
     isn't worth pursuing (or system cleanup of a never-entered stub). Guards ACTIVE —
     a COMPLETED fork returns, it is not abandoned. (Phase D FSM.)"""
+    store = as_structural_store(store)
     from astp.core.branching import CognitiveDeltaType, DepartureForkStatus
-    from astp.adapters.neo4j.writer import mark_departure_fork_status_sync
     try:
-        eid, status = _get_departure_fork_episode(driver, fork_episode_id=fork_episode_id)
+        eid, status = _get_departure_fork_episode(store, fork_episode_id=fork_episode_id)
         if not eid:
             logger.error(f"Departure fork episode {fork_episode_id} not found")
             return False
         if status != DepartureForkStatus.ACTIVE.value:
             logger.error(f"Cannot abandon departure fork in status {status} (must be ACTIVE)")
             return False
-        mark_departure_fork_status_sync(driver, eid, DepartureForkStatus.ABANDONED.value)
+        store.mark_departure_fork_status(eid, DepartureForkStatus.ABANDONED.value)
         _audit_departure_transition(
-            driver, eid, CognitiveDeltaType.DEPARTURE_FORK_ABANDONED, actor, reason
+            store, eid, CognitiveDeltaType.DEPARTURE_FORK_ABANDONED, actor, reason
         )
         logger.info(f"Departure fork abandoned: {str(eid)[:8]}...")
         return True
@@ -1067,7 +976,7 @@ def abandon_departure_fork(driver, fork_episode_id, actor="system", reason="") -
 
 
 def declare_fork_return(
-    driver, fork_id, origin_episode_id, return_type, returned_by,
+    store, fork_id, origin_episode_id, return_type, returned_by,
     synthesis_summary="", fork_episode_id=None,
 ):
     """Formally bring a COMPLETED departure fork's work back to the origin — DECLARATIVE
@@ -1077,13 +986,11 @@ def declare_fork_return(
 
     Guards: fork must be COMPLETED; no prior return declaration for this fork_id.
     Returns ForkReturnResult, or None. (Phase D FSM.)"""
+    store = as_structural_store(store)
     from astp.core.branching import (
         ForkReturnNode, ForkReturnResult, ForkReturnType, DepartureForkStatus,
         AuditRecord, CognitiveDeltaType, TriggerType,
         compute_fork_return_hash, compute_audit_record_hash,
-    )
-    from astp.adapters.neo4j.writer import (
-        write_fork_return_node_sync, write_audit_record_sync,
     )
     from uuid import UUID
 
@@ -1093,7 +1000,7 @@ def declare_fork_return(
 
         # Guard: fork must be COMPLETED
         f_eid, status = _get_departure_fork_episode(
-            driver, fork_episode_id=fork_episode_id, fork_id=fork_id
+            store, fork_episode_id=fork_episode_id, fork_id=fork_id
         )
         if not f_eid:
             logger.error(f"Departure fork {fork_id} not found")
@@ -1104,18 +1011,12 @@ def declare_fork_return(
             )
 
         # Guard: no prior return declaration for this fork
-        with driver.session() as session:
-            prior_ret = session.run(
-                "MATCH (fr:AriadneForkReturn {fork_id: $fid}) "
-                "RETURN fr.fork_return_id AS id LIMIT 1",
-                {"fid": str(fork_id)},
-            ).single()
-        if prior_ret:
+        if store.fork_return_exists(str(fork_id)):
             raise ASTPGovernanceError(
                 f"Departure fork {fork_id} already has a return declaration"
             )
 
-        fork_tip = fetch_prior_audit_hash(driver, f_eid)  # fork episode's spine tip at return
+        fork_tip = fetch_prior_audit_hash(store, f_eid)  # fork episode's spine tip at return
         frn = ForkReturnNode(
             fork_id=UUID(str(fork_id)),
             fork_episode_id=UUID(str(f_eid)),
@@ -1130,14 +1031,10 @@ def declare_fork_return(
             str(frn.origin_episode_id), return_type.value, synthesis_summary,
             fork_tip, returned_by, frn.timestamp_utc.isoformat(), frn.parent_hash,
         )
-        write_fork_return_node_sync(driver, frn)
+        store.write_fork_return_node(frn)
 
         # Record the return outcome on the fork episode
-        with driver.session() as session:
-            session.run(
-                "MATCH (e:AriadneEpisode {episode_id: $eid}) SET e.fork_return_type = $rt",
-                {"eid": str(f_eid), "rt": return_type.value},
-            )
+        store.set_episode_fork_return_type(str(f_eid), return_type.value)
 
         # Audit on the ORIGIN chain
         forward = {
@@ -1146,8 +1043,8 @@ def declare_fork_return(
             "fork_return_id": str(frn.fork_return_id),
         }
         reverse = {"delete_fork_return_id": str(frn.fork_return_id)}
-        ds = next_delta_sequence(driver, origin_episode_id)
-        prior = fetch_prior_audit_hash(driver, origin_episode_id)
+        ds = next_delta_sequence(store, origin_episode_id)
+        prior = fetch_prior_audit_hash(store, origin_episode_id)
         audit = AuditRecord(
             delta_sequence=ds, agent_id=returned_by, session_id=f"fork-return-{fork_id}",
             delta_type=CognitiveDeltaType.DEPARTURE_FORK_RETURNED,
@@ -1162,7 +1059,7 @@ def declare_fork_return(
             audit.agent_id, audit.wall_clock_time.isoformat(),
             json.dumps(forward, default=str), prior,
         )
-        write_audit_record_sync(driver, audit)
+        store.write_audit_record(audit)
 
         logger.info(
             f"Departure fork returned: {str(fork_id)[:8]}... "
@@ -1181,7 +1078,7 @@ def declare_fork_return(
 
 
 def resolve_fork(
-    driver,
+    store,
     fork_id: str,
     selected_fork_point_id: str,
     resolution_rationale: str,
@@ -1195,16 +1092,13 @@ def resolve_fork(
     Returns:
         ResolveForkResult on success, None on failure
     """
+    store = as_structural_store(store)
     from astp.core.branching import (
         AuditRecord,
         CognitiveDeltaType,
         TriggerType,
         compute_audit_record_hash,
         ResolveForkResult,
-    )
-    from astp.adapters.neo4j.writer import (
-        mark_fork_point_status_sync,
-        write_audit_record_sync,
     )
 
     try:
@@ -1215,15 +1109,7 @@ def resolve_fork(
             )
 
         # Load all fork points for this fork
-        with driver.session() as session:
-            result = session.run("""
-                MATCH (fp:AriadneForkPoint {fork_id: $fork_id})
-                RETURN fp.fork_point_id AS fpid,
-                       fp.episode_id    AS eid,
-                       fp.fork_status   AS status,
-                       fp.origin_episode_id AS origin_id
-            """, {"fork_id": fork_id})
-            fork_points = [dict(r) for r in result]
+        fork_points = store.fork_points(fork_id)
 
         if not fork_points:
             logger.error(f"Fork {fork_id} not found or has no ForkPoints")
@@ -1249,9 +1135,9 @@ def resolve_fork(
         discarded_ids = [fp["fpid"] for fp in discarded]
 
         # Mark selected PROMOTED, others DISCARDED
-        mark_fork_point_status_sync(driver, selected_fork_point_id, "PROMOTED")
+        store.mark_fork_point_status(selected_fork_point_id, "PROMOTED")
         for fp in discarded:
-            mark_fork_point_status_sync(driver, fp["fpid"], "DISCARDED")
+            store.mark_fork_point_status(fp["fpid"], "DISCARDED")
 
         # Archive discarded alternatives via BranchTerminus records?
         # ForkPoints anchor Episodes, not branches — discarded forks remain
@@ -1270,8 +1156,8 @@ def resolve_fork(
             "clear_resolution": selected_fork_point_id,
         }
 
-        delta_sequence = next_delta_sequence(driver, origin_episode_id)
-        prior_audit_hash = fetch_prior_audit_hash(driver, origin_episode_id)
+        delta_sequence = next_delta_sequence(store, origin_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(store, origin_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -1295,9 +1181,9 @@ def resolve_fork(
             json.dumps(forward_delta, default=str),
             prior_audit_hash,
         )
-        write_audit_record_sync(driver, audit)
+        store.write_audit_record(audit)
 
-        _write_branch_wil(driver, origin_episode_id, fork_id, WILOperation.FORK_RESOLVE)
+        _write_branch_wil(store, origin_episode_id, fork_id, WILOperation.FORK_RESOLVE)
 
         logger.info(
             f"Fork resolved: {fork_id[:8]}... "
@@ -1326,16 +1212,16 @@ def resolve_fork(
 # ============================================================================
 
 
-def find_common_ancestor(driver, branch_id: str, target_episode_id: str):
+def find_common_ancestor(store, branch_id: str, target_episode_id: str):
     """Find the common ancestor segment between a branch and a target episode.
 
     Currently walks to the branch's originating BranchPoint and verifies it
     anchors on the target episode's spine. Returns CommonAncestorResult or None.
     """
+    store = as_structural_store(store)
     from astp.core.branching import CommonAncestorResult
-    from astp.adapters.neo4j.writer import find_common_ancestor_sync
 
-    raw = find_common_ancestor_sync(driver, branch_id, target_episode_id)
+    raw = store.find_common_ancestor(branch_id, target_episode_id)
     if not raw:
         return None
     return CommonAncestorResult(
@@ -1346,7 +1232,7 @@ def find_common_ancestor(driver, branch_id: str, target_episode_id: str):
 
 
 def execute_merge(
-    driver,
+    store,
     source_branch_id: str,
     target_episode_id: str,
     merge_summary: str,
@@ -1363,7 +1249,7 @@ def execute_merge(
     resolutions, returns a ConflictManifest and does NOT proceed.
 
     Args:
-        driver: Neo4j sync driver
+        store: a StructuralStore (a raw driver of the reference store is accepted for one release)
         source_branch_id: Branch to merge (must be ACTIVE)
         target_episode_id: Spine receiving the merge (must be ACTIVE)
         merge_summary: Required, non-empty — the synthesis
@@ -1383,6 +1269,7 @@ def execute_merge(
         MergeResult on success, ConflictManifest if unresolved conflicts,
         None on error.
     """
+    store = as_structural_store(store)
     from astp.core.branching import (
         MergePointNode,
         BranchTerminusNode,
@@ -1402,12 +1289,6 @@ def execute_merge(
         MergeResult,
     )
     from astp.core.schema import sha3_256
-    from astp.adapters.neo4j.writer import (
-        write_merge_point_sync,
-        write_branch_terminus_sync,
-        write_branch_return_edge_sync,
-        write_audit_record_sync,
-    )
 
     try:
         # STEP 1: Validate preconditions
@@ -1423,59 +1304,41 @@ def execute_merge(
         resolution_artifacts = resolution_artifacts or []
 
         # Load branch point — branch must exist and be ACTIVE
-        with driver.session() as session:
-            bp_result = session.run("""
-                MATCH (bp:AriadneBranchPoint {branch_id: $bid})
-                OPTIONAL MATCH (bp)-[:BRANCH_TERMINUS]->(bt:AriadneBranchTerminus)
-                RETURN bp {.*} AS branch_point, bt IS NOT NULL AS has_terminus
-            """, {"bid": source_branch_id})
-            bp_record = bp_result.single()
-
-            if not bp_record or not bp_record["branch_point"]:
-                logger.error(f"Branch {source_branch_id} not found")
-                return None
-            if bp_record["has_terminus"]:
-                logger.error(f"Branch {source_branch_id} already terminated")
-                return None
-            bp_data = dict(bp_record["branch_point"])
+        loaded = store.branch_point_with_terminus(source_branch_id)
+        if loaded is None:
+            logger.error(f"Branch {source_branch_id} not found")
+            return None
+        bp_data, has_terminus = loaded
+        if has_terminus:
+            logger.error(f"Branch {source_branch_id} already terminated")
+            return None
 
         source_episode_id = bp_data.get("episode_id", "")
         branch_point_hash = bp_data.get("content_hash", "")
         branch_point_id = bp_data.get("branch_point_id", "")
 
         # Target episode must be ACTIVE
-        with driver.session() as session:
-            tgt_result = session.run("""
-                MATCH (e:AriadneEpisode {episode_id: $eid})
-                RETURN e.episode_status AS status, e.spine_hash AS spine_hash
-            """, {"eid": target_episode_id})
-            tgt_record = tgt_result.single()
-            if not tgt_record:
-                logger.error(f"Target episode {target_episode_id} not found")
-                return None
-            if tgt_record["status"] not in ("ACTIVE", "PENDING_HITL"):
-                logger.error(
-                    f"Target episode not in ACTIVE state: {tgt_record['status']}"
-                )
-                return None
-            target_spine_hash = tgt_record["spine_hash"] or ""
+        target = store.episode_status_and_spine_hash(target_episode_id)
+        if target is None:
+            logger.error(f"Target episode {target_episode_id} not found")
+            return None
+        target_status, target_spine_hash = target
+        if target_status not in ("ACTIVE", "PENDING_HITL"):
+            logger.error(
+                f"Target episode not in ACTIVE state: {target_status}"
+            )
+            return None
+        target_spine_hash = target_spine_hash or ""
 
         # STEP 2: Capture pre-merge Merkle roots (immutable after this point)
         source_merkle_root = bp_data.get("spine_merkle_snapshot", "") or ""
         # Prefer the current spine hash of the source episode if distinct
-        with driver.session() as session:
-            src_result = session.run("""
-                MATCH (e:AriadneEpisode {episode_id: $eid})
-                RETURN e.spine_hash AS spine_hash
-            """, {"eid": source_episode_id})
-            src_record = src_result.single()
-            if src_record and src_record["spine_hash"]:
-                source_merkle_root = src_record["spine_hash"]
+        source_merkle_root = store.episode_spine_hash(source_episode_id) or source_merkle_root
 
         target_merkle_root_pre = target_spine_hash
 
         # STEP 3: Find common ancestor
-        ancestor = find_common_ancestor(driver, source_branch_id, target_episode_id)
+        ancestor = find_common_ancestor(store, source_branch_id, target_episode_id)
         if not ancestor:
             logger.error(
                 f"No common ancestor between branch {source_branch_id[:8]}... "
@@ -1558,7 +1421,7 @@ def execute_merge(
             )
             # Abort; write failure audit record
             _write_merge_failure_audit(
-                driver, source_episode_id, target_episode_id, initiator,
+                store, source_episode_id, target_episode_id, initiator,
                 "Missing Merkle root(s) — merge aborted",
             )
             return None
@@ -1590,7 +1453,7 @@ def execute_merge(
             merge_point.timestamp_utc.isoformat(),
             merge_point.parent_hash,
         )
-        write_merge_point_sync(driver, merge_point)
+        store.write_merge_point(merge_point)
 
         # STEP 10: Write BranchTerminusNode (terminus_type=MERGED)
         terminus = BranchTerminusNode(
@@ -1607,7 +1470,7 @@ def execute_merge(
                 "merge_type": merge_type.value,
             },
         )
-        write_branch_terminus_sync(driver, terminus)
+        store.write_branch_terminus(terminus)
 
         # STEP 11: Write BranchReturnEdge
         branch_return = BranchReturnEdge(
@@ -1618,7 +1481,7 @@ def execute_merge(
             synthesis_summary=merge_summary,
             nodes_integrated=len(conflict_segments),
         )
-        write_branch_return_edge_sync(driver, branch_return)
+        store.write_branch_return_edge(branch_return)
 
         # STEP 12/13: Write MERGE_EXECUTED AuditRecord
         forward_delta = {
@@ -1641,8 +1504,8 @@ def execute_merge(
             "restore_target_merkle_root": target_merkle_root_pre,
         }
 
-        delta_sequence = next_delta_sequence(driver, target_episode_id)
-        prior_audit_hash = fetch_prior_audit_hash(driver, target_episode_id)
+        delta_sequence = next_delta_sequence(store, target_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(store, target_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -1671,10 +1534,10 @@ def execute_merge(
             json.dumps(forward_delta, default=str),
             prior_audit_hash,
         )
-        write_audit_record_sync(driver, audit)
+        store.write_audit_record(audit)
 
         _write_branch_wil(
-            driver, target_episode_id, str(merge_point.merge_point_id), WILOperation.MERGE_EXECUTE
+            store, target_episode_id, str(merge_point.merge_point_id), WILOperation.MERGE_EXECUTE
         )
 
         logger.info(
@@ -1704,25 +1567,20 @@ def execute_merge(
         raise BranchOperationError(f"execute_merge failed: {e}") from e
 
 
-def verify_merge_integrity(driver, merge_id: str):
+def verify_merge_integrity(store, merge_id: str):
     """Verify a merge's three Merkle roots match their expected sources.
 
     Returns MergeIntegrityResult.
     """
+    store = as_structural_store(store)
     from astp.core.branching import MergeIntegrityResult
     from astp.core.schema import sha3_256
 
     try:
-        with driver.session() as session:
-            mp_result = session.run("""
-                MATCH (mp:AriadneMergePoint {merge_id: $mid})
-                RETURN mp {.*} AS merge_point
-            """, {"mid": merge_id})
-            mp_record = mp_result.single()
-            if not mp_record or not mp_record["merge_point"]:
-                logger.error(f"MergePoint {merge_id} not found")
-                return None
-            mp = dict(mp_record["merge_point"])
+        mp = store.merge_point(merge_id)
+        if mp is None:
+            logger.error(f"MergePoint {merge_id} not found")
+            return None
 
         source_valid = bool(mp.get("source_merkle_root"))
         target_pre_valid = bool(mp.get("target_merkle_root_pre"))
@@ -1730,21 +1588,14 @@ def verify_merge_integrity(driver, merge_id: str):
         # Recompute post-root and compare
         conflict_segments = mp.get("conflict_segments") or []
         # Recover conflict_resolutions from audit record
-        with driver.session() as session:
-            ar_result = session.run("""
-                MATCH (ar:AriadneAuditRecord {delta_type: 'MERGE_EXECUTED'})
-                WHERE ar.forward_delta CONTAINS $mid
-                RETURN ar.forward_delta AS fd
-                LIMIT 1
-            """, {"mid": merge_id})
-            ar_record = ar_result.single()
-            resolutions = []
-            if ar_record and ar_record["fd"]:
-                try:
-                    fd = json.loads(ar_record["fd"])
-                    resolutions = fd.get("conflict_resolutions", [])
-                except (json.JSONDecodeError, TypeError):
-                    pass
+        forward_delta_text = store.merge_executed_forward_delta(merge_id)
+        resolutions = []
+        if forward_delta_text:
+            try:
+                fd = json.loads(forward_delta_text)
+                resolutions = fd.get("conflict_resolutions", [])
+            except (json.JSONDecodeError, TypeError):
+                pass
 
         post_preimage = (
             f"{mp['target_merkle_root_pre']}:{mp['source_merkle_root']}:"
@@ -1782,17 +1633,17 @@ def _compute_branch_duration_ms(created_at_str: str) -> int:
 
 
 def _write_merge_failure_audit(
-    driver, source_episode_id: str, target_episode_id: str,
+    store, source_episode_id: str, target_episode_id: str,
     initiator: str, reason: str,
 ) -> None:
     """Write an audit record for a merge abort (integrity check failure)."""
+    store = as_structural_store(store)
     from astp.core.branching import (
         AuditRecord,
         CognitiveDeltaType,
         TriggerType,
         compute_audit_record_hash,
     )
-    from astp.adapters.neo4j.writer import write_audit_record_sync
 
     try:
         forward_delta = {
@@ -1801,8 +1652,8 @@ def _write_merge_failure_audit(
             "outcome": "ABORTED",
             "reason": reason,
         }
-        delta_sequence = next_delta_sequence(driver, target_episode_id)
-        prior_audit_hash = fetch_prior_audit_hash(driver, target_episode_id)
+        delta_sequence = next_delta_sequence(store, target_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(store, target_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -1826,7 +1677,7 @@ def _write_merge_failure_audit(
             json.dumps(forward_delta, default=str),
             prior_audit_hash,
         )
-        write_audit_record_sync(driver, audit)
+        store.write_audit_record(audit)
     except Exception as e:
         raise AdapterWriteError(f"merge failure audit: {e}") from e
 
@@ -1837,7 +1688,7 @@ def _write_merge_failure_audit(
 
 
 def create_aside(
-    driver,
+    store,
     parent_episode_id: str,
     parent_segment_id: str,
     aside_label: str,
@@ -1856,6 +1707,7 @@ def create_aside(
     Returns:
         AsideResult on success, None on failure
     """
+    store = as_structural_store(store)
     from astp.core.branching import (
         AsideSegmentNode,
         AuditRecord,
@@ -1867,10 +1719,6 @@ def create_aside(
         enforce_aside_target_agent,
         AsideResult,
     )
-    from astp.adapters.neo4j.writer import (
-        write_aside_sync,
-        write_audit_record_sync,
-    )
 
     try:
         # STEP 1: Validate preconditions
@@ -1880,24 +1728,19 @@ def create_aside(
             raise ASTPGovernanceError("Aside requires a non-empty label")
 
         # Verify parent episode is ACTIVE
-        with driver.session() as session:
-            ep_check = session.run("""
-                MATCH (e:AriadneEpisode {episode_id: $eid})
-                RETURN e.episode_status AS status
-            """, {"eid": parent_episode_id})
-            ep_record = ep_check.single()
-            if not ep_record:
-                logger.error(f"Parent episode {parent_episode_id} not found")
-                return None
-            if ep_record["status"] not in ("ACTIVE", "PENDING_HITL"):
-                logger.error(
-                    f"Parent episode not in ACTIVE state: {ep_record['status']}"
-                )
-                return None
+        status = store.episode_status(parent_episode_id)
+        if status is None:
+            logger.error(f"Parent episode {parent_episode_id} not found")
+            return None
+        if status not in ("ACTIVE", "PENDING_HITL"):
+            logger.error(
+                f"Parent episode not in ACTIVE state: {status}"
+            )
+            return None
 
         # The parent Segment is bound by identity and by content (SPEC §19.4.1); a
         # parent that does not exist, or is not a UUID, is a precondition refusal.
-        parent = _parent_segment_for_side_channel(driver, parent_segment_id)
+        parent = _parent_segment_for_side_channel(store, parent_segment_id)
         if parent is None:
             return None
         parent_uuid, parent_content_hash = parent
@@ -1919,7 +1762,7 @@ def create_aside(
         )
 
         # STEP 3: Write AsideSegmentNode
-        write_aside_sync(driver, aside)
+        store.write_aside(aside)
 
         # STEP 4: Write ASIDE_OPENED AuditRecord
         forward_delta = {
@@ -1933,8 +1776,8 @@ def create_aside(
         }
         reverse_delta = {"delete_aside_id": str(aside.aside_id)}
 
-        delta_sequence = next_delta_sequence(driver, parent_episode_id)
-        prior_audit_hash = fetch_prior_audit_hash(driver, parent_episode_id)
+        delta_sequence = next_delta_sequence(store, parent_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(store, parent_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -1960,9 +1803,9 @@ def create_aside(
             json.dumps(forward_delta, default=str),
             prior_audit_hash,
         )
-        write_audit_record_sync(driver, audit)
+        store.write_audit_record(audit)
 
-        _write_branch_wil(driver, parent_episode_id, str(aside.aside_id), WILOperation.ASIDE_OPEN)
+        _write_branch_wil(store, parent_episode_id, str(aside.aside_id), WILOperation.ASIDE_OPEN)
 
         logger.info(
             f"Aside opened: {str(aside.aside_id)[:8]}... "
@@ -1987,7 +1830,7 @@ def create_aside(
 
 
 def close_aside(
-    driver,
+    store,
     aside_id: str,
     close_reason: str,
     notification_targets: Optional[list] = None,
@@ -2003,6 +1846,7 @@ def close_aside(
     Returns:
         AsideCloseResult on success, None on failure
     """
+    store = as_structural_store(store)
     from astp.core.branching import (
         AsideTerminusNode,
         AsideTerminationStatus,
@@ -2014,18 +1858,12 @@ def close_aside(
         AsideCloseResult,
     )
     from astp.core.schema import sha3_256
-    from astp.adapters.neo4j.writer import (
-        load_aside_sync,
-        scan_aside_external_references_sync,
-        write_aside_terminus_sync,
-        write_audit_record_sync,
-    )
 
     try:
         # STEP 1: Validate preconditions
         enforce_aside_close_reason(close_reason)
 
-        loaded = load_aside_sync(driver, aside_id)
+        loaded = store.load_aside(aside_id)
         if not loaded:
             logger.error(f"Aside {aside_id} not found")
             return None
@@ -2040,8 +1878,7 @@ def close_aside(
             content_refs = list({*content_refs, *additional_content_refs})
 
         # STEP 2: Reference scan — any external segments pointing inside?
-        external_refs = scan_aside_external_references_sync(
-            driver, aside_id, content_refs,
+        external_refs = store.scan_aside_external_references(aside_id, content_refs,
         )
         reference_scan_passed = len(external_refs) == 0
 
@@ -2052,8 +1889,7 @@ def close_aside(
         # STEP 4: The terminus binds what the channel produced — the content hashes
         # of the Segments written inside it, in the order written — the close
         # reason, the scan outcome and the external references found (SPEC §19.4.1).
-        from astp.adapters.neo4j.queries import content_hashes_in_sequence_order, segment_content_hashes_sync
-        produced = content_hashes_in_sequence_order(segment_content_hashes_sync(driver, content_refs), content_refs)
+        produced = content_hashes_in_sequence_order(store.segment_content_hashes(content_refs), content_refs)
         terminus = AsideTerminusNode(
             aside_id=aside_id,
             parent_episode_id=parent_episode_id,
@@ -2070,7 +1906,7 @@ def close_aside(
             str(aside_data.get("content_hash") or ""), produced, close_reason, reference_scan_passed,
             [UUID(str(x)) for x in external_refs if _is_uuid(x)], terminus.termination_status.value, terminus.timestamp_utc,
         )
-        write_aside_terminus_sync(driver, terminus)
+        store.write_aside_terminus(terminus)
 
         # STEP 6: Write ASIDE_CLOSED AuditRecord
         forward_delta = {
@@ -2083,8 +1919,8 @@ def close_aside(
         }
         reverse_delta = {"restore_aside_to_open": aside_id}
 
-        delta_sequence = next_delta_sequence(driver, parent_episode_id)
-        prior_audit_hash = fetch_prior_audit_hash(driver, parent_episode_id)
+        delta_sequence = next_delta_sequence(store, parent_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(store, parent_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -2109,10 +1945,10 @@ def close_aside(
             json.dumps(forward_delta, default=str),
             prior_audit_hash,
         )
-        write_audit_record_sync(driver, audit)
+        store.write_audit_record(audit)
 
         _write_branch_wil(
-            driver, parent_episode_id, str(terminus.aside_terminus_id), WILOperation.ASIDE_CLOSE
+            store, parent_episode_id, str(terminus.aside_terminus_id), WILOperation.ASIDE_CLOSE
         )
 
         if not reference_scan_passed:
@@ -2151,7 +1987,7 @@ def close_aside(
 
 
 def create_soliloquy(
-    driver,
+    store,
     parent_episode_id: str,
     parent_segment_id: str,
     soliloquy_purpose: str,
@@ -2171,6 +2007,7 @@ def create_soliloquy(
     Returns:
         SoliloquyResult on success, None on failure
     """
+    store = as_structural_store(store)
     from astp.core.branching import (
         SoliloquySegmentNode,
         SoliloquyVisibilityPolicy,
@@ -2183,10 +2020,6 @@ def create_soliloquy(
         enforce_soliloquy_human_accessible,
         SoliloquyResult,
     )
-    from astp.adapters.neo4j.writer import (
-        write_soliloquy_sync,
-        write_audit_record_sync,
-    )
 
     try:
         # STEP 1: Validate preconditions
@@ -2198,22 +2031,17 @@ def create_soliloquy(
         enforce_soliloquy_human_accessible(policy)
 
         # Verify parent episode is ACTIVE
-        with driver.session() as session:
-            ep_check = session.run("""
-                MATCH (e:AriadneEpisode {episode_id: $eid})
-                RETURN e.episode_status AS status
-            """, {"eid": parent_episode_id})
-            ep_record = ep_check.single()
-            if not ep_record:
-                logger.error(f"Parent episode {parent_episode_id} not found")
-                return None
-            if ep_record["status"] not in ("ACTIVE", "PENDING_HITL"):
-                logger.error(
-                    f"Parent episode not in ACTIVE state: {ep_record['status']}"
-                )
-                return None
+        status = store.episode_status(parent_episode_id)
+        if status is None:
+            logger.error(f"Parent episode {parent_episode_id} not found")
+            return None
+        if status not in ("ACTIVE", "PENDING_HITL"):
+            logger.error(
+                f"Parent episode not in ACTIVE state: {status}"
+            )
+            return None
 
-        parent = _parent_segment_for_side_channel(driver, parent_segment_id)
+        parent = _parent_segment_for_side_channel(store, parent_segment_id)
         if parent is None:
             return None
         parent_uuid, parent_content_hash = parent
@@ -2235,7 +2063,7 @@ def create_soliloquy(
         )
 
         # STEP 3: Write SoliloquySegmentNode
-        write_soliloquy_sync(driver, soliloquy)
+        store.write_soliloquy(soliloquy)
 
         # STEP 4: Write SOLILOQUY_INITIATED AuditRecord
         forward_delta = {
@@ -2249,8 +2077,8 @@ def create_soliloquy(
         }
         reverse_delta = {"delete_soliloquy_id": str(soliloquy.soliloquy_id)}
 
-        delta_sequence = next_delta_sequence(driver, parent_episode_id)
-        prior_audit_hash = fetch_prior_audit_hash(driver, parent_episode_id)
+        delta_sequence = next_delta_sequence(store, parent_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(store, parent_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -2275,10 +2103,10 @@ def create_soliloquy(
             json.dumps(forward_delta, default=str),
             prior_audit_hash,
         )
-        write_audit_record_sync(driver, audit)
+        store.write_audit_record(audit)
 
         _write_branch_wil(
-            driver, parent_episode_id, str(soliloquy.soliloquy_id), WILOperation.SOLILOQUY_INIT
+            store, parent_episode_id, str(soliloquy.soliloquy_id), WILOperation.SOLILOQUY_INIT
         )
 
         logger.info(
@@ -2305,7 +2133,7 @@ def create_soliloquy(
 
 
 def conclude_soliloquy(
-    driver,
+    store,
     soliloquy_id: str,
     conclusion_summary: str,
     merged_into_segment_id: str,
@@ -2320,6 +2148,7 @@ def conclude_soliloquy(
     Returns:
         SoliloquyConclusionResult on success, None on failure
     """
+    store = as_structural_store(store)
     from astp.core.branching import (
         SoliloquyConclusionNode,
         SoliloquyTerminationStatus,
@@ -2332,11 +2161,6 @@ def conclude_soliloquy(
         enforce_soliloquy_conclusion_required,
         SoliloquyConclusionResult,
     )
-    from astp.adapters.neo4j.writer import (
-        load_soliloquy_sync,
-        write_soliloquy_conclusion_sync,
-        write_audit_record_sync,
-    )
 
     try:
         # STEP 1: Validate preconditions
@@ -2347,7 +2171,7 @@ def conclude_soliloquy(
                 "only the conclusion merges back"
             )
 
-        loaded = load_soliloquy_sync(driver, soliloquy_id)
+        loaded = store.load_soliloquy(soliloquy_id)
         if not loaded:
             logger.error(f"Soliloquy {soliloquy_id} not found")
             return None
@@ -2370,8 +2194,7 @@ def conclude_soliloquy(
         if not _is_uuid(merged_into_segment_id):
             logger.error(f"merged_into_segment_id {merged_into_segment_id!r} is not a UUID")
             return None
-        from astp.adapters.neo4j.queries import content_hashes_in_sequence_order, segment_content_hashes_sync
-        found = segment_content_hashes_sync(driver, deliberation_chain)
+        found = store.segment_content_hashes(deliberation_chain)
         missing = [x for x in deliberation_chain if str(x) not in found]
         if missing:
             logger.error(f"deliberation chain names Segments that do not exist or have no content hash: {missing}")
@@ -2398,7 +2221,7 @@ def conclude_soliloquy(
         )
 
         # STEP 3: Write SoliloquyConclusionNode
-        write_soliloquy_conclusion_sync(driver, conclusion)
+        store.write_soliloquy_conclusion(conclusion)
 
         # STEP 4: Write SOLILOQUY_CONCLUDED AuditRecord
         forward_delta = {
@@ -2411,8 +2234,8 @@ def conclude_soliloquy(
         }
         reverse_delta = {"restore_soliloquy_to_active": soliloquy_id}
 
-        delta_sequence = next_delta_sequence(driver, parent_episode_id)
-        prior_audit_hash = fetch_prior_audit_hash(driver, parent_episode_id)
+        delta_sequence = next_delta_sequence(store, parent_episode_id)
+        prior_audit_hash = fetch_prior_audit_hash(store, parent_episode_id)
 
         audit = AuditRecord(
             delta_sequence=delta_sequence,
@@ -2436,10 +2259,10 @@ def conclude_soliloquy(
             json.dumps(forward_delta, default=str),
             prior_audit_hash,
         )
-        write_audit_record_sync(driver, audit)
+        store.write_audit_record(audit)
 
         _write_branch_wil(
-            driver, parent_episode_id, str(conclusion.conclusion_id),
+            store, parent_episode_id, str(conclusion.conclusion_id),
             WILOperation.SOLILOQUY_CONCLUDE,
         )
 
@@ -2467,7 +2290,7 @@ def conclude_soliloquy(
 
 
 def _write_branch_wil(
-    driver, episode_id: str, node_id: str, operation: WILOperation
+    store, episode_id: str, node_id: str, operation: WILOperation
 ) -> None:
     """Write a WIL entry for a branch operation.
 
@@ -2480,32 +2303,19 @@ def _write_branch_wil(
     is never written for a write that did not happen, and a ledger entry that
     cannot be written fails the operation that needed it (G-39).
     """
+    store = as_structural_store(store)
     operation = WILOperation(operation)
 
     try:
         from astp.core.branching import compute_branch_point_hash
         from uuid import uuid4
 
-        with driver.session() as session:
-            session.run("""
-                MERGE (w:AriadneWILEntry {intent_id: $intent_id})
-                ON CREATE SET
-                  w.operation              = $operation,
-                  w.episode_id             = $episode_id,
-                  w.stores_involved        = ['neo4j'],
-                  w.pre_state_hash         = $pre_hash,
-                  w.post_state_hash        = $post_hash,
-                  w.initiated_at           = $ts,
-                  w.completed_at           = $ts,
-                  w.status                 = 'COMPLETE',
-                  w.last_completed_store   = 'neo4j'
-            """, {
-                "intent_id": str(uuid4()),
-                "operation": operation.value,
-                "episode_id": episode_id,
-                "pre_hash": node_id,
-                "post_hash": node_id,
-                "ts": datetime.now(timezone.utc).isoformat(),
-            })
+        store.write_completed_wil_entry(
+            intent_id=str(uuid4()),
+            operation=operation.value,
+            episode_id=episode_id,
+            node_id=node_id,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
     except Exception as e:
         raise AdapterWriteError(f"branch WIL entry: {e}") from e
