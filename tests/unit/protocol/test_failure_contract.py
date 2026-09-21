@@ -31,7 +31,7 @@ from astp.protocol.errors import AdapterWriteError, ASTPProtocolError, BranchOpe
 
 PKG = Path(__file__).resolve().parents[3] / "astp"
 ADAPTER_MODULES = [
-    PKG / "adapters" / "neo4j" / p for p in ("writer.py", "wil.py", "crystallization.py", "queries.py", "rebalance.py", "retrieval_audit.py")
+    PKG / "adapters" / "neo4j" / p for p in ("writer.py", "wil.py", "crystallization.py", "queries.py", "rebalance.py", "retrieval_audit.py", "store.py")
 ] + [PKG / "core" / "audit_chain.py", PKG / "core" / "branch_operations.py", PKG / "core" / "wil.py"]
 
 

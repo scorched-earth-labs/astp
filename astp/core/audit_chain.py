@@ -34,7 +34,7 @@ through to `AriadneAuditRecord.episode_id` as the indexed lookup field.
 
 **DI discipline**
 
-Both helpers take the driver as an argument. They reach for no module-
+Both helpers take the store as an argument. They reach for no module-
 level state and no globals. This matches the dependency-injection
 pattern that runs through the rest of the protocol package.
 """
@@ -44,6 +44,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from astp.adapters.base import as_structural_store
 from astp.protocol.errors import AdapterWriteError, ASTPProtocolError
 
 logger = logging.getLogger("astp.core.audit_chain")
@@ -55,7 +56,7 @@ logger = logging.getLogger("astp.core.audit_chain")
 GENESIS_HASH = "GENESIS"
 
 
-def next_delta_sequence(driver: Any, chain_key: str) -> int:
+def next_delta_sequence(store: Any, chain_key: str) -> int:
     """Return the next monotonic sequence number for a chain.
 
     Returns 1 for an empty chain. Sequences are scoped per chain_key
@@ -66,25 +67,10 @@ def next_delta_sequence(driver: Any, chain_key: str) -> int:
     5.1.0 this fell through to 1, which manufactured a second genesis
     mid-chain on any transient error.
     """
+    store = as_structural_store(store)
     try:
-        with driver.session() as session:
-            result = session.run(
-                """
-                MATCH (ar:AriadneAuditRecord {episode_id: $eid})
-                RETURN max(ar.delta_sequence) AS max_seq
-                """,
-                # Cypher parameter is `$eid` for backward compatibility with
-                # the test fakes in tests/unit/protocol/test_phase2_operations.py
-                # and similar. The Python-level parameter is `chain_key`
-                # because the value may be an episode_id OR a synthetic chain
-                # key (e.g., "declaration:<system>:<group>"). Cypher parameter
-                # name is implementation detail; the function contract is on
-                # the Python signature.
-                {"eid": chain_key},
-            )
-            record = result.single()
-            current_max = record["max_seq"] if record and record["max_seq"] is not None else 0
-            return current_max + 1
+        current_max = store.max_delta_sequence(chain_key)
+        return (current_max if current_max is not None else 0) + 1
     except ASTPProtocolError:
         raise
     except Exception as e:
@@ -92,7 +78,7 @@ def next_delta_sequence(driver: Any, chain_key: str) -> int:
         raise AdapterWriteError(f"next_delta_sequence: {e}") from e
 
 
-def prior_audit_hash(driver: Any, chain_key: str) -> str:
+def prior_audit_hash(store: Any, chain_key: str) -> str:
     """Return the hash of the most recent audit record on this chain.
 
     Returns `GENESIS_HASH` if the chain is empty. The caller uses this
@@ -103,20 +89,10 @@ def prior_audit_hash(driver: Any, chain_key: str) -> str:
     ``next_delta_sequence``): returning GENESIS on a transient error, as
     this did until 5.1.0, forged a chain restart.
     """
+    store = as_structural_store(store)
     try:
-        with driver.session() as session:
-            result = session.run(
-                """
-                MATCH (ar:AriadneAuditRecord {episode_id: $eid})
-                RETURN ar.record_hash AS hash
-                ORDER BY ar.delta_sequence DESC
-                LIMIT 1
-                """,
-                # See `next_delta_sequence` for the $eid vs chain_key rationale.
-                {"eid": chain_key},
-            )
-            record = result.single()
-            return record["hash"] if record and record["hash"] else GENESIS_HASH
+        latest = store.latest_audit_record_hash(chain_key)
+        return latest if latest else GENESIS_HASH
     except ASTPProtocolError:
         raise
     except Exception as e:

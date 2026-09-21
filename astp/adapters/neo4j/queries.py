@@ -1274,8 +1274,4 @@ def segment_content_hashes_sync(driver, segment_ids) -> dict:
         raise AdapterWriteError(f"segment_content_hashes_sync: {e}") from e
 
 
-def content_hashes_in_sequence_order(found: dict, segment_ids) -> list:
-    """The content hashes of ``segment_ids`` present in ``found``, ordered by
-    ``sequence_index`` — the order the Segments were written."""
-    present = [found[str(i)] for i in segment_ids if str(i) in found]
-    return [h for _, h in sorted(present, key=lambda t: (t[0] is None, t[0]))]
+from astp.core.ordering import content_hashes_in_sequence_order  # noqa: E402 — re-exported; the helper is pure and lives in core

@@ -45,6 +45,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
+from astp.adapters.base import as_structural_store
 from astp.core.hash_canonical import hash_preimage
 
 
@@ -404,7 +405,7 @@ def _declaration_audit_chain_id(group_system: str, group_id: str) -> str:
 
 
 def assert_membership_record(
-    driver,
+    store,
     record: MembershipRecord,
     *,
     session_id: Optional[str] = None,
@@ -412,7 +413,7 @@ def assert_membership_record(
 ) -> MembershipRecord:
     """Operation-layer entry point for asserting a membership.
 
-    Wraps the adapter-level `write_membership_record_sync` with audit
+    Wraps the adapter-level `StructuralStore.write_membership_record` with audit
     chain emission. Emits MEMBERSHIP_RECORD_CREATED unconditionally;
     additionally emits MEMBERSHIP_RECORD_SUPERSEDED if the new record
     supersedes a prior — both events describe one operation. Audit
@@ -422,11 +423,8 @@ def assert_membership_record(
     advances. The bare writer is for cases where the caller already
     has audit handling (e.g., bulk migration with batched audit).
     """
+    store = as_structural_store(store)
     import json as _json
-    from astp.adapters.neo4j.writer import (
-        write_audit_record_sync,
-        write_membership_record_sync,
-    )
     from astp.core.branching import (
         AuditRecord,
         CognitiveDeltaType,
@@ -436,7 +434,7 @@ def assert_membership_record(
     from astp.core.audit_chain import next_delta_sequence, prior_audit_hash
 
     # 1. Write the membership record (governance + hash stamping + edge).
-    write_membership_record_sync(driver, record)
+    store.write_membership_record(record)
 
     # 2. Build MEMBERSHIP_RECORD_CREATED audit record.
     created_delta = MembershipRecordCreatedDelta(
@@ -457,8 +455,8 @@ def assert_membership_record(
     }
 
     episode_id_str = str(record.episode_id)
-    seq_a = next_delta_sequence(driver, episode_id_str)
-    prior_a = prior_audit_hash(driver, episode_id_str)
+    seq_a = next_delta_sequence(store, episode_id_str)
+    prior_a = prior_audit_hash(store, episode_id_str)
 
     short_record_id = str(record.record_id)[:8]
     audit_created = AuditRecord(
@@ -484,18 +482,13 @@ def assert_membership_record(
         _json.dumps(created_forward, default=str, sort_keys=True),
         prior_a,
     )
-    write_audit_record_sync(driver, audit_created)
+    store.write_audit_record(audit_created)
 
     # 3. If this is a succession, fetch the prior record's role and emit
     # MEMBERSHIP_RECORD_SUPERSEDED in addition.
     if record.supersedes_record_id is not None:
-        with driver.session() as session:
-            prior_row = session.run(
-                "MATCH (m:AriadneMembershipRecord {record_id: $rid}) "
-                "RETURN m.membership_role AS role",
-                {"rid": str(record.supersedes_record_id)},
-            ).single()
-        old_role = prior_row["role"] if prior_row else "(unknown)"
+        prior_role = store.membership_record_role(str(record.supersedes_record_id))
+        old_role = prior_role if prior_role else "(unknown)"
 
         superseded_delta = MembershipRecordSupersededDelta(
             old_record_id=str(record.supersedes_record_id),
@@ -515,7 +508,7 @@ def assert_membership_record(
             "new_record_id": str(record.record_id),
         }
 
-        seq_b = next_delta_sequence(driver, episode_id_str)
+        seq_b = next_delta_sequence(store, episode_id_str)
         prior_b = audit_created.record_hash  # Chain directly off the just-written record
 
         audit_superseded = AuditRecord(
@@ -545,13 +538,13 @@ def assert_membership_record(
             _json.dumps(superseded_forward, default=str, sort_keys=True),
             prior_b,
         )
-        write_audit_record_sync(driver, audit_superseded)
+        store.write_audit_record(audit_superseded)
 
     return record
 
 
 def register_conformance_declaration(
-    driver,
+    store,
     declaration: ConformanceDeclaration,
 ) -> ConformanceDeclaration:
     """Persist an initial ConformanceDeclaration (no version bump).
@@ -566,14 +559,14 @@ def register_conformance_declaration(
     amendment adds a DECLARATION_CREATED event, this is the natural
     place to emit it.
     """
-    from astp.adapters.neo4j.writer import write_conformance_declaration_sync
 
-    write_conformance_declaration_sync(driver, declaration)
+    store = as_structural_store(store)
+    store.write_conformance_declaration(declaration)
     return declaration
 
 
 def bump_conformance_declaration(
-    driver,
+    store,
     new_declaration: ConformanceDeclaration,
     prior_declaration_id: str,
     *,
@@ -599,12 +592,8 @@ def bump_conformance_declaration(
     Raises:
         GroupingGovernanceError: if version classification fails.
     """
+    store = as_structural_store(store)
     import json as _json
-    from astp.adapters.neo4j.writer import (
-        supersede_conformance_declaration_sync,
-        write_audit_record_sync,
-        write_conformance_declaration_sync,
-    )
     from astp.core.branching import (
         AuditRecord,
         CognitiveDeltaType,
@@ -619,11 +608,10 @@ def bump_conformance_declaration(
     bump_kind = classify_version_bump(prior_version, new_declaration.declaration_version)
 
     # 2. Write the new declaration.
-    write_conformance_declaration_sync(driver, new_declaration)
+    store.write_conformance_declaration(new_declaration)
 
     # 3. Link supersession + set forward pointer on prior.
-    supersede_conformance_declaration_sync(
-        driver, prior_declaration_id, str(new_declaration.declaration_id)
+    store.supersede_conformance_declaration(prior_declaration_id, str(new_declaration.declaration_id)
     )
 
     # 4. Build the delta payload + emit the appropriate audit event.
@@ -664,8 +652,8 @@ def bump_conformance_declaration(
     chain_key = _declaration_audit_chain_id(
         new_declaration.group_system, new_declaration.group_id
     )
-    seq = next_delta_sequence(driver, chain_key)
-    prior_hash = prior_audit_hash(driver, chain_key)
+    seq = next_delta_sequence(store, chain_key)
+    prior_hash = prior_audit_hash(store, chain_key)
 
     audit = AuditRecord(
         delta_sequence=seq,
@@ -694,6 +682,6 @@ def bump_conformance_declaration(
         _json.dumps(forward_delta, default=str, sort_keys=True),
         prior_hash,
     )
-    write_audit_record_sync(driver, audit)
+    store.write_audit_record(audit)
 
     return new_declaration, bump_kind

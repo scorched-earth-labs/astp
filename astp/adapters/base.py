@@ -278,3 +278,239 @@ class ASTPAdapter(ABC):
 
 
 AriadneAdapter = ASTPAdapter  # name retained for callers written before astp 0.6.0
+
+
+# ── Structural store — the contract the operations layer writes through ──────
+#
+# The branch / fork / merge / aside / soliloquy operations (astp.core.branch_operations),
+# cross-episode linking (astp.core.cross_episode), grouping (astp.core.grouping),
+# coherence (astp.core.coherence) and the audit-chain helpers (astp.core.audit_chain)
+# read and write the structural record through this contract and nothing else.
+# No store is named in the operations layer: an implementation supplies one of
+# these, and the reference Neo4j implementation is astp.adapters.neo4j.store.
+#
+# Every method is synchronous. A method that cannot complete raises — a store
+# failure as AdapterWriteError (chained), a governance violation as its own
+# ASTPProtocolError subclass — and never returns a default (SPEC §15 item 7).
+# A *read* that finds nothing returns None or an empty collection; that is a
+# result, not a failure.
+
+
+class StructuralStore(ABC):
+    """The storage contract of the operations layer (SPEC §15, §19, §20).
+
+    Node arguments are the pydantic models of ``astp.core.branching``,
+    ``astp.core.cross_episode`` and ``astp.core.grouping``; identifiers are the
+    canonical string form of the UUID. Reads return plain dicts keyed by the
+    property names those models use.
+    """
+
+    # ── Episodes ───────────────────────────────────────────────────────────
+
+    @abstractmethod
+    def episode_status(self, episode_id: str) -> Optional[str]:
+        """The Episode's lifecycle status, or None when the Episode does not exist."""
+        ...
+
+    @abstractmethod
+    def episode_spine_hash(self, episode_id: str) -> Optional[str]:
+        """The Episode's current spine hash, or None when unset or the Episode does not exist."""
+        ...
+
+    @abstractmethod
+    def episode_status_and_spine_hash(self, episode_id: str) -> Optional[tuple]:
+        """``(status, spine_hash)`` read together, or None when the Episode does not exist."""
+        ...
+
+    @abstractmethod
+    def departure_fork_episode(self, fork_episode_id: Optional[str] = None,
+                               fork_id: Optional[str] = None) -> tuple:
+        """``(episode_id, fork_status)`` of a departure-fork Episode found by its
+        own id or by ``fork_id``; ``(None, None)`` when there is none."""
+        ...
+
+    @abstractmethod
+    def write_departure_fork_episode(self, episode: Any) -> None: ...
+
+    @abstractmethod
+    def set_episode_fork_return_type(self, episode_id: str, return_type: str) -> None: ...
+
+    @abstractmethod
+    def mark_departure_fork_status(self, fork_episode_id: str, status: str) -> None: ...
+
+    @abstractmethod
+    def set_departure_fork_anchor_index(self, fork_episode_id: str, anchor_index: int) -> None: ...
+
+    # ── Segments ───────────────────────────────────────────────────────────
+
+    @abstractmethod
+    def segment_sequence_index(self, segment_id: str) -> Optional[int]:
+        """The Segment's ``sequence_index``, or None when it does not exist."""
+        ...
+
+    @abstractmethod
+    def segment_content_hashes(self, segment_ids) -> Dict[str, tuple]:
+        """``segment_id -> (sequence_index, content_hash)`` for the Segments that exist
+        among ``segment_ids`` and carry a content hash (SPEC §19.4)."""
+        ...
+
+    # ── Branches ───────────────────────────────────────────────────────────
+
+    @abstractmethod
+    def write_branch_point(self, branch_point: Any) -> None: ...
+
+    @abstractmethod
+    def branch_point_with_terminus(self, branch_id: str) -> Optional[tuple]:
+        """``(branch_point_properties, has_terminus)`` or None when the branch does not exist."""
+        ...
+
+    @abstractmethod
+    def write_branch_terminus(self, terminus: Any) -> None: ...
+
+    @abstractmethod
+    def write_branch_return_edge(self, branch_return: Any) -> None: ...
+
+    @abstractmethod
+    def find_common_ancestor(self, branch_id: str, target_episode_id: str) -> Optional[dict]: ...
+
+    # ── Forks ──────────────────────────────────────────────────────────────
+
+    @abstractmethod
+    def write_fork_point(self, fork_point: Any) -> None: ...
+
+    @abstractmethod
+    def fork_points(self, fork_id: str) -> List[dict]:
+        """Every ForkPoint of a fork: ``fpid``, ``eid``, ``status``, ``origin_id``."""
+        ...
+
+    @abstractmethod
+    def mark_fork_point_status(self, fork_point_id: str, status: str) -> None: ...
+
+    @abstractmethod
+    def write_departure_fork_point(self, fork_point: Any) -> None: ...
+
+    @abstractmethod
+    def departure_fork_point_by_fork(self, fork_id: str) -> Optional[dict]:
+        """``pid``, ``eid``, ``tip`` of the DepartureForkPoint of ``fork_id``, or None."""
+        ...
+
+    @abstractmethod
+    def write_fork_return_node(self, fork_return: Any) -> None: ...
+
+    @abstractmethod
+    def fork_return_exists(self, fork_id: str) -> bool: ...
+
+    # ── Merges ─────────────────────────────────────────────────────────────
+
+    @abstractmethod
+    def write_merge_point(self, merge_point: Any) -> None: ...
+
+    @abstractmethod
+    def merge_point(self, merge_id: str) -> Optional[dict]:
+        """The MergePoint's properties, or None."""
+        ...
+
+    @abstractmethod
+    def merge_executed_forward_delta(self, merge_id: str) -> Optional[str]:
+        """The stored ``forward_delta`` text of the MERGE_EXECUTED audit record that
+        names ``merge_id``, or None."""
+        ...
+
+    # ── Asides and soliloquies ─────────────────────────────────────────────
+
+    @abstractmethod
+    def write_aside(self, aside: Any) -> None: ...
+
+    @abstractmethod
+    def write_aside_terminus(self, terminus: Any) -> None: ...
+
+    @abstractmethod
+    def load_aside(self, aside_id: str) -> Optional[dict]: ...
+
+    @abstractmethod
+    def scan_aside_external_references(self, aside_id: str, content_refs: List[str]) -> List[str]:
+        """The content refs among ``content_refs`` that resolve outside the aside (G-26)."""
+        ...
+
+    @abstractmethod
+    def write_soliloquy(self, soliloquy: Any) -> None: ...
+
+    @abstractmethod
+    def write_soliloquy_conclusion(self, conclusion: Any) -> None: ...
+
+    @abstractmethod
+    def load_soliloquy(self, soliloquy_id: str) -> Optional[dict]: ...
+
+    # ── Coherence ──────────────────────────────────────────────────────────
+
+    @abstractmethod
+    def write_coherence_fingerprint(self, fingerprint: Any) -> None: ...
+
+    @abstractmethod
+    def recent_fingerprints(self, episode_id: str, limit: int = 10) -> List[dict]: ...
+
+    @abstractmethod
+    def last_fingerprint(self, episode_id: str) -> Optional[dict]: ...
+
+    @abstractmethod
+    def last_nominal_segment(self, episode_id: str) -> Optional[str]: ...
+
+    # ── Cross-episode links and grouping ───────────────────────────────────
+
+    @abstractmethod
+    def write_episode_link(self, link: Any) -> None: ...
+
+    @abstractmethod
+    def write_membership_record(self, record: Any) -> None: ...
+
+    @abstractmethod
+    def membership_record_role(self, record_id: str) -> Optional[str]:
+        """The ``membership_role`` of a MembershipRecord, or None."""
+        ...
+
+    @abstractmethod
+    def write_conformance_declaration(self, declaration: Any) -> None: ...
+
+    @abstractmethod
+    def supersede_conformance_declaration(self, old_declaration_id: str, new_declaration_id: str) -> None: ...
+
+    # ── Audit chain, intents, write-intent ledger ──────────────────────────
+
+    @abstractmethod
+    def write_audit_record(self, audit: Any) -> None: ...
+
+    @abstractmethod
+    def max_delta_sequence(self, chain_key: str) -> Optional[int]:
+        """The highest ``delta_sequence`` on the chain, or None when the chain is empty."""
+        ...
+
+    @abstractmethod
+    def latest_audit_record_hash(self, chain_key: str) -> Optional[str]:
+        """The ``record_hash`` of the chain's most recent record, or None when the chain is empty."""
+        ...
+
+    @abstractmethod
+    def acquire_intent(self, idempotency_key: str, intent_type: str, initiator_id: str) -> tuple:
+        """``(intent_properties, is_new)``: an existing intent (COMPLETE or in progress)
+        is returned with ``is_new=False``; otherwise the intent is created."""
+        ...
+
+    @abstractmethod
+    def complete_intent(self, idempotency_key: str, result_node_id: str) -> None: ...
+
+    @abstractmethod
+    def write_completed_wil_entry(self, intent_id: str, operation: str, episode_id: str,
+                                  node_id: str, timestamp: str) -> None:
+        """Ledger a structural write that has already completed (G-39): one
+        ``COMPLETE`` entry whose pre- and post-state hash is ``node_id``."""
+        ...
+
+
+def as_structural_store(store_or_driver: Any) -> "StructuralStore":
+    """Accept either a ``StructuralStore`` or, for callers written before astp
+    0.7.0, a raw driver of the reference store — which is wrapped in the
+    reference implementation. The raw-driver form is retained for one release."""
+    if isinstance(store_or_driver, StructuralStore):
+        return store_or_driver
+    from astp.adapters.neo4j.store import Neo4jStructuralStore
+    return Neo4jStructuralStore(store_or_driver)

@@ -40,6 +40,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
+from astp.adapters.base import as_structural_store
 from astp.core.hash_canonical import hash_preimage
 
 
@@ -393,7 +394,7 @@ class RejectionReason(str, Enum):
 
 
 def assert_episode_link(
-    driver,
+    store,
     link: EpisodeLink,
     *,
     session_id: Optional[str] = None,
@@ -401,13 +402,13 @@ def assert_episode_link(
 ) -> EpisodeLink:
     """Operation-layer entry point for asserting a cross-episode link.
 
-    Wraps the low-level `write_episode_link_sync` adapter with audit-chain
+    Wraps the low-level `StructuralStore.write_episode_link` adapter with audit-chain
     emission. This is the function the server endpoint and Faculty code
-    paths should call — they should NOT call `write_episode_link_sync`
+    paths should call — they should NOT call `StructuralStore.write_episode_link`
     directly, because doing so bypasses the audit chain.
 
     Args:
-        driver: Neo4j driver.
+        store: a StructuralStore (a raw driver of the reference store is accepted for one release).
         link: EpisodeLink to assert. `created_by` must be set (audit
             chain requires an actor). `content_hash` will be stamped if
             not already present.
@@ -419,7 +420,7 @@ def assert_episode_link(
             the user's reason from the API call.
 
     Returns the link with `content_hash` populated. The link is now
-    persisted in Neo4j and the audit chain has advanced by one record.
+    persisted in the store and the audit chain has advanced by one record.
 
     Phase 1 scope: this function emits LINK_ACCEPTED only — every
     successful assertion is treated as an acceptance event. Phase 2's
@@ -430,11 +431,8 @@ def assert_episode_link(
     # the operation function can be referenced without pulling the full
     # adapter graph in environments that don't need it (e.g., schema
     # validation tools, type-only imports).
+    store = as_structural_store(store)
     import json as _json
-    from astp.adapters.neo4j.writer import (
-        write_audit_record_sync,
-        write_episode_link_sync,
-    )
     from astp.core.audit_chain import next_delta_sequence, prior_audit_hash
     from astp.core.branching import (
         AuditRecord,
@@ -446,7 +444,7 @@ def assert_episode_link(
     # 1. Write the link node + edge through the adapter. The adapter
     # enforces endpoint existence + mutual-exclusivity governance and
     # stamps content_hash if not already set.
-    write_episode_link_sync(driver, link)
+    store.write_episode_link(link)
 
     # 2. Build the forward + reverse deltas for the audit record.
     delta = LinkAcceptedDelta(
@@ -466,8 +464,8 @@ def assert_episode_link(
     # source episode. Source episode is the audit anchor — the episode
     # "asserting" the relationship owns the audit chain entry.
     src_episode_id = str(link.source_episode)
-    delta_sequence = next_delta_sequence(driver, src_episode_id)
-    prior_hash = prior_audit_hash(driver, src_episode_id)
+    delta_sequence = next_delta_sequence(store, src_episode_id)
+    prior_hash = prior_audit_hash(store, src_episode_id)
 
     # 4. Build and hash the AuditRecord, then write it.
     short_link_id = str(link.link_id)[:8]
@@ -497,7 +495,7 @@ def assert_episode_link(
         _json.dumps(forward_delta_dict, default=str, sort_keys=True),
         prior_hash,
     )
-    write_audit_record_sync(driver, audit)
+    store.write_audit_record(audit)
 
     return link
 
@@ -510,7 +508,7 @@ def assert_episode_link(
 
 
 def propose_link_candidate(
-    driver,
+    store,
     *,
     source_episode: str,
     target_episode: str,
@@ -539,8 +537,8 @@ def propose_link_candidate(
     surface it in the review queue and later correlate the
     accept/reject decision back to the proposal.
     """
+    store = as_structural_store(store)
     import json as _json
-    from astp.adapters.neo4j.writer import write_audit_record_sync
     from astp.core.audit_chain import next_delta_sequence, prior_audit_hash
     from astp.core.branching import (
         AuditRecord,
@@ -562,8 +560,8 @@ def propose_link_candidate(
     # Proposals are append-only — rejection is a separate forward event.
     reverse_delta_dict = {"operation": "noop", "reason": "proposals are append-only"}
 
-    delta_sequence = next_delta_sequence(driver, source_episode)
-    prior_hash = prior_audit_hash(driver, source_episode)
+    delta_sequence = next_delta_sequence(store, source_episode)
+    prior_hash = prior_audit_hash(store, source_episode)
 
     audit = AuditRecord(
         delta_sequence=delta_sequence,
@@ -588,13 +586,13 @@ def propose_link_candidate(
         _json.dumps(forward_delta_dict, default=str, sort_keys=True),
         prior_hash,
     )
-    write_audit_record_sync(driver, audit)
+    store.write_audit_record(audit)
 
     return str(audit.audit_id)
 
 
 def record_candidate_rejection(
-    driver,
+    store,
     *,
     source_episode: str,
     target_episode: str,
@@ -617,8 +615,8 @@ def record_candidate_rejection(
 
     Returns the audit_id of the CANDIDATE_REJECTED record.
     """
+    store = as_structural_store(store)
     import json as _json
-    from astp.adapters.neo4j.writer import write_audit_record_sync
     from astp.core.audit_chain import next_delta_sequence, prior_audit_hash
     from astp.core.branching import (
         AuditRecord,
@@ -638,8 +636,8 @@ def record_candidate_rejection(
     forward_delta_dict = delta.model_dump()
     reverse_delta_dict = {"operation": "noop", "reason": "candidate rejections are append-only"}
 
-    delta_sequence = next_delta_sequence(driver, source_episode)
-    prior_hash = prior_audit_hash(driver, source_episode)
+    delta_sequence = next_delta_sequence(store, source_episode)
+    prior_hash = prior_audit_hash(store, source_episode)
 
     audit = AuditRecord(
         delta_sequence=delta_sequence,
@@ -664,13 +662,13 @@ def record_candidate_rejection(
         _json.dumps(forward_delta_dict, default=str, sort_keys=True),
         prior_hash,
     )
-    write_audit_record_sync(driver, audit)
+    store.write_audit_record(audit)
 
     return str(audit.audit_id)
 
 
 def record_link_rejection(
-    driver,
+    store,
     *,
     proposed_audit_event_id: str,
     source_episode: str,
@@ -691,8 +689,8 @@ def record_link_rejection(
 
     Returns the audit_id of the LINK_REJECTED record.
     """
+    store = as_structural_store(store)
     import json as _json
-    from astp.adapters.neo4j.writer import write_audit_record_sync
     from astp.core.audit_chain import next_delta_sequence, prior_audit_hash
     from astp.core.branching import (
         AuditRecord,
@@ -713,8 +711,8 @@ def record_link_rejection(
     forward_delta_dict = delta.model_dump()
     reverse_delta_dict = {"operation": "noop", "reason": "link rejections are append-only"}
 
-    delta_sequence = next_delta_sequence(driver, source_episode)
-    prior_hash = prior_audit_hash(driver, source_episode)
+    delta_sequence = next_delta_sequence(store, source_episode)
+    prior_hash = prior_audit_hash(store, source_episode)
 
     audit = AuditRecord(
         delta_sequence=delta_sequence,
@@ -739,7 +737,7 @@ def record_link_rejection(
         _json.dumps(forward_delta_dict, default=str, sort_keys=True),
         prior_hash,
     )
-    write_audit_record_sync(driver, audit)
+    store.write_audit_record(audit)
 
     return str(audit.audit_id)
 
