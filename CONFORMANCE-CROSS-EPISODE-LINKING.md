@@ -37,7 +37,7 @@ All hex values lowercase. All string fields UTF-8. Datetimes UTC-normalized ISO 
 ### 2.1 Hash Canonicalization
 
 **CEL-001** — `EpisodeLink` content hash
-- **Class:** REQUIRED
+- **Class:** REQUIRED — *4.x form, for links written before astp 0.5.0; the 5.0.0 construction is `EPISODE_LINK:v2:` over the §5.1.1 field encoding (SPEC §20 →2)*
 - **Spec Reference:** §20 →2 (hash preimage note)
 - **Description:** `compute_episode_link_content_hash()` MUST produce identical bytes across implementations given identical inputs. The canonical layout is the ordered field set, serialized as a JSON object with `sort_keys=False` and `separators=(",",":")`, then SHA3-256. Field order (from `_HASH_PREIMAGE_FIELDS`): `link_id`, `source_episode`, `target_episode`, `created_at`, `created_by`, `link_type`, `link_strength`, `is_inferred`, `inference_signals`, `inference_threshold`, `retroactive`, `health_state`, `health_checked_at`, `source_version`, `target_version`, `quarantine_reason`, `quarantined_at`.
 - **Verification Protocol:** Cross-implementation consistency check. Two conforming implementations MUST produce identical `content_hash` bytes for the same input tuple.
@@ -50,7 +50,7 @@ All hex values lowercase. All string fields UTF-8. Datetimes UTC-normalized ISO 
 - **Failure Condition:** A link's `content_hash` changes when only `quarantine_resolved_at` / `quarantine_resolution` are set — the resolution lifecycle is committed by the audit log, not the content hash.
 
 **CEL-003** — Health-state field inclusion
-- **Class:** REQUIRED
+- **Class:** REQUIRED — *4.x form only; under `EPISODE_LINK:v2:` (SPEC §20 →2) `health_state` and `health_checked_at` are OUT of the preimage and re-stamping after a health transition MUST NOT change `content_hash`*
 - **Spec Reference:** §20 →2, §20 →11.2.2 (`LINK_INTEGRITY` field snapshot)
 - **Description:** Mutable health fields `health_state` and `health_checked_at` ARE part of the preimage (drift detection is cryptographically anchored to write-time state). The `LINK_INTEGRITY` proof's `field_snapshot` MUST cover exactly the CEL-001 field set. Re-stamping after a health transition MUST yield a new, deterministic hash.
 - **Verification Protocol:** Recompute over stored canonical fields; MUST equal stored `content_hash`.

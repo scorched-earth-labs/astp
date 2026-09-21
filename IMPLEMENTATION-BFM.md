@@ -17,7 +17,7 @@
 SPEC §19 defines the protocol surface of the Branch/Fork/Merge/Aside/Soliloquy/CoherenceFingerprint taxonomy — the normative invariants any conforming implementation must satisfy. This document describes **how Scorched Earth Labs implemented that taxonomy** against the Neo4j adapter. It is not normative: another adapter (Postgres, DynamoDB, a vector store + relational hybrid) may differ in storage layout while remaining spec-conforming.
 
 What is normative from this file:
-- The domain-separation hash prefixes (`BRANCH_POINT:`, `MERGE_POINT:`, `DEPARTURE_FORK_POINT:`, `FORK_RETURN:`, `ASIDE:`, `SOLILOQUY_PLACEHOLDER:`, `SOLILOQUY_FULL:`, `DELIBERATION_CHAIN:`, `SOLILOQUY_CONCLUSION:`, `FINGERPRINT:`, `OBJECTIVE:`, `AUDIT:`, `INTENT:`, `CONFIRMATION:`, `CONFLICT_MANIFEST:`, `MERGE_SPINE_POST:`, `ASIDE_FINAL:`). These are part of the protocol.
+- The domain-separation hash prefixes this document uses (`BRANCH_POINT:`, `MERGE_POINT:`, `DEPARTURE_FORK_POINT:`, `FORK_RETURN:`, `ASIDE:`, `SOLILOQUY_PLACEHOLDER:`, `SOLILOQUY_FULL:`, `DELIBERATION_CHAIN:`, `SOLILOQUY_CONCLUSION:`, `FINGERPRINT:`, `OBJECTIVE:`, `AUDIT:`, `INTENT:`, `CONFIRMATION:`, `CONFLICT_MANIFEST:`, `MERGE_SPINE_POST:`, `ASIDE_FINAL:`) are the **4.x** prefixes, retained by SPEC §5.1.3 as the definitions of the values stamped on nodes already written and never reused. What a 5.0.0 seal commits are the `:v2:` structural-manifest members of SPEC §5.7.1 and the `:v2:` side-channel constructions of §19.4 (stamped by the reference writers from astp 0.5.0); `FINGERPRINT:` is retired with no successor (§19.5.1).
 - The three-writes rule: every taxonomy state transition writes a structural node, a cognitive delta, and an audit record, or it writes nothing.
 - The conflict-manifest short-circuit in `execute_merge()`.
 
@@ -416,8 +416,8 @@ The protocol default is `HASH_PLACEHOLDER` because it's the privacy-preserving c
 
 `conclude_soliloquy()` writes `SoliloquyConclusionNode` with:
 
-- `conclusion_content_hash` — hash of the public summary (domain `SOLILOQUY_CONCLUSION:`)
-- `deliberation_chain_hash` — tamper-evident hash of the private chain (domain `DELIBERATION_CHAIN:`)
+- `conclusion_content_hash` — hash of the public summary (domain `SOLILOQUY_CONCLUSION:` on nodes written before astp 0.5.0; `SOLILOQUY_CONCLUSION:v2:` since — SPEC §19.4)
+- `deliberation_chain_hash` — tamper-evident hash of the private chain (domain `DELIBERATION_CHAIN:` before astp 0.5.0; `DELIBERATION_CHAIN:v2:` over the deliberation Segments' content hashes in order since — SPEC §19.4)
 - `merged_into_segment_id` — the spine segment that receives the conclusion
 
 The deliberation chain itself stays on the `SoliloquySegmentNode`. Only the conclusion is public. An auditor with read access to the Soliloquy node can verify the chain content against the stored hash — without the content ever leaving the node.
