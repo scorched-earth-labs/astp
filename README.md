@@ -118,7 +118,7 @@ A conforming adapter must:
 4. Support idempotent writes for WIL recovery
 5. Fail loudly on errors — never silently swallow writes
 
-The operations layer — branch, fork, merge, aside, soliloquy, cross-episode linking, grouping, coherence, the audit chain — reads and writes through a second, synchronous contract, `StructuralStore` (also in `astp.adapters.base`), and names no store of its own. An implementation supplies one; the reference implementation is `astp.adapters.neo4j.store.Neo4jStructuralStore`. See `SPEC.md` for the full conformance requirements.
+The operations layer — branch, fork, merge, aside, soliloquy, cross-episode linking, grouping, coherence, the audit chain — reads and writes through a second, synchronous contract, `StructuralStore` (also in `astp.adapters.base`), and names no store of its own. An implementation supplies one. `astp.adapters.memory.InMemoryStore` implements both contracts over plain dicts — the simplest conforming implementation, and the store the protocol's own tests run the operations against; `astp.adapters.neo4j.store.Neo4jStructuralStore` is the graph-backed reference. See `SPEC.md` for the full conformance requirements.
 
 ---
 

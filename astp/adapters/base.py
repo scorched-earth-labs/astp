@@ -379,7 +379,7 @@ class StructuralStore(ABC):
     def write_fork_point(self, fork_point: Any) -> None: ...
 
     @abstractmethod
-    def fork_points(self, fork_id: str) -> List[dict]:
+    def fork_points_of(self, fork_id: str) -> List[dict]:
         """Every ForkPoint of a fork: ``fpid``, ``eid``, ``status``, ``origin_id``."""
         ...
 

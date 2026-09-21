@@ -135,7 +135,7 @@ class Neo4jStructuralStore(StructuralStore):
     def write_fork_point(self, fork_point: Any) -> None:
         W.write_fork_point_sync(self.driver, fork_point)
 
-    def fork_points(self, fork_id: str) -> List[dict]:
+    def fork_points_of(self, fork_id: str) -> List[dict]:
         with self.driver.session() as session:
             result = session.run("""
                 MATCH (fp:AriadneForkPoint {fork_id: $fork_id})
