@@ -465,7 +465,7 @@ No field of any Layer 3 node or edge appears in the preimage of any Layer 1 or 2
 
 ## 16. Adapter and Conformance
 
-### AriadneAdapter / ASI
+### ASTPAdapter / ASI
 
 The abstract contract (the **Adapter Service Interface**) any storage backend implements to serve as an ASTP adapter: writing nodes, querying, computing hashes, WIL recovery. `astp/adapters/base.py`; SPEC §2, §15.
 
@@ -516,7 +516,7 @@ A normative change, taken through the process in `GOVERNANCE.md` (proposal → d
 - **Adapter Failure Contract** — §16
 - **Amendment** — §17
 - **Anchor Commitment / Receipt** — §13
-- **AriadneAdapter / ASI** — §16
+- **ASTPAdapter / ASI** — §16
 - **Aside** — §11
 - **AttachmentNode** — §2
 - **Audit Record** — §9

@@ -55,7 +55,7 @@ astp/
 │   ├── workflow_execution.py# Layer 3 — Workflow & Execution DAG
 │   └── hash_canonical.py    # Reference canonicalizer for content hashes
 └── adapters/
-    ├── base.py              # AriadneAdapter abstract interface (ASI)
+    ├── base.py              # ASTPAdapter abstract interface (ASI)
     └── neo4j/               # Reference implementation
         ├── writer.py, queries.py, crystallization.py, wil.py
         └── rebalance.py, retrieval_audit.py
@@ -100,12 +100,12 @@ A cross-agent exchange recorded as a first-class protocol node, not an applicati
 
 ## Implementing an Adapter
 
-Any database can serve as an ASTP backend by implementing the `AriadneAdapter` interface:
+Any database can serve as an ASTP backend by implementing the `ASTPAdapter` interface:
 
 ```python
-from astp.adapters.base import AriadneAdapter
+from astp.adapters.base import ASTPAdapter
 
-class MyDatabaseAdapter(AriadneAdapter):
+class MyDatabaseAdapter(ASTPAdapter):
     # Implement the ASI methods
     ...
 ```

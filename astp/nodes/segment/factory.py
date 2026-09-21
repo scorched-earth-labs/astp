@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Segment Factory — convenience for creating segment CognitiveNodes.
+ASTP Segment Factory — convenience for creating segment CognitiveNodes.
 
 Thin wrapper over the generic ``create_node`` factory: builds a SegmentPayload
 and delegates, so segment creation is now a one-call operation like episode

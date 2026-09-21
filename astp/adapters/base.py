@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Adapter Service Interface (ASI)
+ASTP Adapter Service Interface (ASI)
 
 Abstract base class defining the contract that any database adapter must
-implement to be a conforming Ariadne persistence backend.
+implement to be a conforming ASTP persistence backend.
 
 The Neo4j adapter in astp.adapters.neo4j is the reference implementation.
 Other adapters (PostgreSQL/AGE, Neptune, ArangoDB, SQL-based) must implement
@@ -50,13 +50,13 @@ from astp.core.schema import (
 )
 
 
-class AriadneAdapter(ABC):
+class ASTPAdapter(ABC):
     """
-    Abstract adapter interface for Ariadne persistence backends.
+    Abstract adapter interface for ASTP persistence backends.
 
     Implementations must handle:
     1. Schema initialization (constraints, indexes)
-    2. Node CRUD for all Ariadne node types
+    2. Node CRUD for all ASTP node types
     3. Edge creation (CONTAINS, TRIGGERED, REFERENCES, etc.)
     4. Query operations for UI and agent consumption
 
@@ -275,3 +275,6 @@ class AriadneAdapter(ABC):
     ) -> None:
         """Create a REFERENCES edge between segments."""
         ...
+
+
+AriadneAdapter = ASTPAdapter  # name retained for callers written before astp 0.6.0

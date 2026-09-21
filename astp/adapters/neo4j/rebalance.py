@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Neo4j Rebalance Adapter
+ASTP Neo4j Rebalance Adapter
 
 Persistence for RebalanceEventNode — forensic audit trail for
 tree rebalancing operations. Stored on AriadneRebalanceEvent nodes.
@@ -47,7 +47,7 @@ async def initialize_rebalance_schema(driver) -> None:
     async with driver.session() as session:
         for stmt in REBALANCE_SCHEMA:
             await session.run(stmt)
-    logger.info("Ariadne rebalance event schema initialized")
+    logger.info("ASTP rebalance event schema initialized")
 
 
 async def write_rebalance_event(driver, event: RebalanceEventNode) -> None:

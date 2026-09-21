@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Neo4j Crystallization Adapter
+ASTP Neo4j Crystallization Adapter
 
 Neo4j-specific persistence operations for the crystallization protocol.
 Every operation raises AdapterWriteError on failure; nothing is gated by a flag.
@@ -26,7 +26,7 @@ import logging
 import os
 from uuid import UUID
 
-from astp.core.schema import AriadneGovernanceError
+from astp.core.schema import ASTPGovernanceError
 from astp.core.crystallization import (
     CrystallizationDeltaNode,
     CrystallizationVerificationResult,
@@ -39,7 +39,8 @@ from astp.core.crystallization import (
 logger = logging.getLogger("astp.adapters.neo4j.crystallization")
 
 IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE = os.getenv(
-    "ARIADNE_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE", "true"
+    "ASTP_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE",
+    os.getenv("ARIADNE_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE", "true"),  # honoured for deployments configured before astp 0.6.0
 ).lower() == "true"
 
 
@@ -68,7 +69,7 @@ async def acquire_crystallization_lock(driver, episode_id: str) -> bool:
 
         if pending_hitl > 0:
             logger.warning(
-                f"Ariadne: Cannot acquire crystallization lock for episode {episode_id} "
+                f"ASTP: Cannot acquire crystallization lock for episode {episode_id} "
                 f"-- {pending_hitl} pending HITL event(s) must be resolved first."
             )
             return False
@@ -89,10 +90,10 @@ async def acquire_crystallization_lock(driver, episode_id: str) -> bool:
         record = await result.single()
         locked = record is not None
         if locked:
-            logger.info(f"Ariadne: CRYSTALLIZATION_PENDING lock acquired for episode {episode_id}")
+            logger.info(f"ASTP: CRYSTALLIZATION_PENDING lock acquired for episode {episode_id}")
         else:
             logger.warning(
-                f"Ariadne: Could not acquire crystallization lock for episode {episode_id} "
+                f"ASTP: Could not acquire crystallization lock for episode {episode_id} "
                 f"-- episode not in ACTIVE/CLOSING/CLOSING_PENDING_SEAL state or not found."
             )
         return locked
@@ -127,7 +128,7 @@ async def release_crystallization_lock(driver, episode_id: str, success: bool) -
         record = await result.single()
         restored = record["restored"] if record else None
     logger.info(
-        f"Ariadne: Released crystallization lock for episode {episode_id} "
+        f"ASTP: Released crystallization lock for episode {episode_id} "
         f"-> {restored or '(no lock held)'} (success={success})"
     )
 
@@ -219,7 +220,7 @@ async def write_crystallization_delta(driver, delta: CrystallizationDeltaNode) -
         })
 
     logger.info(
-        f"Ariadne: Crystallization delta {delta.delta_id} written for "
+        f"ASTP: Crystallization delta {delta.delta_id} written for "
         f"episode {delta.episode_id} at chain_position={delta.chain_position}"
     )
 
@@ -294,7 +295,7 @@ async def get_next_valid_chain_position(driver, episode_id: str) -> int:
         content_count = record2["content_count"] if record2 else 0
 
     if last_crystallization_pos is not None and content_count <= last_crystallization_pos:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             f"Ordering constraint violation: Cannot re-crystallize episode {episode_id}. "
             f"No new content deltas since last crystallization at position "
             f"{last_crystallization_pos}. Add content before re-crystallizing."
@@ -338,7 +339,7 @@ async def archive_episode(
     redis_client=None,
 ) -> None:
     """
-    Archives an episode. If ARIADNE_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE=true
+    Archives an episode. If ASTP_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE=true
     and the episode is not yet crystallized, auto-crystallizes before archiving.
 
     `redis_client` is optional and additive. When supplied, the implicit
@@ -353,7 +354,7 @@ async def archive_episode(
     if not is_cryst:
         if IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE:
             logger.info(
-                f"Ariadne: Auto-crystallizing episode {episode_id} before archive"
+                f"ASTP: Auto-crystallizing episode {episode_id} before archive"
             )
             async def _build_delta():
                 sealed_chain_root = compute_spine_hash_for_episode(
@@ -379,14 +380,14 @@ async def archive_episode(
                     redis_client, driver, episode_id, _build_delta
                 )
                 if not intent_id:
-                    raise AriadneGovernanceError(
+                    raise ASTPGovernanceError(
                         f"Cannot archive episode {episode_id}: failed to acquire "
                         f"crystallization lock for implicit pre-archive crystallization."
                     )
             else:
                 locked = await acquire_crystallization_lock(driver, episode_id)
                 if not locked:
-                    raise AriadneGovernanceError(
+                    raise ASTPGovernanceError(
                         f"Cannot archive episode {episode_id}: failed to acquire "
                         f"crystallization lock for implicit pre-archive crystallization."
                     )
@@ -397,11 +398,11 @@ async def archive_episode(
                     await release_crystallization_lock(driver, episode_id, success=False)
                     raise
         else:
-            raise AriadneGovernanceError(
+            raise ASTPGovernanceError(
                 f"Archive rejected: Episode {episode_id} is not crystallized and "
-                f"ARIADNE_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE=false. "
+                f"ASTP_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE=false. "
                 f"Either crystallize the episode explicitly before archiving, or "
-                f"set ARIADNE_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE=true."
+                f"set ASTP_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE=true."
             )
 
     async with driver.session() as session:
@@ -410,4 +411,4 @@ async def archive_episode(
             SET e.episode_status = 'ARCHIVED',
                 e.archived_at    = datetime()
         """, {"episode_id": episode_id})
-    logger.info(f"Ariadne: Episode {episode_id} archived.")
+    logger.info(f"ASTP: Episode {episode_id} archived.")

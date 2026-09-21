@@ -6,6 +6,12 @@ All notable changes to ASTP (the AI State Tree Protocol). Version numbering foll
 
 The next change-set queues here.
 
+### Changed (reference package 0.6.0 — the public API carries the protocol's name)
+- `ASTPAdapter`, `ASTPProtocolError`, `ASTPGovernanceError`, `ASTP_SCHEMA_VERSION` and `initialize_astp_schema` replace the `Ariadne*` / `ARIADNE_*` / `initialize_ariadne_schema` names. The old names remain importable as aliases of the new ones for callers written before 0.6.0; no behaviour changes. Docstrings, comments and log prefixes say ASTP.
+- `GroupingSystem.ASTP_NATIVE` (`"astp_native"`) is the protocol's reserved grouping value. `ARIADNE_NATIVE` (`"ariadne_native"`) is retained as the value carried by records written before 0.6.0 — `group_system` is in the MembershipRecord hash preimage (SPEC §20 →7), so those records keep it.
+- `ASTP_PROVISIONAL_WINDOW_HOURS` and `ASTP_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE` are the configuration names; the `ARIADNE_`-prefixed names are still honoured when the new ones are unset.
+- **Not renamed, deliberately** (`tests/unit/protocol/test_wire_constants.py` guards them): the HKDF `info` strings (`ariadne.workspace.v1`, `ariadne.node.v1:{type}`, `ariadne.seal.v1`) — key-derivation inputs; the `ariadne::` coordinator key prefixes and the `Ariadne*` graph labels, constraint and index names — they name data in deployed stores. Each is a versioned migration of its own.
+
 ### Reference deployment — cutover landed
 - The paired ignis-os change named by 5.1.0 (ignis-os #138, 2026-09-19) routes the crystallize handler through `compute_episode_seal_v2` and the verifier through `reproduce_episode_root`; the reference deployment seals under `spine_algorithm_version` 2. The 5.1.0 condition on `SPINE_ALGORITHM_VERSION_CURRENT` is therefore met, and the constant still reads `1` — by design, not by lag. It is the identifier of the retained version 1 construction (`compute_spine_root_v2(episode_id=…)`, the adaptive tree), which the deployment's version 1 fallback (a non-UUID identifier; a terminal HITL event stored without its context) and every verifier of a 4.x seal select by it; flipping it would stamp `2` on version 1 roots. A version 2 seal takes its identifiers from `SealV2` (`seal_v2.SPINE_ALGORITHM_VERSION_2`), never from a constant. The constant's comment now says so; its name is kept for API compatibility.
 

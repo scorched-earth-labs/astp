@@ -30,10 +30,10 @@ from uuid import uuid4
 
 import pytest
 
-from astp.adapters.neo4j import writer as ariadne_writer
+from astp.adapters.neo4j import writer as neo4j_writer
 from astp.core import branch_operations
 from astp.core.branching import (
-    AriadneGovernanceError,
+    ASTPGovernanceError,
     ConflictManifest,
     MergeResult,
     MergeType,
@@ -483,7 +483,7 @@ class TestCreateFork:
         store = _make_store_with_episodes([eid])
         driver = FakeDriver(store)
 
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             branch_operations.create_fork(
                 driver,
                 origin_episode_id=eid,
@@ -498,7 +498,7 @@ class TestCreateFork:
         store = _make_store_with_episodes([eid])
         driver = FakeDriver(store)
 
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             branch_operations.create_fork(
                 driver,
                 origin_episode_id=eid,
@@ -561,7 +561,7 @@ class TestResolveFork:
             alternatives=[{}, {}],
         )
 
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             branch_operations.resolve_fork(
                 driver,
                 fork_id=fork_result.fork_id,
@@ -847,7 +847,7 @@ class TestCreateDepartureFork:
         store = _make_store_with_episodes([oid])
         driver = FakeDriver(store)
         # missing fork_trigger_segment_id → governance error
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             branch_operations.create_departure_fork(
                 driver, origin_episode_id=oid, origin_segment_id="seg-1",
                 fork_objective="obj", fork_creation_trigger="AGENT_ESCALATION", initiator="agent-a",
@@ -991,7 +991,7 @@ class TestDepartureForkFSM:
         store = FakeStore()
         oid, res, driver = self._make_active_fork(store)
         # fork is ACTIVE — return must be blocked
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             branch_operations.declare_fork_return(
                 driver, fork_id=res.fork_id, origin_episode_id=oid,
                 return_type="INCORPORATED", returned_by="origin-agent",
@@ -1021,7 +1021,7 @@ class TestDepartureForkFSM:
             driver, fork_id=res.fork_id, origin_episode_id=oid,
             return_type="ACKNOWLEDGED", returned_by="origin-agent",
         )
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             branch_operations.declare_fork_return(
                 driver, fork_id=res.fork_id, origin_episode_id=oid,
                 return_type="INCORPORATED", returned_by="origin-agent",
@@ -1074,7 +1074,7 @@ class TestForkOrphanRecovery:
         driver = FakeDriver(store)
         fid = uuid4()
         for action in ("first", "second"):
-            ariadne_writer.write_fork_orphan_marker_sync(driver, ForkOrphanMarker(
+            neo4j_writer.write_fork_orphan_marker_sync(driver, ForkOrphanMarker(
                 fork_id=fid, origin_episode_id=uuid4(), orphan_class=OrphanClass.CLASS_A,
                 sequence_index=1, detection_run_id=uuid4(), recovery_action=action,
                 requires_operator_review=True,
@@ -1088,7 +1088,7 @@ class TestForkOrphanRecovery:
         driver = FakeDriver(store)
         pid = str(uuid4())
         store.departure_points[pid] = {"fork_point_id": pid, "fork_id": str(uuid4())}
-        ariadne_writer.mark_departure_fork_point_orphaned_sync(driver, pid)
+        neo4j_writer.mark_departure_fork_point_orphaned_sync(driver, pid)
         assert store.departure_points[pid]["orphaned"] is True
         assert pid in store.departure_points                 # never deleted (append-only)
 
@@ -1097,7 +1097,7 @@ class TestForkOrphanRecovery:
         store = FakeStore()
         driver = FakeDriver(store)
         dfp, now = self._dfp(tip="backdated-tip")
-        ariadne_writer.write_retroactive_departure_fork_point_sync(driver, dfp, now)
+        neo4j_writer.write_retroactive_departure_fork_point_sync(driver, dfp, now)
         stored = store.departure_points[str(dfp.fork_point_id)]
         assert stored["retroactive"] is True
         assert stored["orphan_recovery_timestamp"] == now.isoformat()
@@ -1117,7 +1117,7 @@ class TestForkOrphanRecovery:
         driver = FakeDriver(store)
         eid = str(uuid4())
         store.episodes[eid] = {"status": "ACTIVE", "fork_status": "ACTIVE"}
-        ariadne_writer.mark_fork_episode_unanchored_sync(driver, eid)
+        neo4j_writer.mark_fork_episode_unanchored_sync(driver, eid)
         assert store.episodes[eid]["fork_orphaned"] is True
         assert store.episodes[eid]["fork_orphan_class"] == "UNANCHORED"
 
@@ -1126,7 +1126,7 @@ class TestForkOrphanRecovery:
         driver = FakeDriver(store)
         eid = str(uuid4())
         store.episodes[eid] = {"status": "ACTIVE", "fork_status": "ACTIVE"}
-        ariadne_writer.correct_fork_status_by_orphan_recovery_sync(driver, eid)
+        neo4j_writer.correct_fork_status_by_orphan_recovery_sync(driver, eid)
         assert store.episodes[eid]["fork_status"] == "COMPLETED"
         assert store.episodes[eid]["status_corrected_by_orphan_recovery"] is True
         assert store.episodes[eid]["status_corrected_at"] is not None

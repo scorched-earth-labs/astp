@@ -41,7 +41,7 @@ from uuid import UUID
 
 from astp.core import seal_v2 as S
 from astp.core.seal_v2 import SegmentSealInput
-from astp.protocol.errors import AdapterWriteError, AriadneProtocolError
+from astp.protocol.errors import AdapterWriteError, ASTPProtocolError
 
 DEFAULT_SEGMENT_SCHEMA_VERSION = "1.2.0"
 SEGMENT_NODE_TYPE = "segment"
@@ -185,7 +185,7 @@ def fetch_seal_inputs_v2(session, episode_id) -> SealInputsV2:
             ctx = S.compute_hitl_context_hash_v2(r["req"], UUID(r["episode_id"]), r["gate"], r["agent"], _ts(r["invoked_at"]), r["context_json"])
             res = S.compute_hitl_resolution_hash_v2(UUID(r["id"]), r["decision"], r["resolved_by"], _ts(r["resolved_at"]), r["rationale"])
             members.append(S.compute_hitl_node_hash_v2(ctx, res))
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
         raise AdapterWriteError(f"fetch_seal_inputs_v2: {e}") from e

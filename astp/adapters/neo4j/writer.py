@@ -28,7 +28,7 @@ from typing import List, Optional
 
 from astp.core.schema import (
     AmendmentLink,
-    AriadneGovernanceError,
+    ASTPGovernanceError,
     AttachmentNode,
     CodicilNode,
     ConsultationNode,
@@ -49,7 +49,7 @@ from astp.core.schema import (
     validate_signal_classification,
 )
 
-from astp.protocol.errors import AdapterWriteError, AriadneProtocolError
+from astp.protocol.errors import AdapterWriteError, ASTPProtocolError
 from astp.core.schema import hitl_terminal_status, require_episode_uuid
 
 logger = logging.getLogger("astp.adapters.neo4j")
@@ -192,21 +192,24 @@ ON CREATE SET
   sv.domain_separation    = "LEAF: prefix for leaves; NODE: prefix for internal nodes; HITL_CTX: for HITL context; HITL_RES: for HITL resolution",
   sv.episode_root_formula = "H(NODE: spine_hash || signal_manifest_hash || exclusion_hash)",
   sv.status               = "ACTIVE",
-  sv.notes                = "v1.2.0: HITLEventNode as first-class Ariadne node type with two-phase lifecycle, HITL_GATE edges, and governance rule G-10."
+  sv.notes                = "v1.2.0: HITLEventNode as first-class ASTP node type with two-phase lifecycle, HITL_GATE edges, and governance rule G-10."
 """
 
 
-async def initialize_ariadne_schema(driver) -> None:
-    """Create all Ariadne constraints, indexes, and schema version seed.
+async def initialize_astp_schema(driver) -> None:
+    """Create all ASTP constraints, indexes, and schema version seed.
     Called on startup."""
-    logger.info("Initializing Ariadne Neo4j schema...")
+    logger.info("Initializing ASTP Neo4j schema...")
     async with driver.session() as session:
         for constraint in SCHEMA_CONSTRAINTS:
             await session.run(constraint)
         for index in SCHEMA_INDEXES:
             await session.run(index)
         await session.run(SCHEMA_VERSION_SEED)
-    logger.info("Ariadne Neo4j schema initialized (constraints, indexes, schema version seed)")
+    logger.info("ASTP Neo4j schema initialized (constraints, indexes, schema version seed)")
+
+
+initialize_ariadne_schema = initialize_astp_schema  # name retained for callers written before astp 0.6.0
 
 
 # ── Node Creation ─────────────────────────────────────────────────────────────
@@ -466,7 +469,7 @@ _UPDATABLE_EPISODE_FIELDS = frozenset({
 async def update_episode_status(driver, episode_id, status, **fields) -> None:
     """Set an episode's lifecycle status, and optionally related fields.
 
-    `AriadneAdapter.update_episode_status` was declared abstract and never
+    `ASTPAdapter.update_episode_status` was declared abstract and never
     implemented, so every lifecycle transition — close, seal, archive — was
     written as ad-hoc Cypher by whoever needed it.
 
@@ -476,7 +479,7 @@ async def update_episode_status(driver, episode_id, status, **fields) -> None:
     """
     unknown = sorted(set(fields) - _UPDATABLE_EPISODE_FIELDS)
     if unknown:
-        raise AriadneGovernanceError(
+        raise ASTPGovernanceError(
             f"update_episode_status: unknown episode field(s) {unknown}; "
             f"allowed: {sorted(_UPDATABLE_EPISODE_FIELDS)}"
         )
@@ -898,7 +901,7 @@ async def create_branch_episode(
         """, {"parent_id": parent_episode_id})
         record = await result.single()
         if not record or record["status"] != EpisodeStatus.ACTIVE.value:
-            raise AriadneGovernanceError(
+            raise ASTPGovernanceError(
                 f"G-2 violation: Cannot branch from episode {parent_episode_id} "
                 f"-- it is not in ACTIVE state."
             )
@@ -966,10 +969,10 @@ def write_attachment_node_sync(driver, attachment: AttachmentNode) -> None:
                 "attachment_id": str(attachment.attachment_id),
                 "attached_at": attachment.attached_at.isoformat(),
             })
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: attachment write failed (non-fatal): {e}")
+        logger.error(f"ASTP: attachment write failed (non-fatal): {e}")
         raise AdapterWriteError(f"write_attachment_node_sync: {e}") from e
 
 
@@ -990,7 +993,7 @@ def write_document_node_sync(driver, document: DocumentNode) -> None:
             )
             if not result.single():
                 logger.warning(
-                    f"Ariadne: Cannot attach document — episode {document.episode_id} not found"
+                    f"ASTP: Cannot attach document — episode {document.episode_id} not found"
                 )
                 return
 
@@ -1043,14 +1046,14 @@ def write_document_node_sync(driver, document: DocumentNode) -> None:
             })
 
             logger.info(
-                f"Ariadne: Document '{document.filename}' attached to episode "
+                f"ASTP: Document '{document.filename}' attached to episode "
                 f"{str(document.episode_id)[:8]}..."
             )
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write document node: {e}")
+        logger.error(f"ASTP: Failed to write document node: {e}")
         raise AdapterWriteError(f"write_document_node_sync: {e}") from e
 
 
@@ -1072,7 +1075,7 @@ def write_hitl_event_invocation_sync(driver, hitl_event, context_json: Optional[
     Sync variant — for callers running in a synchronous context.
     """
     try:
-        from astp.core.schema import ARIADNE_SCHEMA_VERSION
+        from astp.core.schema import ASTP_SCHEMA_VERSION
 
         with driver.session() as session:
             # Create HITLEventNode
@@ -1110,7 +1113,7 @@ def write_hitl_event_invocation_sync(driver, hitl_event, context_json: Optional[
                 "context_hash": hitl_event.context_hash,
                 "invocation_signature": hitl_event.invocation_signature,
                 "invocation_key_fingerprint": hitl_event.invocation_key_fingerprint,
-                "schema_version": ARIADNE_SCHEMA_VERSION,
+                "schema_version": ASTP_SCHEMA_VERSION,
             })
 
             # HITL_GATE edge: Episode -> HITLEvent
@@ -1138,15 +1141,15 @@ def write_hitl_event_invocation_sync(driver, hitl_event, context_json: Optional[
             })
 
         logger.info(
-            f"Ariadne: HITL invocation recorded {str(hitl_event.hitl_event_id)[:8]}... "
+            f"ASTP: HITL invocation recorded {str(hitl_event.hitl_event_id)[:8]}... "
             f"[{hitl_event.requesting_agent} → {hitl_event.gate_type.value}] "
             f"(episode={str(hitl_event.episode_id)[:8]}...)"
         )
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write HITL invocation: {e}")
+        logger.error(f"ASTP: Failed to write HITL invocation: {e}")
         raise AdapterWriteError(f"write_hitl_event_invocation_sync: {e}") from e
 
 
@@ -1205,19 +1208,19 @@ def write_hitl_event_resolution_sync(
             record = result.single()
             if record:
                 logger.info(
-                    f"Ariadne: HITL resolution recorded {hitl_event_id[:8]}... "
+                    f"ASTP: HITL resolution recorded {hitl_event_id[:8]}... "
                     f"[decision={decision}, by={resolved_by}]"
                 )
             else:
                 logger.warning(
-                    f"Ariadne: HITL event {hitl_event_id[:8]}... not found "
+                    f"ASTP: HITL event {hitl_event_id[:8]}... not found "
                     f"or not in INVOKED status — resolution not recorded"
                 )
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write HITL resolution: {e}")
+        logger.error(f"ASTP: Failed to write HITL resolution: {e}")
         raise AdapterWriteError(f"write_hitl_event_resolution_sync: {e}") from e
 
 
@@ -1227,7 +1230,7 @@ def write_hitl_event_resolution_sync(
 def write_branch_point_sync(driver, branch_point) -> None:
     """Write a BranchPointNode + BRANCH_ORIGIN edge from episode."""
     try:
-        from astp.core.schema import ARIADNE_SCHEMA_VERSION
+        from astp.core.schema import ASTP_SCHEMA_VERSION
 
         with driver.session() as session:
             session.run("""
@@ -1267,7 +1270,7 @@ def write_branch_point_sync(driver, branch_point) -> None:
                 "content_hash": branch_point.content_hash,
                 "parent_hash": branch_point.parent_hash,
                 "timestamp_utc": branch_point.timestamp_utc.isoformat(),
-                "schema_version": ARIADNE_SCHEMA_VERSION,
+                "schema_version": ASTP_SCHEMA_VERSION,
                 "pre_declaration_merkle_root": branch_point.pre_declaration_merkle_root,
                 "declared_retroactively_at": branch_point.declared_retroactively_at.isoformat() if branch_point.declared_retroactively_at else None,
                 "declared_by": branch_point.declared_by,
@@ -1291,15 +1294,15 @@ def write_branch_point_sync(driver, branch_point) -> None:
             })
 
         logger.info(
-            f"Ariadne: BranchPoint {str(branch_point.branch_point_id)[:8]}... "
+            f"ASTP: BranchPoint {str(branch_point.branch_point_id)[:8]}... "
             f"[{branch_point.initiated_by} → {branch_point.branch_type.value}] "
             f"(episode={str(branch_point.episode_id)[:8]}...)"
         )
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write BranchPoint: {e}")
+        logger.error(f"ASTP: Failed to write BranchPoint: {e}")
         raise AdapterWriteError(f"write_branch_point_sync: {e}") from e
 
 
@@ -1350,15 +1353,15 @@ def write_branch_terminus_sync(driver, terminus) -> None:
             })
 
         logger.info(
-            f"Ariadne: BranchTerminus {str(terminus.terminus_id)[:8]}... "
+            f"ASTP: BranchTerminus {str(terminus.terminus_id)[:8]}... "
             f"[{terminus.terminus_type.value}] "
             f"(branch={str(terminus.branch_id)[:8]}...)"
         )
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write BranchTerminus: {e}")
+        logger.error(f"ASTP: Failed to write BranchTerminus: {e}")
         raise AdapterWriteError(f"write_branch_terminus_sync: {e}") from e
 
 
@@ -1424,15 +1427,15 @@ def write_audit_record_sync(driver, audit) -> None:
                 })
 
         logger.info(
-            f"Ariadne: AuditRecord #{audit.delta_sequence} "
+            f"ASTP: AuditRecord #{audit.delta_sequence} "
             f"[{audit.delta_type.value}] "
             f"(episode={audit.episode_id[:8]}...)"
         )
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write AuditRecord: {e}")
+        logger.error(f"ASTP: Failed to write AuditRecord: {e}")
         raise AdapterWriteError(f"write_audit_record_sync: {e}") from e
 
 
@@ -1461,10 +1464,10 @@ def write_intent_record_sync(driver, intent) -> None:
                 "result_node_id": intent.result_node_id,
             })
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write IntentRecord: {e}")
+        logger.error(f"ASTP: Failed to write IntentRecord: {e}")
         raise AdapterWriteError(f"write_intent_record_sync: {e}") from e
 
 
@@ -1513,10 +1516,10 @@ def acquire_intent_sync(driver, idempotency_key: str, intent_type: str, initiato
 
             return {"intent_id": intent_id, "idempotency_key": idempotency_key, "status": "PENDING"}, True
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to acquire intent: {e}")
+        logger.error(f"ASTP: Failed to acquire intent: {e}")
         raise AdapterWriteError(f"acquire_intent_sync: {e}") from e
 
 
@@ -1538,10 +1541,10 @@ def complete_intent_sync(driver, idempotency_key: str, result_node_id: str) -> N
                 "result_node_id": result_node_id,
             })
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to complete intent: {e}")
+        logger.error(f"ASTP: Failed to complete intent: {e}")
         raise AdapterWriteError(f"complete_intent_sync: {e}") from e
 
 
@@ -1555,7 +1558,7 @@ def write_fork_point_sync(driver, fork_point) -> None:
     fork_id. Each ForkPoint anchors a new Episode.
     """
     try:
-        from astp.core.schema import ARIADNE_SCHEMA_VERSION
+        from astp.core.schema import ASTP_SCHEMA_VERSION
 
         with driver.session() as session:
             session.run("""
@@ -1593,7 +1596,7 @@ def write_fork_point_sync(driver, fork_point) -> None:
                 "content_hash": fork_point.content_hash,
                 "parent_hash": fork_point.parent_hash,
                 "timestamp_utc": fork_point.timestamp_utc.isoformat(),
-                "schema_version": ARIADNE_SCHEMA_VERSION,
+                "schema_version": ASTP_SCHEMA_VERSION,
             })
 
             # FORK_ORIGIN edge: origin Episode -> ForkPoint
@@ -1614,15 +1617,15 @@ def write_fork_point_sync(driver, fork_point) -> None:
             })
 
         logger.info(
-            f"Ariadne: ForkPoint {str(fork_point.fork_point_id)[:8]}... "
+            f"ASTP: ForkPoint {str(fork_point.fork_point_id)[:8]}... "
             f"[{fork_point.sibling_index + 1}/{fork_point.sibling_count}] "
             f"(fork={str(fork_point.fork_id)[:8]}...)"
         )
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write ForkPoint: {e}")
+        logger.error(f"ASTP: Failed to write ForkPoint: {e}")
         raise AdapterWriteError(f"write_fork_point_sync: {e}") from e
 
 
@@ -1630,7 +1633,7 @@ def write_departure_fork_episode_sync(driver, episode) -> None:
     """Write the new departure-fork AriadneEpisode node (ACTIVE) with its immutable
     fork provenance. Sync counterpart of create_episode_node, extended with the
     Phase-D fork_* provenance fields so episode + provenance land atomically inside
-    create_departure_fork(). (Ariadne BFM Phase D.)"""
+    create_departure_fork(). (BFM Phase D.)"""
     try:
         with driver.session() as session:
             session.run("""
@@ -1685,13 +1688,13 @@ def write_departure_fork_episode_sync(driver, episode) -> None:
                 "fork_status": episode.fork_status,
             })
         logger.info(
-            f"Ariadne: Departure-fork Episode {str(episode.episode_id)[:8]}... "
+            f"ASTP: Departure-fork Episode {str(episode.episode_id)[:8]}... "
             f"created ACTIVE (origin={str(episode.fork_origin_episode_id)[:8] if episode.fork_origin_episode_id else '?'}...)"
         )
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write departure-fork episode: {e}")
+        logger.error(f"ASTP: Failed to write departure-fork episode: {e}")
         raise AdapterWriteError(f"write_departure_fork_episode_sync: {e}") from e
 
 
@@ -1699,7 +1702,7 @@ def write_departure_fork_point_sync(driver, fp) -> None:
     """Write a DepartureForkPointNode to the origin spine + FORK_ORIGIN edge
     (origin Episode -> departure fork point). Single node (no siblings)."""
     try:
-        from astp.core.schema import ARIADNE_SCHEMA_VERSION
+        from astp.core.schema import ASTP_SCHEMA_VERSION
         with driver.session() as session:
             session.run("""
                 MERGE (fp:AriadneDepartureForkPoint {fork_point_id: $fork_point_id})
@@ -1731,7 +1734,7 @@ def write_departure_fork_point_sync(driver, fp) -> None:
                 "content_hash": fp.content_hash,
                 "parent_hash": fp.parent_hash,
                 "timestamp_utc": fp.timestamp_utc.isoformat(),
-                "schema_version": ARIADNE_SCHEMA_VERSION,
+                "schema_version": ASTP_SCHEMA_VERSION,
             })
             session.run("""
                 MATCH (e:AriadneEpisode {episode_id: $origin_episode_id})
@@ -1748,13 +1751,13 @@ def write_departure_fork_point_sync(driver, fp) -> None:
                 "timestamp_utc": fp.timestamp_utc.isoformat(),
             })
         logger.info(
-            f"Ariadne: DepartureForkPoint {str(fp.fork_point_id)[:8]}... "
+            f"ASTP: DepartureForkPoint {str(fp.fork_point_id)[:8]}... "
             f"[{fp.fork_creation_trigger.value}] (fork={str(fp.fork_id)[:8]}...)"
         )
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write DepartureForkPoint: {e}")
+        logger.error(f"ASTP: Failed to write DepartureForkPoint: {e}")
         raise AdapterWriteError(f"write_departure_fork_point_sync: {e}") from e
 
 
@@ -1771,11 +1774,11 @@ def mark_departure_fork_status_sync(driver, fork_episode_id: str, status: str) -
                 "status": status,
                 "ts": datetime.now(timezone.utc).isoformat(),
             })
-        logger.info(f"Ariadne: DepartureFork {str(fork_episode_id)[:8]}... -> {status}")
-    except AriadneProtocolError:
+        logger.info(f"ASTP: DepartureFork {str(fork_episode_id)[:8]}... -> {status}")
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to update departure-fork status: {e}")
+        logger.error(f"ASTP: Failed to update departure-fork status: {e}")
         raise AdapterWriteError(f"mark_departure_fork_status_sync: {e}") from e
 
 
@@ -1798,13 +1801,13 @@ def set_departure_fork_anchor_index_sync(driver, fork_episode_id: str, anchor_in
                 "anchor_index": anchor_index,
             })
         logger.info(
-            f"Ariadne: DepartureFork {str(fork_episode_id)[:8]}... "
+            f"ASTP: DepartureFork {str(fork_episode_id)[:8]}... "
             f"fork_anchor_index -> {anchor_index}"
         )
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to patch fork_anchor_index: {e}")
+        logger.error(f"ASTP: Failed to patch fork_anchor_index: {e}")
         raise AdapterWriteError(f"set_departure_fork_anchor_index_sync: {e}") from e
 
 
@@ -1812,7 +1815,7 @@ def write_fork_return_node_sync(driver, frn) -> None:
     """Write a ForkReturnNode to the ORIGIN spine + FORK_RETURN edge (origin -> return
     node) + RETURNED_FROM edge (return node -> fork episode). Declarative return."""
     try:
-        from astp.core.schema import ARIADNE_SCHEMA_VERSION
+        from astp.core.schema import ASTP_SCHEMA_VERSION
         with driver.session() as session:
             session.run("""
                 MERGE (fr:AriadneForkReturn {fork_return_id: $fork_return_id})
@@ -1840,7 +1843,7 @@ def write_fork_return_node_sync(driver, frn) -> None:
                 "content_hash": frn.content_hash,
                 "parent_hash": frn.parent_hash,
                 "timestamp_utc": frn.timestamp_utc.isoformat(),
-                "schema_version": ARIADNE_SCHEMA_VERSION,
+                "schema_version": ASTP_SCHEMA_VERSION,
             })
             session.run("""
                 MATCH (e:AriadneEpisode {episode_id: $origin_episode_id})
@@ -1862,13 +1865,13 @@ def write_fork_return_node_sync(driver, frn) -> None:
                 "return_type": frn.return_type.value,
             })
         logger.info(
-            f"Ariadne: ForkReturn {str(frn.fork_return_id)[:8]}... "
+            f"ASTP: ForkReturn {str(frn.fork_return_id)[:8]}... "
             f"[{frn.return_type.value}] (fork={str(frn.fork_id)[:8]}...)"
         )
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write ForkReturn: {e}")
+        logger.error(f"ASTP: Failed to write ForkReturn: {e}")
         raise AdapterWriteError(f"write_fork_return_node_sync: {e}") from e
 
 
@@ -1884,7 +1887,7 @@ def write_fork_orphan_marker_sync(driver, marker) -> None:
     MERGE on fork_id → ONE marker per orphaned fork (a re-detection sweep never piles up
     duplicates). Read-only after write; excluded from departure-registry queries."""
     try:
-        from astp.core.schema import ARIADNE_SCHEMA_VERSION
+        from astp.core.schema import ASTP_SCHEMA_VERSION
         with driver.session() as session:
             session.run("""
                 MERGE (m:AriadneForkOrphanMarker {fork_id: $fork_id})
@@ -1910,7 +1913,7 @@ def write_fork_orphan_marker_sync(driver, marker) -> None:
                 "requires_operator_review": marker.requires_operator_review,
                 "detected_at": marker.detected_at.isoformat(),
                 "content_hash": marker.content_hash,
-                "schema_version": ARIADNE_SCHEMA_VERSION,
+                "schema_version": ASTP_SCHEMA_VERSION,
             })
             session.run("""
                 MATCH (e:AriadneEpisode {episode_id: $origin_episode_id})
@@ -1922,13 +1925,13 @@ def write_fork_orphan_marker_sync(driver, marker) -> None:
                 "orphan_class": marker.orphan_class.value,
             })
         logger.info(
-            f"Ariadne: ForkOrphanMarker [{marker.orphan_class.value}] "
+            f"ASTP: ForkOrphanMarker [{marker.orphan_class.value}] "
             f"(fork={str(marker.fork_id)[:8]}...) review={marker.requires_operator_review}"
         )
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write ForkOrphanMarker: {e}")
+        logger.error(f"ASTP: Failed to write ForkOrphanMarker: {e}")
         raise AdapterWriteError(f"write_fork_orphan_marker_sync: {e}") from e
 
 
@@ -1942,11 +1945,11 @@ def mark_departure_fork_point_orphaned_sync(driver, fork_point_id: str) -> None:
                 MATCH (fp:AriadneDepartureForkPoint {fork_point_id: $fork_point_id})
                 SET fp.orphaned = true
             """, {"fork_point_id": str(fork_point_id)})
-        logger.info(f"Ariadne: DepartureForkPoint {str(fork_point_id)[:8]}... flagged orphaned (Class A)")
-    except AriadneProtocolError:
+        logger.info(f"ASTP: DepartureForkPoint {str(fork_point_id)[:8]}... flagged orphaned (Class A)")
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to flag departure fork point orphaned: {e}")
+        logger.error(f"ASTP: Failed to flag departure fork point orphaned: {e}")
         raise AdapterWriteError(f"mark_departure_fork_point_orphaned_sync: {e}") from e
 
 
@@ -1966,7 +1969,7 @@ def write_retroactive_departure_fork_point_sync(driver, dfp, orphan_recovery_tim
     byte-identical to one written on time (the retroactive flag is diagnostic metadata, outside
     the hash preimage)."""
     try:
-        from astp.core.schema import ARIADNE_SCHEMA_VERSION
+        from astp.core.schema import ASTP_SCHEMA_VERSION
         ts = orphan_recovery_timestamp.isoformat() if hasattr(orphan_recovery_timestamp, "isoformat") else orphan_recovery_timestamp
         with driver.session() as session:
             session.run("""
@@ -2001,7 +2004,7 @@ def write_retroactive_departure_fork_point_sync(driver, dfp, orphan_recovery_tim
                 "content_hash": dfp.content_hash,
                 "parent_hash": dfp.parent_hash,
                 "timestamp_utc": dfp.timestamp_utc.isoformat(),
-                "schema_version": ARIADNE_SCHEMA_VERSION,
+                "schema_version": ASTP_SCHEMA_VERSION,
                 "retroactive": True,
                 "orphan_recovery_timestamp": ts,
             })
@@ -2018,13 +2021,13 @@ def write_retroactive_departure_fork_point_sync(driver, dfp, orphan_recovery_tim
                 "timestamp_utc": dfp.timestamp_utc.isoformat(),
             })
         logger.info(
-            f"Ariadne: RETROACTIVE DepartureForkPoint {str(dfp.fork_point_id)[:8]}... "
+            f"ASTP: RETROACTIVE DepartureForkPoint {str(dfp.fork_point_id)[:8]}... "
             f"written (Class-B recovery, fork={str(dfp.fork_id)[:8]}...)"
         )
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed retroactive departure fork point write: {e}")
+        logger.error(f"ASTP: Failed retroactive departure fork point write: {e}")
         raise AdapterWriteError(f"write_retroactive_departure_fork_point_sync: {e}") from e
 
 
@@ -2037,11 +2040,11 @@ def mark_fork_episode_unanchored_sync(driver, fork_episode_id: str) -> None:
                 MATCH (e:AriadneEpisode {episode_id: $episode_id})
                 SET e.fork_orphaned = true, e.fork_orphan_class = 'UNANCHORED'
             """, {"episode_id": str(fork_episode_id)})
-        logger.info(f"Ariadne: Fork episode {str(fork_episode_id)[:8]}... marked UNANCHORED (Class B)")
-    except AriadneProtocolError:
+        logger.info(f"ASTP: Fork episode {str(fork_episode_id)[:8]}... marked UNANCHORED (Class B)")
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to mark fork episode unanchored: {e}")
+        logger.error(f"ASTP: Failed to mark fork episode unanchored: {e}")
         raise AdapterWriteError(f"mark_fork_episode_unanchored_sync: {e}") from e
 
 
@@ -2063,11 +2066,11 @@ def correct_fork_status_by_orphan_recovery_sync(driver, fork_episode_id: str) ->
                 "episode_id": str(fork_episode_id),
                 "ts": datetime.now(timezone.utc).isoformat(),
             })
-        logger.info(f"Ariadne: Fork episode {str(fork_episode_id)[:8]}... status corrected -> COMPLETED (Class C)")
-    except AriadneProtocolError:
+        logger.info(f"ASTP: Fork episode {str(fork_episode_id)[:8]}... status corrected -> COMPLETED (Class C)")
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to correct fork status by orphan recovery: {e}")
+        logger.error(f"ASTP: Failed to correct fork status by orphan recovery: {e}")
         raise AdapterWriteError(f"correct_fork_status_by_orphan_recovery_sync: {e}") from e
 
 
@@ -2089,17 +2092,17 @@ def mark_fork_point_status_sync(driver, fork_point_id: str, status: str) -> None
                 "status": status,
                 "resolved_at": datetime.now(timezone.utc).isoformat(),
             })
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to update fork point status: {e}")
+        logger.error(f"ASTP: Failed to update fork point status: {e}")
         raise AdapterWriteError(f"mark_fork_point_status_sync: {e}") from e
 
 
 def write_merge_point_sync(driver, merge_point) -> None:
     """Write a MergePointNode on the target spine with all three Merkle roots."""
     try:
-        from astp.core.schema import ARIADNE_SCHEMA_VERSION
+        from astp.core.schema import ASTP_SCHEMA_VERSION
 
         with driver.session() as session:
             session.run("""
@@ -2142,7 +2145,7 @@ def write_merge_point_sync(driver, merge_point) -> None:
                 "content_hash": merge_point.content_hash,
                 "parent_hash": merge_point.parent_hash,
                 "timestamp_utc": merge_point.timestamp_utc.isoformat(),
-                "schema_version": ARIADNE_SCHEMA_VERSION,
+                "schema_version": ASTP_SCHEMA_VERSION,
             })
 
             # MERGE_INTO edge: source episode -> MergePoint
@@ -2176,16 +2179,16 @@ def write_merge_point_sync(driver, merge_point) -> None:
             })
 
         logger.info(
-            f"Ariadne: MergePoint {str(merge_point.merge_point_id)[:8]}... "
+            f"ASTP: MergePoint {str(merge_point.merge_point_id)[:8]}... "
             f"[{merge_point.merge_type.value}] "
             f"(source={merge_point.source_episode_id[:8]}... → "
             f"target={merge_point.target_episode_id[:8]}...)"
         )
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write MergePoint: {e}")
+        logger.error(f"ASTP: Failed to write MergePoint: {e}")
         raise AdapterWriteError(f"write_merge_point_sync: {e}") from e
 
 
@@ -2215,10 +2218,10 @@ def write_branch_return_edge_sync(driver, branch_return) -> None:
                 "timestamp_utc": branch_return.timestamp_utc.isoformat(),
             })
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write BranchReturnEdge: {e}")
+        logger.error(f"ASTP: Failed to write BranchReturnEdge: {e}")
         raise AdapterWriteError(f"write_branch_return_edge_sync: {e}") from e
 
 
@@ -2256,10 +2259,10 @@ def find_common_ancestor_sync(
                 "anchor_merkle": record["anchor_merkle"],
             }
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: find_common_ancestor failed: {e}")
+        logger.error(f"ASTP: find_common_ancestor failed: {e}")
         raise AdapterWriteError(f"find_common_ancestor_sync: {e}") from e
 
 
@@ -2269,7 +2272,7 @@ def find_common_ancestor_sync(
 def write_aside_sync(driver, aside) -> None:
     """Write an AsideSegmentNode + ASIDE_OPEN edge from parent episode."""
     try:
-        from astp.core.schema import ARIADNE_SCHEMA_VERSION
+        from astp.core.schema import ASTP_SCHEMA_VERSION
 
         with driver.session() as session:
             session.run("""
@@ -2299,7 +2302,7 @@ def write_aside_sync(driver, aside) -> None:
                 "content_hash": aside.content_hash,
                 "parent_hash": aside.parent_hash,
                 "timestamp_utc": aside.timestamp_utc.isoformat(),
-                "schema_version": ARIADNE_SCHEMA_VERSION,
+                "schema_version": ASTP_SCHEMA_VERSION,
             })
             # ASIDE_OPEN edge: parent episode -> Aside
             session.run("""
@@ -2319,15 +2322,15 @@ def write_aside_sync(driver, aside) -> None:
             })
 
         logger.info(
-            f"Ariadne: Aside {str(aside.aside_id)[:8]}... "
+            f"ASTP: Aside {str(aside.aside_id)[:8]}... "
             f"[human={aside.initiated_by_human} → agent={aside.target_agent_id}] "
             f"(episode={str(aside.parent_episode_id)[:8]}...)"
         )
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write Aside: {e}")
+        logger.error(f"ASTP: Failed to write Aside: {e}")
         raise AdapterWriteError(f"write_aside_sync: {e}") from e
 
 
@@ -2379,10 +2382,10 @@ def write_aside_terminus_sync(driver, terminus) -> None:
                 "termination_status": terminus.termination_status.value,
             })
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write AsideTerminus: {e}")
+        logger.error(f"ASTP: Failed to write AsideTerminus: {e}")
         raise AdapterWriteError(f"write_aside_terminus_sync: {e}") from e
 
 
@@ -2402,10 +2405,10 @@ def load_aside_sync(driver, aside_id: str) -> Optional[dict]:
                 "aside": dict(record["aside"]),
                 "is_closed": record["is_closed"],
             }
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: load_aside failed: {e}")
+        logger.error(f"ASTP: load_aside failed: {e}")
         raise AdapterWriteError(f"load_aside_sync: {e}") from e
 
 
@@ -2432,10 +2435,10 @@ def scan_aside_external_references_sync(
             if not record:
                 return []
             return list(record["offenders"] or [])
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: aside reference scan failed: {e}")
+        logger.error(f"ASTP: aside reference scan failed: {e}")
         raise AdapterWriteError(f"scan_aside_external_references_sync: {e}") from e
 
 
@@ -2446,7 +2449,7 @@ def write_soliloquy_sync(driver, soliloquy) -> None:
     preserves the Merkle chain without exposing content).
     """
     try:
-        from astp.core.schema import ARIADNE_SCHEMA_VERSION
+        from astp.core.schema import ASTP_SCHEMA_VERSION
         import json
 
         with driver.session() as session:
@@ -2478,7 +2481,7 @@ def write_soliloquy_sync(driver, soliloquy) -> None:
                 "content_hash": soliloquy.content_hash,
                 "parent_hash": soliloquy.parent_hash,
                 "timestamp_utc": soliloquy.timestamp_utc.isoformat(),
-                "schema_version": ARIADNE_SCHEMA_VERSION,
+                "schema_version": ASTP_SCHEMA_VERSION,
             })
             # SOLILOQUY_OPEN edge: parent episode -> Soliloquy
             session.run("""
@@ -2496,16 +2499,16 @@ def write_soliloquy_sync(driver, soliloquy) -> None:
             })
 
         logger.info(
-            f"Ariadne: Soliloquy {str(soliloquy.soliloquy_id)[:8]}... "
+            f"ASTP: Soliloquy {str(soliloquy.soliloquy_id)[:8]}... "
             f"[agent={soliloquy.initiated_by_agent}, "
             f"policy={soliloquy.visibility_policy.content_hash_policy.value}] "
             f"(episode={str(soliloquy.parent_episode_id)[:8]}...)"
         )
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write Soliloquy: {e}")
+        logger.error(f"ASTP: Failed to write Soliloquy: {e}")
         raise AdapterWriteError(f"write_soliloquy_sync: {e}") from e
 
 
@@ -2555,10 +2558,10 @@ def write_soliloquy_conclusion_sync(driver, conclusion) -> None:
                 "termination_status": conclusion.termination_status.value,
             })
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write SoliloquyConclusion: {e}")
+        logger.error(f"ASTP: Failed to write SoliloquyConclusion: {e}")
         raise AdapterWriteError(f"write_soliloquy_conclusion_sync: {e}") from e
 
 
@@ -2578,10 +2581,10 @@ def load_soliloquy_sync(driver, soliloquy_id: str) -> Optional[dict]:
                 "soliloquy": dict(record["soliloquy"]),
                 "is_concluded": record["is_concluded"],
             }
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: load_soliloquy failed: {e}")
+        logger.error(f"ASTP: load_soliloquy failed: {e}")
         raise AdapterWriteError(f"load_soliloquy_sync: {e}") from e
 
 
@@ -2596,7 +2599,7 @@ def write_coherence_fingerprint_sync(driver, fingerprint) -> None:
     an external vector store and store only a reference here.
     """
     try:
-        from astp.core.schema import ARIADNE_SCHEMA_VERSION
+        from astp.core.schema import ASTP_SCHEMA_VERSION
 
         with driver.session() as session:
             session.run("""
@@ -2625,7 +2628,7 @@ def write_coherence_fingerprint_sync(driver, fingerprint) -> None:
                 "consecutive_drift_count": fingerprint.consecutive_drift_count,
                 "detection_state": fingerprint.detection_state.value,
                 "timestamp_utc": fingerprint.timestamp_utc.isoformat(),
-                "schema_version": ARIADNE_SCHEMA_VERSION,
+                "schema_version": ASTP_SCHEMA_VERSION,
             })
             # FINGERPRINTS edge: Episode -> Fingerprint
             session.run("""
@@ -2638,10 +2641,10 @@ def write_coherence_fingerprint_sync(driver, fingerprint) -> None:
                 "sequence_index": fingerprint.sequence_index,
             })
 
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: Failed to write CoherenceFingerprint: {e}")
+        logger.error(f"ASTP: Failed to write CoherenceFingerprint: {e}")
         raise AdapterWriteError(f"write_coherence_fingerprint_sync: {e}") from e
 
 
@@ -2658,10 +2661,10 @@ def query_recent_fingerprints_sync(
                 LIMIT $limit
             """, {"episode_id": episode_id, "limit": limit})
             return [dict(r["fingerprint"]) for r in result]
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: query_recent_fingerprints failed: {e}")
+        logger.error(f"ASTP: query_recent_fingerprints failed: {e}")
         raise AdapterWriteError(f"query_recent_fingerprints_sync: {e}") from e
 
 
@@ -2688,10 +2691,10 @@ def get_last_nominal_segment_sync(driver, episode_id: str) -> Optional[str]:
             """, {"episode_id": episode_id})
             record = result.single()
             return record["segment_id"] if record else None
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
-        logger.error(f"Ariadne: get_last_nominal_segment failed: {e}")
+        logger.error(f"ASTP: get_last_nominal_segment failed: {e}")
         raise AdapterWriteError(f"get_last_nominal_segment_sync: {e}") from e
 
 
@@ -2857,7 +2860,7 @@ def write_episode_link_sync(driver, link) -> None:
         )
 
     logger.info(
-        f"Ariadne: EpisodeLink {str(link.link_id)[:8]}... "
+        f"ASTP: EpisodeLink {str(link.link_id)[:8]}... "
         f"{link.link_type.value} from {src_id[:8]} → {tgt_id[:8]} "
         f"(strength={link.link_strength:.2f}, "
         f"{'inferred' if link.is_inferred else 'human-asserted'})"
@@ -2988,7 +2991,7 @@ def write_membership_record_sync(driver, record) -> None:
         )
 
         # 5. Episode → Group edge. Stub-merge the group node (group may live
-        # outside Ariadne; we keep a graph anchor).
+        # outside the protocol; we keep a graph anchor).
         session.run(
             """
             MATCH (e:AriadneEpisode {episode_id: $ep_id})
@@ -3020,7 +3023,7 @@ def write_membership_record_sync(driver, record) -> None:
             )
 
     logger.info(
-        f"Ariadne: MembershipRecord {str(record.record_id)[:8]}... "
+        f"ASTP: MembershipRecord {str(record.record_id)[:8]}... "
         f"episode {episode_id[:8]} ∈ {record.group_system}:{record.group_id} "
         f"role={record.membership_role.value}"
         + (
@@ -3101,7 +3104,7 @@ def write_conformance_declaration_sync(driver, declaration) -> None:
         )
 
     logger.info(
-        f"Ariadne: ConformanceDeclaration {str(declaration.declaration_id)[:8]}... "
+        f"ASTP: ConformanceDeclaration {str(declaration.declaration_id)[:8]}... "
         f"for {declaration.group_system}:{declaration.group_id} "
         f"v{declaration.declaration_version} "
         f"({len(declaration.capabilities)} capabilities)"
@@ -3139,6 +3142,6 @@ def supersede_conformance_declaration_sync(
             )
 
     logger.info(
-        f"Ariadne: ConformanceDeclaration {old_declaration_id[:8]} "
+        f"ASTP: ConformanceDeclaration {old_declaration_id[:8]} "
         f"→ superseded by {new_declaration_id[:8]}"
     )

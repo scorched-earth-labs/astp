@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Neo4j Adapter — reference implementation.
+ASTP Neo4j Adapter — reference implementation.
 
-Provides Neo4j-backed persistence for the Ariadne protocol:
+Provides Neo4j-backed persistence for the ASTP protocol:
 - writer: Create/update episode, segment, signal, seal nodes
 - queries: Read-only queries for UI and agent consumption
 """

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne — Generic Cognitive Node Factory.
+ASTP — Generic Cognitive Node Factory.
 
 One creation path for every cognitive node type. ``create_node`` generalizes
 the bespoke ``create_episode_node``: it enforces node-type registration

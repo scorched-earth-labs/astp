@@ -25,7 +25,7 @@ from uuid import uuid4
 import pytest
 
 from astp.core.branching import (
-    AriadneGovernanceError,
+    ASTPGovernanceError,
     BranchReturnEdge,
     ConflictManifest,
     ConflictSegment,
@@ -160,26 +160,26 @@ class TestHashDomainSeparation:
 
 class TestGovernanceRules:
     def test_fork_objective_required(self):
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_fork_objective_required(None)
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_fork_objective_required("")
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_fork_objective_required("   ")
         enforce_fork_objective_required("valid")  # no raise
 
     def test_fork_sibling_count_minimum_two(self):
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_fork_sibling_count(0)
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_fork_sibling_count(1)
         enforce_fork_sibling_count(2)  # no raise
         enforce_fork_sibling_count(5)  # no raise
 
     def test_merge_summary_required(self):
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_merge_summary_required(None)
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             enforce_merge_summary_required("")
         enforce_merge_summary_required("synthesis")  # no raise
 

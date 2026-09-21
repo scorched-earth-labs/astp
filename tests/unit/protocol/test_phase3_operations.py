@@ -33,7 +33,7 @@ import pytest
 
 from astp.core import branch_operations
 from astp.core.branching import (
-    AriadneGovernanceError,
+    ASTPGovernanceError,
     AsideCloseResult,
     AsideResult,
     SoliloquyConclusionResult,
@@ -274,7 +274,7 @@ class TestCreateAside:
         eid = str(uuid4())
         store = _make_store([eid])
         driver = FakeDriver(store)
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             branch_operations.create_aside(
                 driver,
                 parent_episode_id=eid,
@@ -288,7 +288,7 @@ class TestCreateAside:
         eid = str(uuid4())
         store = _make_store([eid])
         driver = FakeDriver(store)
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             branch_operations.create_aside(
                 driver,
                 parent_episode_id=eid,
@@ -361,7 +361,7 @@ class TestCloseAside:
             aside_label="lbl", initiated_by_human="human-1",
             target_agent_id="agent-a",
         )
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             branch_operations.close_aside(
                 driver, aside_id=open_result.aside_id, close_reason="",
             )
@@ -415,7 +415,7 @@ class TestCreateSoliloquy:
         eid = str(uuid4())
         store = _make_store([eid])
         driver = FakeDriver(store)
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             branch_operations.create_soliloquy(
                 driver,
                 parent_episode_id=eid,
@@ -452,7 +452,7 @@ class TestCreateSoliloquy:
         eid = str(uuid4())
         store = _make_store([eid])
         driver = FakeDriver(store)
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             branch_operations.create_soliloquy(
                 driver, parent_episode_id=eid, parent_segment_id=SEG,
                 soliloquy_purpose="",
@@ -525,7 +525,7 @@ class TestConcludeSoliloquy:
             driver, parent_episode_id=eid, parent_segment_id=SEG,
             soliloquy_purpose="decide", initiated_by_agent="agent-a",
         )
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             branch_operations.conclude_soliloquy(
                 driver,
                 soliloquy_id=open_result.soliloquy_id,
@@ -541,7 +541,7 @@ class TestConcludeSoliloquy:
             driver, parent_episode_id=eid, parent_segment_id=SEG,
             soliloquy_purpose="decide", initiated_by_agent="agent-a",
         )
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             branch_operations.conclude_soliloquy(
                 driver,
                 soliloquy_id=open_result.soliloquy_id,

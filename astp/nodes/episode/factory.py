@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Episode Factory — Convenience for creating episode CognitiveNodes.
+ASTP Episode Factory — Convenience for creating episode CognitiveNodes.
 
 Builds a CognitiveNode with node_type="episode" and an EpisodePayload,
 computing the leaf hash automatically.

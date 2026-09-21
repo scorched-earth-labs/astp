@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Segment Node Type — a point-in-time record within an episode.
+ASTP Segment Node Type — a point-in-time record within an episode.
 
 Segments form the audit trail: each recorded action (a chat turn, tool call,
 or annotation) is a segment linked to its episode via ``parent_node_id``.

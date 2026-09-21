@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Audit chain helpers — shared by every Ariadne operation that advances the
+Audit chain helpers — shared by every ASTP operation that advances the
 tamper-evident audit log.
 
 Three modules emit AuditRecords (`branch_operations.py`,
@@ -44,7 +44,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from astp.protocol.errors import AdapterWriteError, AriadneProtocolError
+from astp.protocol.errors import AdapterWriteError, ASTPProtocolError
 
 logger = logging.getLogger("astp.core.audit_chain")
 
@@ -85,7 +85,7 @@ def next_delta_sequence(driver: Any, chain_key: str) -> int:
             record = result.single()
             current_max = record["max_seq"] if record and record["max_seq"] is not None else 0
             return current_max + 1
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
         logger.error(f"audit_chain.next_delta_sequence: cannot read chain head: {e}")
@@ -117,7 +117,7 @@ def prior_audit_hash(driver: Any, chain_key: str) -> str:
             )
             record = result.single()
             return record["hash"] if record and record["hash"] else GENESIS_HASH
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
         logger.error(f"audit_chain.prior_audit_hash: cannot read chain head: {e}")

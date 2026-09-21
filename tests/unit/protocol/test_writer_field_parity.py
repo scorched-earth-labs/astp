@@ -159,10 +159,10 @@ class TestUpdateEpisodeStatus:
     def test_rejects_unknown_fields(self):
         import asyncio
 
-        from astp.core.schema import AriadneGovernanceError, EpisodeStatus
+        from astp.core.schema import ASTPGovernanceError, EpisodeStatus
         from astp.adapters.neo4j.writer import update_episode_status
 
-        with pytest.raises(AriadneGovernanceError):
+        with pytest.raises(ASTPGovernanceError):
             asyncio.run(update_episode_status(
                 object(), "ep-1", EpisodeStatus.CLOSED,
                 **{"sealed_at) SET e.pwned = true //": "x"},
@@ -251,7 +251,7 @@ class TestAdapterSurfaceComplete:
 
     #: Implementations whose names diverge from the abstract method.
     ALIASES = {
-        "initialize_schema": "initialize_ariadne_schema",
+        "initialize_schema": "initialize_astp_schema",
         "create_document": "write_document_node_sync",  # sync, by design
     }
 

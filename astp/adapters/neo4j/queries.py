@@ -25,7 +25,7 @@ import logging
 import os
 from typing import Any, Optional
 
-from astp.protocol.errors import AdapterWriteError, AriadneProtocolError
+from astp.protocol.errors import AdapterWriteError, ASTPProtocolError
 
 logger = logging.getLogger("astp.adapters.neo4j.queries")
 
@@ -867,8 +867,7 @@ async def list_links_for_episode(
         limit: Cap results to prevent unbounded loads.
 
     Returns: list of dicts with link fields + `direction` ('out'/'in') +
-    `other_episode_id` (the non-self endpoint). Empty list if Ariadne
-    disabled or no matching links.
+    `other_episode_id` (the non-self endpoint). Empty list when there are no matching links.
     """
     def _query():
         params: dict[str, Any] = {"episode_id": episode_id, "limit": limit}
@@ -930,8 +929,7 @@ async def list_links_for_episode(
 
 
 async def get_episode_link(driver, link_id: str) -> Optional[dict[str, Any]]:
-    """Fetch a single EpisodeLink by id. Returns None when not found or
-    when Ariadne is disabled."""
+    """Fetch a single EpisodeLink by id. Returns None when not found."""
     def _query():
         with driver.session() as session:
             result = session.run(
@@ -972,7 +970,7 @@ async def list_pending_link_candidates(
     Sorted by composite_score DESC so the highest-confidence
     pending candidates surface first.
 
-    Empty list if Ariadne disabled. forward_delta JSON is decoded in
+    forward_delta JSON is decoded in
     Python (rather than via APOC) to keep the query dependency-free.
     """
     def _query():
@@ -1270,7 +1268,7 @@ def segment_content_hashes_sync(driver, segment_ids) -> dict:
                 {"ids": ids},
             )
             return {r["id"]: (r["seq"], r["h"]) for r in rows}
-    except AriadneProtocolError:
+    except ASTPProtocolError:
         raise
     except Exception as e:
         raise AdapterWriteError(f"segment_content_hashes_sync: {e}") from e

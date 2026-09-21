@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Ariadne Episode Lifecycle — State Machine
+ASTP Episode Lifecycle — State Machine
 
 Episode-specific lifecycle states and valid transitions.
 This is isolated in the episode layer — the protocol layer
