@@ -23,7 +23,6 @@ import os
 from importlib import reload
 
 from astp.adapters import base as adapters_base
-from astp.adapters.neo4j import writer
 from astp.core import grouping, schema
 from astp.protocol import errors
 
@@ -33,7 +32,6 @@ def test_error_and_adapter_aliases_are_the_same_objects():
     assert schema.AriadneGovernanceError is schema.ASTPGovernanceError
     assert adapters_base.AriadneAdapter is adapters_base.ASTPAdapter
     assert schema.ARIADNE_SCHEMA_VERSION == schema.ASTP_SCHEMA_VERSION
-    assert writer.initialize_ariadne_schema is writer.initialize_astp_schema
 
 
 def test_old_exception_names_catch_new_raises():
@@ -55,18 +53,13 @@ def test_grouping_system_keeps_the_retained_value():
 
 def test_old_env_names_are_honoured(monkeypatch):
     from astp.core import wil
-    from astp.adapters.neo4j import crystallization
     monkeypatch.delenv("ASTP_PROVISIONAL_WINDOW_HOURS", raising=False)
     monkeypatch.setenv("ARIADNE_PROVISIONAL_WINDOW_HOURS", "2.5")
-    monkeypatch.delenv("ASTP_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE", raising=False)
-    monkeypatch.setenv("ARIADNE_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE", "false")
     try:
         assert reload(wil).PROVISIONAL_WINDOW_HOURS == 2.5
-        assert reload(crystallization).IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE is False
         monkeypatch.setenv("ASTP_PROVISIONAL_WINDOW_HOURS", "1.0")
         assert reload(wil).PROVISIONAL_WINDOW_HOURS == 1.0  # the new name wins when both are set
     finally:
         monkeypatch.delenv("ARIADNE_PROVISIONAL_WINDOW_HOURS", raising=False)
-        monkeypatch.delenv("ARIADNE_IMPLICIT_CRYSTALLIZATION_ON_ARCHIVE", raising=False)
         monkeypatch.delenv("ASTP_PROVISIONAL_WINDOW_HOURS", raising=False)
-        reload(wil); reload(crystallization)
+        reload(wil)

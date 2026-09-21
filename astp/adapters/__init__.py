@@ -15,5 +15,5 @@
 ASTP Adapters — database-specific implementations.
 
 Each adapter implements the ASTPAdapter interface defined in base.py.
-The Neo4j adapter is the reference implementation.
+astp.adapters.memory.InMemoryStore is the reference implementation.
 """

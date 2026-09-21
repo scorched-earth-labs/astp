@@ -16,16 +16,14 @@ Wire constants that kept the ``ariadne`` prefix when the package became ``astp``
 
 The import package was renamed; these strings were not, and must not be.
 The HKDF ``info`` strings are key-derivation inputs, so changing one changes
-every derived key. The coordinator key prefixes and graph labels name data
-that already exists in deployed stores. A future naming sweep that "fixes"
-any of them is a breaking change, and this file is what should stop it.
+every derived key. A future naming sweep that "fixes" them is a breaking
+change, and this file is what should stop it. (The reference deployment's
+coordinator key prefixes and graph labels are guarded where that adapter lives.)
 """
 
 from cryptography.hazmat.primitives.hashes import SHA3_256
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-from astp.adapters.neo4j import writer
-from astp.core import wil
 from astp.protocol.keys import derive_node_key, derive_seal_key, derive_workspace_key
 
 ROOT = bytes(range(32))
@@ -51,29 +49,3 @@ class TestHkdfInfoStrings:
         assert derive_seal_key(ROOT, SPINE_ROOT) == _hkdf(
             ROOT, bytes.fromhex(SPINE_ROOT), b"ariadne.seal.v1"
         )
-
-
-class TestCoordinatorKeyPrefixes:
-    def test_key_builders(self):
-        assert wil.build_redis_episode_key("e") == "ariadne::episode::e"
-        assert wil.build_redis_manifest_key("e") == "ariadne::manifest::e"
-        assert wil.build_redis_wil_key("i") == "ariadne::wil::i"
-        assert wil.build_redis_merkle_key("l") == "ariadne::merkle::l"
-
-    def test_ttl_policy_is_keyed_on_the_same_prefix(self):
-        assert all(k.startswith("ariadne::") for k in wil.REDIS_TTL_POLICY)
-
-
-class TestGraphLabels:
-    def test_schema_statements_keep_the_label_prefix(self):
-        statements = [
-            s
-            for name in dir(writer)
-            for s in (getattr(writer, name),)
-            if isinstance(s, list) and s and all(isinstance(x, str) for x in s)
-            for s in s
-            if s.startswith("CREATE ")
-        ]
-        assert statements, "no schema statements found on the writer module"
-        for label in ("AriadneEpisode", "AriadneSegment", "AriadneSignal", "AriadneWILEntry"):
-            assert any(f":{label})" in s for s in statements), label

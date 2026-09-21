@@ -16,7 +16,7 @@ ASTP — Delta Records
 
 Every state transition (segment append, rebalance, seal) is recorded
 as a DeltaRecord. The pre_root → post_root chain is the authoritative
-truth that makes both Redis and Neo4j state auditable.
+truth that makes both coordinator and structural-store state auditable.
 
 Two channels:
   - ContentDelta: segment appends, content updates

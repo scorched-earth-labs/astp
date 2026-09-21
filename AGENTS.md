@@ -7,7 +7,7 @@ Guidance for AI coding agents (Claude Code, Codex, Copilot, Cursor and others) w
 ASTP is a **protocol** — a specification plus a reference implementation — not an application. It ships:
 
 1. The normative specification, `SPEC.md`, with its companion documents: `CONFORMANCE*.md` (conformance requirements), `IMPLEMENTATION-*.md` (implementer guides), `GLOSSARY.md`, `VERSIONING.md`, `CHANGELOG.md`.
-2. The Python package `astp/` — protocol primitives, node types, and a Neo4j reference adapter.
+2. The Python package `astp/` — protocol primitives, node types, the two adapter contracts and their in-memory reference implementation. No storage provider is named anywhere in it.
 3. The test suite under `tests/`.
 
 `docs/history/` holds superseded documents, kept for provenance. Do not implement from them and do not update them.
@@ -15,7 +15,7 @@ ASTP is a **protocol** — a specification plus a reference implementation — n
 ## Commands
 
 ```bash
-pip install -e ".[neo4j,dev]"     # editable install with adapter and test dependencies
+pip install -e ".[dev]"           # editable install with test dependencies
 pytest                            # full suite; needs no database and no network
 pytest tests/unit/protocol/test_verification.py
 pytest tests/unit/protocol/test_verification.py::test_name -v
@@ -23,7 +23,7 @@ pytest tests/unit/protocol/test_verification.py::test_name -v
 
 There is no lint, format, or typecheck command configured. Don't invent one. Every test file must pass on its own as well as in the full run.
 
-The Neo4j adapter takes a driver object from the caller. Nothing here starts a database; adapter integration tests belong to whoever wires the adapter to one.
+The suite needs no database and no network: the operations run against `astp.adapters.memory.InMemoryStore`. A deployment's adapter, and its integration tests, live with that deployment.
 
 ## Architecture
 
@@ -32,7 +32,7 @@ astp/protocol/   Node-generic layer. Operates on CognitiveNode only.
 astp/nodes/      Node-type instantiation (episode/, segment/). Each defines its NodePayload.
 astp/core/       Episode-era schema, governance, WIL, branching, grouping,
                  cross-episode linking, workflow_execution (Layer 3).
-astp/adapters/   ASTPAdapter + StructuralStore contracts; InMemoryStore (both, over dicts) and the Neo4j reference implementation.
+astp/adapters/   ASTPAdapter + StructuralStore contracts; InMemoryStore implements both.
 ```
 
 **The namespace firewall is the most important invariant in the tree:** nothing under `astp/protocol/` imports from `astp/nodes/`. `tests/unit/protocol/test_namespace_firewall.py` enforces it, along with a second rule: `astp/protocol/` imports nothing from `astp/core/` or `astp/adapters/` either. If a change seems to need such an import, the symbol is in the wrong layer — move the symbol or rethink the design. Do not relax the test.

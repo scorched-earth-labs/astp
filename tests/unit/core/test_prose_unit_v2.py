@@ -18,15 +18,16 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from astp.core.seal_v2 import SealWithoutRecord, check_seal_record
-from astp.core.wil import StoreLayer, StoreRole, store_role_of
+from astp.core.wil import LEGACY_STORE_VALUES, StoreRole, store_role_of
 
 
 def test_store_roles_are_named_by_role_and_legacy_provider_values_map_to_them():
     assert [r.value for r in StoreRole] == ["durable_content", "authoritative_structural", "ephemeral_coordinator", "semantic_index"]
     assert store_role_of("durable_content") is StoreRole.DURABLE_CONTENT
     # a 4.x ledger entry stays readable
-    for layer, role in zip(StoreLayer, StoreRole):
-        assert store_role_of(layer.value) is role
+    assert list(LEGACY_STORE_VALUES.values()) == list(StoreRole)
+    for value, role in LEGACY_STORE_VALUES.items():
+        assert store_role_of(value) is role
     with pytest.raises(ValueError):
         store_role_of("mongodb")
 

@@ -124,8 +124,7 @@ def _detect_via_fsm(
 class CoherenceFingerprintRegistry:
     """Read/write facade over the stored coherence fingerprints.
 
-    Backed by a ``StructuralStore``; a raw driver of the reference store is
-    accepted for one release. Use this instead of store calls from application code.
+    Backed by a ``StructuralStore``. Use this instead of store calls from application code.
     """
 
     def __init__(self, store):

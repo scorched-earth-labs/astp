@@ -14,12 +14,15 @@
 """
 Write Intent Log (WIL) — cross-system write coordination standard.
 
-Protocol-level definitions: enums, models, write ordering invariant,
-TTL policy, provisional state guard. Database-agnostic.
+Protocol-level definitions: the operation register, the entry model, the
+write-ordering invariant over storage *roles*, and the provisional-state
+guard. No store is named: a role is what the protocol knows (SPEC §12.1), and
+a provider is a deployment's choice recorded nowhere in normative text.
 
 Three storage invariants (SPEC §12.1):
-1. Redis as ephemeral coordinator, not persistent store
-2. Blob -> Neo4j -> QDrant write ordering (formal invariant)
+1. The ephemeral coordinator holds coordination state, never the record
+2. durable content -> authoritative structural -> ephemeral coordinator
+   -> semantic index write ordering (formal invariant)
 3. Provisional state never enters persistent storage
 """
 
@@ -30,7 +33,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from astp.core.schema import ASTPGovernanceError
 
@@ -39,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 # PROVISIONAL_WINDOW_PENDING_EMPIRICAL_VALIDATION
 # 4 hours is the conservative upper bound.
-# Measurement target: T_wil_p99 = P99(delta write initiated -> Neo4j write confirmed)
+# Measurement target: T_wil_p99 = P99(delta write initiated -> structural-store write confirmed)
 PROVISIONAL_WINDOW_HOURS = float(
     os.getenv("ASTP_PROVISIONAL_WINDOW_HOURS", os.getenv("ARIADNE_PROVISIONAL_WINDOW_HOURS", "4"))
 )  # the ARIADNE_ name is honoured for deployments configured before astp 0.6.0
@@ -50,9 +53,8 @@ PROVISIONAL_WINDOW_SECONDS = int(PROVISIONAL_WINDOW_HOURS * 3600)
 
 class WILOperation(str, Enum):
     EPISODE_CREATE = "EPISODE_CREATE"
-    # Segment appended to the spine. The coordinated write path is
-    # `execute_segment_commit` in adapters/neo4j/wil.py; calling
-    # `create_segment_node` directly writes the segment without a ledger entry.
+    # Segment appended to the spine. An implementation's coordinated write
+    # path ledgers it; a bare node write without one is the gap §12.4.2 forbids.
     SEGMENT_COMMIT = "SEGMENT_COMMIT"
     SIGNAL_COMMIT = "SIGNAL_COMMIT"
     EPISODE_SEAL = "EPISODE_SEAL"
@@ -94,30 +96,17 @@ class WILStatus(str, Enum):
     REPLAYING = "REPLAYING"  # recovery in progress
 
 
-class StoreLayer(str, Enum):
-    """
-    Storage roles in write-ordering priority (SPEC §12.1): durable content
-    store -> authoritative structural store -> ephemeral coordinator ->
-    semantic search index. The order is a formal invariant, not a convention.
-
-    The protocol names roles, not providers. The member names and values below
-    are the reference deployment's providers; they are recorded in ledger
-    entries (`stores_involved`), so they are stored data and are not renamed
-    here.
-    """
-    BLOB = "blob"      # Durable content store — highest durability, always written first
-    NEO4J = "neo4j"    # Authoritative structural store — written second
-    REDIS = "redis"    # Ephemeral coordinator — written concurrently with the structural store
-    QDRANT = "qdrant"  # Semantic search index — written last; degradation is recoverable
-
-
 class StoreRole(str, Enum):
-    """Role-named store values (SPEC 5.0.0 §12.1).
+    """The four storage roles of SPEC §12.1, in write-ordering priority:
+    durable content -> authoritative structural -> ephemeral coordinator ->
+    semantic index. The order is a formal invariant, not a convention.
 
-    5.0.0 names the four storage roles of SPEC §12.1 by role. Ledger entries
-    written under 4.x carry the reference deployment's provider names in
-    ``stores_involved``; ``store_role_of`` reads either form, so a 4.x ledger
-    stays readable without rewriting stored data.
+    Roles are named by role. Wherever a role is recorded — a ledger entry's
+    ``stores_involved``, a conformance declaration — its value is one of these.
+    Ledger entries written under 4.x carry the reference deployment's provider
+    names; they are stored data and are not rewritten. ``store_role_of`` maps
+    them by the fixed correspondence §12.1 requires the reference
+    implementation to publish.
     """
     DURABLE_CONTENT = "durable_content"                  # written first
     AUTHORITATIVE_STRUCTURAL = "authoritative_structural"  # written second
@@ -125,24 +114,31 @@ class StoreRole(str, Enum):
     SEMANTIC_INDEX = "semantic_index"                    # written last; degradation is recoverable
 
 
-_LEGACY_STORE_ROLES = {
-    StoreLayer.BLOB.value: StoreRole.DURABLE_CONTENT,
-    StoreLayer.NEO4J.value: StoreRole.AUTHORITATIVE_STRUCTURAL,
-    StoreLayer.REDIS.value: StoreRole.EPHEMERAL_COORDINATOR,
-    StoreLayer.QDRANT.value: StoreRole.SEMANTIC_INDEX,
+# The fixed correspondence of SPEC §12.1: the provider names the reference
+# deployment recorded in 4.x ledger entries, and the role each names. Stored
+# data — a reader maps, a writer does not emit them.
+LEGACY_STORE_VALUES: dict[str, StoreRole] = {
+    "blob": StoreRole.DURABLE_CONTENT,
+    "neo4j": StoreRole.AUTHORITATIVE_STRUCTURAL,
+    "redis": StoreRole.EPHEMERAL_COORDINATOR,
+    "qdrant": StoreRole.SEMANTIC_INDEX,
 }
 
 
-def store_role_of(value: str) -> StoreRole:
-    """The role a stored ``stores_involved`` value names: a 5.0.0 role name, or
-    a 4.x provider name of the reference deployment. Anything else is refused."""
+def store_role_of(value) -> StoreRole:
+    """The role a stored ``stores_involved`` value names: a role name, or a 4.x
+    provider name of the reference deployment (``LEGACY_STORE_VALUES``).
+    Anything else is refused."""
+    if isinstance(value, StoreRole):
+        return value
+    raw = getattr(value, "value", value)
     try:
-        return StoreRole(value)
+        return StoreRole(raw)
     except ValueError:
         pass
-    if value in _LEGACY_STORE_ROLES:
-        return _LEGACY_STORE_ROLES[value]
-    raise ValueError(f"unknown store value {value!r}")
+    if raw in LEGACY_STORE_VALUES:
+        return LEGACY_STORE_VALUES[raw]
+    raise ValueError(f"unknown store value {raw!r}")
 
 
 class WritePhase(str, Enum):
@@ -163,7 +159,7 @@ class WriteIntentEntry(BaseModel):
     intent_id: UUID = Field(default_factory=uuid4)
     operation: WILOperation
     episode_id: UUID
-    stores_involved: list[StoreLayer]
+    stores_involved: list[str]       # role names (§12.1); a 4.x provider name is read via store_role_of
     pre_state_hash: str              # SHA3-256 of state before write
     post_state_hash: str             # Expected hash after write
     initiated_at: datetime = Field(
@@ -171,104 +167,79 @@ class WriteIntentEntry(BaseModel):
     )
     completed_at: Optional[datetime] = None  # null = in progress
     status: WILStatus = WILStatus.PENDING
-    last_completed_store: Optional[StoreLayer] = None
+    last_completed_store: Optional[str] = None
     failure_reason: Optional[str] = None
+
+    @field_validator("stores_involved", mode="before")
+    @classmethod
+    def _stores_name_a_role(cls, stores):
+        values = [getattr(s, "value", s) for s in (stores or [])]
+        for v in values:
+            store_role_of(v)  # refuses anything that is neither a role nor a retained 4.x value
+        return values
+
+    @field_validator("last_completed_store", mode="before")
+    @classmethod
+    def _last_store_names_a_role(cls, store):
+        if store is None:
+            return None
+        value = getattr(store, "value", store)
+        store_role_of(value)
+        return value
 
 
 # ── Write Ordering Invariant ─────────────────────────────────────────────────
 
-WRITE_ORDER: list[StoreLayer] = [
-    StoreLayer.BLOB,    # 1st: highest durability
-    StoreLayer.NEO4J,   # 2nd: authoritative structural record
-    StoreLayer.REDIS,   # 3rd: ephemeral coordinator
-    StoreLayer.QDRANT,  # 4th: semantic search; degradation always recoverable
+WRITE_ORDER: list[StoreRole] = [
+    StoreRole.DURABLE_CONTENT,          # 1st: highest durability
+    StoreRole.AUTHORITATIVE_STRUCTURAL, # 2nd: the structural record
+    StoreRole.EPHEMERAL_COORDINATOR,    # 3rd: coordination state
+    StoreRole.SEMANTIC_INDEX,           # 4th: degradation always recoverable
 ]
 
-# QDrant degradation recovery guarantee: agents can always reconstruct from
-# Neo4j (structure) + Blob (content). Search is degraded but identity is intact.
-QDRANT_DEGRADATION_RECOVERABLE = True  # Invariant — must remain True
+# Semantic-index degradation is recoverable by construction: the record is
+# reconstructable from the structural store and the durable content store.
+# Search is degraded but identity is intact.
+SEMANTIC_INDEX_DEGRADATION_RECOVERABLE = True  # Invariant — must remain True
 
 
-def enforce_write_order(stores: list[StoreLayer]) -> list[StoreLayer]:
-    """
-    Returns stores sorted in mandatory write order (Blob -> Neo4j -> Redis -> QDrant).
-    Raises ASTPGovernanceError for unknown store layers.
-    """
-    ordered = [s for s in WRITE_ORDER if s in stores]
-    if set(ordered) != set(stores):
-        unknown = set(stores) - set(WRITE_ORDER)
-        raise ASTPGovernanceError(
-            f"Write ordering violation: Unknown store layer(s) {unknown}. "
-            f"All stores must be declared in WRITE_ORDER."
-        )
-    return ordered
-
-
-# ── Redis Key Schema and TTL Policy ──────────────────────────────────────────
-# SPEC §12.3: every ariadne::* key carries an explicit TTL.
-
-REDIS_TTL_POLICY: dict[str, int] = {
-    "ariadne::episode::{id}": 4 * 3600,                # Session lifetime max (4h)
-    "ariadne::branch::{id}": 2 * 3600,                 # Branch lifetime max (2h)
-    "ariadne::merkle::{id}": 15 * 60,                  # 15 minutes; renewed on verification
-    "ariadne::manifest::{id}": PROVISIONAL_WINDOW_SECONDS,  # Provisional window duration
-    "ariadne::wil::{id}": 24 * 3600,                   # WIL entries: 24h before graduation
-    "ariadne::consultation::{id}": 4 * 3600,           # Active consultation: 4h (same as episode)
-}
-
-
-def get_redis_ttl(key_pattern: str) -> int:
-    """
-    Returns the mandatory TTL in seconds for a given Redis key pattern.
-    Raises ASTPGovernanceError if not in the policy.
-    """
-    for pattern, ttl in REDIS_TTL_POLICY.items():
-        prefix = pattern.split("{")[0]
-        if key_pattern.startswith(prefix):
-            return ttl
-    raise ASTPGovernanceError(
-        f"Redis TTL policy violation: No TTL defined for key '{key_pattern}'. "
-        f"All ariadne::* Redis keys must have an explicit TTL. "
-        f"Add this key pattern to REDIS_TTL_POLICY before writing."
-    )
-
-
-def build_redis_episode_key(episode_id: str) -> str:
-    return f"ariadne::episode::{episode_id}"
-
-
-def build_redis_manifest_key(episode_id: str) -> str:
-    return f"ariadne::manifest::{episode_id}"
-
-
-def build_redis_wil_key(intent_id: str) -> str:
-    return f"ariadne::wil::{intent_id}"
-
-
-def build_redis_merkle_key(leaf_id: str) -> str:
-    return f"ariadne::merkle::{leaf_id}"
+def enforce_write_order(stores: list) -> list:
+    """The given stores in mandatory write order (§12.1). Each store is a role,
+    or a value ``store_role_of`` resolves to one (a deployment's own provider
+    enum whose values are the retained 4.x names, for instance); the input
+    values are returned, ordered by their roles. Raises ASTPGovernanceError
+    for a value that names no role."""
+    try:
+        roles = {s: store_role_of(s) for s in stores}
+    except ValueError as e:
+        raise ASTPGovernanceError(f"Write ordering violation: {e}. All stores must name a role in WRITE_ORDER.") from e
+    return sorted(stores, key=lambda s: WRITE_ORDER.index(roles[s]))
 
 
 # ── Provisional State Guard ──────────────────────────────────────────────────
 # Invariant 3 (SPEC §12.1): provisional state never enters persistent storage.
 
-PROVISIONAL_PERSISTENT_STORES = {StoreLayer.NEO4J, StoreLayer.QDRANT, StoreLayer.BLOB}
+PROVISIONAL_PERSISTENT_STORES = {
+    StoreRole.DURABLE_CONTENT, StoreRole.AUTHORITATIVE_STRUCTURAL, StoreRole.SEMANTIC_INDEX,
+}
 
 
 def enforce_provisional_state_guard(
     is_provisional: bool,
-    target_store: StoreLayer,
+    target_store,
     data_description: str,
 ) -> None:
     """
     Raises ASTPGovernanceError if provisional data is written to a persistent store.
-    Provisional data may only live in Redis during the provisional window.
+    Provisional data may only live in the ephemeral coordinator during the
+    provisional window. ``target_store`` is a role or a value ``store_role_of`` resolves.
     """
-    if is_provisional and target_store in PROVISIONAL_PERSISTENT_STORES:
+    role = store_role_of(target_store)
+    if is_provisional and role in PROVISIONAL_PERSISTENT_STORES:
         raise ASTPGovernanceError(
             f"Provisional state invariant violation: Attempted to write provisional "
-            f"data '{data_description}' to persistent store '{target_store.value}'. "
-            f"Provisional state may only exist in Redis during the provisional window "
-            f"(max {PROVISIONAL_WINDOW_HOURS}h). "
-            f"Data must be fully crystallized before writing to {target_store.value}."
+            f"data '{data_description}' to persistent store '{role.value}'. "
+            f"Provisional state may only exist in the ephemeral coordinator during the "
+            f"provisional window (max {PROVISIONAL_WINDOW_HOURS}h). "
+            f"Data must be fully crystallized before writing to {role.value}."
         )

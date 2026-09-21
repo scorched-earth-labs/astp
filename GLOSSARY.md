@@ -475,7 +475,7 @@ SPEC §15 item 7 as restated in 5.1.0: a writer or reader that cannot complete *
 
 ### Reference Implementation
 
-The Neo4j adapter in `astp/adapters/neo4j/`: the worked example of a conforming adapter and the ground truth for the vectors. Its graph labels keep the `Ariadne*` prefix and its HKDF `info` strings the `ariadne.` prefix — wire constants that feed derived keys or name stored data and are not renamed with the package.
+`astp.adapters.memory.InMemoryStore`: both adapter contracts over plain dicts — the worked example of a conforming implementation, and the store the protocol's own operations tests run against. The vectors' expected digests are pinned in `vectors/` and computed by the protocol modules, not by any store. A deployment's adapter (the reference deployment's is a graph database, with its own guides and guarded wire constants) lives with that deployment.
 
 ### Conformance Test Vectors
 

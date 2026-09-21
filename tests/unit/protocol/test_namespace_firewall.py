@@ -178,7 +178,7 @@ def test_detector_flags_lower_layer_imports():
         "from astp.core.schema import sha3_256",
         "from astp import core",
         "from ..core import schema",
-        "from ..adapters.neo4j import writer",
+        "from ..adapters.memory import InMemoryStore",
         "import astp.adapters",
     ):
         assert _violations(source, "astp.protocol.example", LOWER_LAYER_FORBIDDEN_PREFIXES), source

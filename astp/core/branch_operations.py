@@ -115,7 +115,7 @@ def create_branch(
     or compensated. Writes: BranchPointNode + CognitiveDelta + AuditRecord.
 
     Args:
-        store: a StructuralStore (a raw driver of the reference store is accepted for one release)
+        store: a StructuralStore
         source_episode_id: Episode to branch from
         source_segment_id: Exact divergence point (segment ID)
         branch_intent: Required, non-empty — why this branch exists
@@ -318,7 +318,7 @@ def abandon_branch(
     the branch cannot be reopened. All writes are atomic.
 
     Args:
-        store: a StructuralStore (a raw driver of the reference store is accepted for one release)
+        store: a StructuralStore
         branch_id: UUID of the branch to abandon
         initiator: AgentID or UserID performing the abandonment
         abandonment_reason: Required, non-empty — why the branch is being abandoned
@@ -471,7 +471,7 @@ def create_fork(
     """Create N ForkPointNodes + FORK_CREATED delta + AuditRecord.
 
     Args:
-        store: a StructuralStore (a raw driver of the reference store is accepted for one release)
+        store: a StructuralStore
         origin_episode_id: Episode the fork originates from
         origin_segment_id: Provenance anchor
         fork_objective: New Episode's objective (required, non-empty)
@@ -1249,7 +1249,7 @@ def execute_merge(
     resolutions, returns a ConflictManifest and does NOT proceed.
 
     Args:
-        store: a StructuralStore (a raw driver of the reference store is accepted for one release)
+        store: a StructuralStore
         source_branch_id: Branch to merge (must be ACTIVE)
         target_episode_id: Spine receiving the merge (must be ACTIVE)
         merge_summary: Required, non-empty — the synthesis

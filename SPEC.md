@@ -2618,7 +2618,7 @@ A second invariant governs **who** may write Layer 3:
 
 A CIA is a protocol-level role, not a specific implementation technology. The CIA for `WorkflowDeclaration` in a workspace may be:
 
-- An MCP server (as in the reference implementation — `IMPLEMENTATION-LAYER3.md` §6.4),
+- An MCP server (as in the reference deployment — its adapter guide, `IMPLEMENTATION-LAYER3.md` §6.4, ships with that adapter),
 - An in-process module of a single-process implementation,
 - A network-attached daemon with cryptographic identity,
 - Any other entity that the workspace's `ConformanceDeclaration` names.
@@ -2938,7 +2938,7 @@ Three protocol surfaces touched by this amendment are explicitly deferred to fut
 
 ### Appendix A — Reference Adapter Notes (Non-Normative)
 
-This specification does not describe any particular storage provider. One complete adapter path for Layer 3 — edge storage, suggested indexes, forensic query patterns, and how a deployment designates and enforces its Cognitive Implementation Authority — is described in [`IMPLEMENTATION-LAYER3.md`](./IMPLEMENTATION-LAYER3.md) §6. That material is non-normative: conforming implementations need not adopt any of it.
+This specification does not describe any particular storage provider. One complete adapter path for Layer 3 — edge storage, suggested indexes, forensic query patterns, and how a deployment designates and enforces its Cognitive Implementation Authority — is described in the reference deployment's adapter guide (`IMPLEMENTATION-LAYER3.md` §6), which ships with that adapter rather than with this specification. That material is non-normative: conforming implementations need not adopt any of it.
 
 ---
 
