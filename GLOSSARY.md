@@ -89,7 +89,7 @@ A **human-in-the-loop decision gate** as a first-class node. Two-phase lifecycle
 
 ### AttachmentNode
 
-External content injected into an Episode's context — a file, an image, a transcript, a fetched page — recorded so the injection is verifiable afterwards. The protocol's concern is narrow: the reasoning was influenced by identifiable bytes, and those bytes are hash-bound. SPEC §4.7.
+External content injected into an Episode's context — a file, an image, a transcript, a fetched page — recorded so the injection is verifiable afterwards. The protocol's concern is narrow: the reasoning was influenced by identifiable bytes, and those bytes are hash-bound. Substitution of the bytes is detectable; the node is not a member of any Episode root component, so no seal detects its addition or removal after the fact. SPEC §4.7.
 
 ### CrystallizationDeltaNode
 

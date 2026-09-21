@@ -150,7 +150,7 @@ source_version, target_version, quarantine_reason, quarantined_at
 
 **Excluded** (per §20 →2 hash-preimage note): `quarantine_resolved_at`, `quarantine_resolution`. These are lifecycle annotations set when a quarantine *exits*; including them would invalidate the hash on every quarantine close. The audit log (§20 →5, →11.4) is authoritative for resolution events; the content hash commits to the link **as asserted**, not **as later resolved**.
 
-Note that mutable health-state fields (`health_state`, `health_checked_at`) **are** in the preimage — so drift detection can be cryptographically tied to the link's anchor state at write time. Re-stamping after a health transition therefore produces a new hash (this is intentional, not a violation of `quarantine_resolved_at` exclusion — the two are distinct concerns). This matches the §20 →11.2.2 `LINK_INTEGRITY` proof field snapshot exactly.
+*4.x form — links written before astp 0.5.0.* Note that mutable health-state fields (`health_state`, `health_checked_at`) **are** in the 4.x preimage — so drift detection can be cryptographically tied to the link's anchor state at write time. Re-stamping after a health transition therefore produces a new hash (this is intentional, not a violation of `quarantine_resolved_at` exclusion — the two are distinct concerns). This matched the 4.x §20 →11.2.2 `LINK_INTEGRITY` field snapshot; under `EPISODE_LINK:v2:` (SPEC §20 →2) health and quarantine are out of the preimage and the snapshot is the 5.0.0 bound set.
 
 ### 4.3 Governance — Mutual Exclusivity (§20 →3)
 

@@ -515,12 +515,23 @@ def compute_spine_hash(segment_content_hashes: list[str], spine_signal_hashes: l
 # Hash functions are never modified in place; they are versioned. The functions
 # above (``compute_spine_hash``) remain the ORDERING_VERSION 1 form — segments
 # followed by SPINE-placed signals ordered by received_at — and stay callable so
-# seals produced under them remain reproducible. The v2 form below is the
-# specified one: the spine is segments only, in sequence_index order; signals
-# commit through the signal manifest, which is a set (order-independent).
+# seals produced under them remain reproducible. ``compute_spine_root_v2`` below
+# is the ORDERING_VERSION 2 form of the SAME spine_algorithm_version 0/1 tree:
+# segments only, in sequence_index order; signals commit through the signal
+# manifest, which is a set (order-independent). The 5.0.0 seal construction —
+# spine_algorithm_version 2 (SPEC §5.2–§5.7) — lives in ``astp.core.seal_v2``.
+#
+# SPINE_ALGORITHM_VERSION_CURRENT is the identifier of the retained version 1
+# construction, NOT the version the reference deployment seals under (that is
+# 2, since the ignis-os cutover of 2026-09-19). It selects the version 1 path:
+# ``compute_spine_root_v2(episode_id=...)``, a verifier's version 1 branch, and
+# the deployment's version 1 fallback. It must stay 1 — flipping it would stamp
+# version 2 identifiers on version 1 roots. A version 2 seal takes its
+# identifiers from ``seal_v2.SealV2`` (``seal_v2.SPINE_ALGORITHM_VERSION_2``),
+# never from a constant. The name is kept for API compatibility.
 
 SPINE_ALGORITHM_VERSION_LEGACY = 0   # pre-2026-04-01 iterative Merkle (see git fd37300^)
-SPINE_ALGORITHM_VERSION_CURRENT = 1  # Adaptive Merkle Tree
+SPINE_ALGORITHM_VERSION_CURRENT = 1  # Adaptive Merkle Tree — the retained version 1 construction (see above)
 ORDERING_VERSION_LEGACY = 1          # segments + SPINE signals by received_at (ties unresolved)
 ORDERING_VERSION_CURRENT = 2         # segments only, sequence_index; signals in the manifest
 

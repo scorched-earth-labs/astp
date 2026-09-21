@@ -154,7 +154,7 @@ import astp
 
 ## Status
 
-**5.1.0.** The protocol is ratified at 5.0.0 (Episode of Record `ce3f569c-9cdc-4a3d-913a-b9d8573d9a28`) and at 5.1.0 the reference adapter seals under `spine_algorithm_version` 2 with no feature flag and nothing swallowed. Every construction has machine-readable vectors. The protocol specification is in `SPEC.md`.
+**5.1.0.** The protocol is ratified at 5.0.0 (Episode of Record `ce3f569c-9cdc-4a3d-913a-b9d8573d9a28`) and at 5.1.0 the reference deployment (Ignis OS, cutover 2026-09-19) seals under `spine_algorithm_version` 2 — `astp.core.seal_v2.compute_episode_seal_v2` over the adapter's `seal_inputs` reader — with no feature flag and nothing swallowed. A version 2 seal takes its identifiers from the `SealV2` result; `astp.core.schema.SPINE_ALGORITHM_VERSION_CURRENT` names the retained version 1 construction and reads `1` by design. Every construction has machine-readable vectors. The protocol specification is in `SPEC.md`.
 
 The first consumer of this protocol is Ignis OS, Scorched Earth Labs' agent runtime, and integration tests for the reference adapter run there rather than in this repository. Not recommended for production use elsewhere until the first stable release.
 

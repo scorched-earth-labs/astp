@@ -296,12 +296,12 @@ These vectors test the *shape of a conformant recovery*, not that an implementat
 **SL-002** — Deliberation chain hash
 - **Class:** REQUIRED
 - **Spec Reference:** §19.4.2
-- **Description:** `compute_deliberation_chain_hash()` (domain `DELIBERATION_CHAIN:`) binds each soliloquy segment to its predecessor via a rolling hash chain. Tampering with any intermediate segment MUST be detectable by recomputing the chain and comparing to the stored conclusion's chain hash.
+- **Description:** *4.x form — retained for nodes written before astp 0.5.0; the 5.0.0 construction is `DELIBERATION_CHAIN:v2:` over the deliberation Segments' content hashes in order (SPEC §19.4).* `compute_deliberation_chain_hash()` (domain `DELIBERATION_CHAIN:`) binds each soliloquy segment to its predecessor via a rolling hash chain. Tampering with any intermediate segment MUST be detectable by recomputing the chain and comparing to the stored conclusion's chain hash.
 
 **SL-003** — `SoliloquyConclusionNode` hash
 - **Class:** REQUIRED
 - **Spec Reference:** §19.4.2
-- **Description:** `compute_soliloquy_conclusion_hash()` (domain `SOLILOQUY_CONCLUSION:`) canonicalizes `soliloquy_id`, `conclusion_content_hash`, `deliberation_chain_hash`, `merged_into_segment_id`, `concluded_at`.
+- **Description:** *4.x form — retained for nodes written before astp 0.5.0; the 5.0.0 construction is `SOLILOQUY_CONCLUSION:v2:` (SPEC §19.4).* `compute_soliloquy_conclusion_hash()` (domain `SOLILOQUY_CONCLUSION:`) canonicalizes `soliloquy_id`, `conclusion_content_hash`, `deliberation_chain_hash`, `merged_into_segment_id`, `concluded_at`.
 
 ### 5.4 Soliloquy Governance
 
