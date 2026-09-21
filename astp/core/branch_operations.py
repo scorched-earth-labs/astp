@@ -1109,7 +1109,7 @@ def resolve_fork(
             )
 
         # Load all fork points for this fork
-        fork_points = store.fork_points(fork_id)
+        fork_points = store.fork_points_of(fork_id)
 
         if not fork_points:
             logger.error(f"Fork {fork_id} not found or has no ForkPoints")

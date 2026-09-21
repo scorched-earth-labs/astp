@@ -32,7 +32,7 @@ astp/protocol/   Node-generic layer. Operates on CognitiveNode only.
 astp/nodes/      Node-type instantiation (episode/, segment/). Each defines its NodePayload.
 astp/core/       Episode-era schema, governance, WIL, branching, grouping,
                  cross-episode linking, workflow_execution (Layer 3).
-astp/adapters/   ASTPAdapter + StructuralStore contracts, and the Neo4j reference implementation of both.
+astp/adapters/   ASTPAdapter + StructuralStore contracts; InMemoryStore (both, over dicts) and the Neo4j reference implementation.
 ```
 
 **The namespace firewall is the most important invariant in the tree:** nothing under `astp/protocol/` imports from `astp/nodes/`. `tests/unit/protocol/test_namespace_firewall.py` enforces it, along with a second rule: `astp/protocol/` imports nothing from `astp/core/` or `astp/adapters/` either. If a change seems to need such an import, the symbol is in the wrong layer — move the symbol or rethink the design. Do not relax the test.

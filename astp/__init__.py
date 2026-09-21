@@ -29,7 +29,7 @@ Packages:
     astp.adapters.neo4j      — reference implementation (Neo4j graph database)
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 # The SPEC.md version this package implements.
 PROTOCOL_VERSION = "5.1.0"

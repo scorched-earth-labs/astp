@@ -65,6 +65,13 @@ def test_operations_layer_never_opens_a_store_session():
     assert offenders == [], f"raw store access in the operations layer: {offenders}"
 
 
+def test_in_memory_store_implements_both_contracts():
+    from astp.adapters.base import ASTPAdapter
+    from astp.adapters.memory import InMemoryStore
+    store = InMemoryStore()
+    assert isinstance(store, StructuralStore) and isinstance(store, ASTPAdapter)
+
+
 def test_reference_store_implements_the_whole_contract():
     from astp.adapters.neo4j.store import Neo4jStructuralStore
     abstract = {n for n, m in inspect.getmembers(StructuralStore) if getattr(m, "__isabstractmethod__", False)}

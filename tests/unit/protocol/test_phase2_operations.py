@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Phase 2 — Operations Unit Tests (driver-mocked)
+Phase 2 — Operations Unit Tests
 
 Exercises create_fork, resolve_fork, execute_merge, verify_merge_integrity
-against an in-memory fake Neo4j driver. Verifies:
+against the in-memory reference store (``astp.adapters.memory.InMemoryStore``). Verifies:
   - all three writes happen per spec (structural node + delta + audit)
   - AUTO strategy returns ConflictManifest, does not write merge records
   - resolutions allow merge to commit with RESOLVED type
@@ -30,7 +30,7 @@ from uuid import uuid4
 
 import pytest
 
-from astp.adapters.neo4j import writer as neo4j_writer
+from astp.adapters.memory import InMemoryStore
 from astp.core import branch_operations
 from astp.core.branching import (
     ASTPGovernanceError,
@@ -40,361 +40,17 @@ from astp.core.branching import (
 )
 
 
-# ── Fake Neo4j driver ───────────────────────────────────────────────────────
-
-
-class FakeResult:
-    def __init__(self, rows: List[Dict[str, Any]]):
-        self._rows = rows
-
-    def single(self):
-        return self._rows[0] if self._rows else None
-
-    def __iter__(self):
-        return iter(self._rows)
-
-
-class FakeSession:
-    def __init__(self, store: "FakeStore"):
-        self.store = store
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
-
-    def run(self, query: str, params: Dict[str, Any] = None):
-        params = params or {}
-        return self.store.run(query, params)
-
-
-class FakeDriver:
-    def __init__(self, store: "FakeStore"):
-        self._store = store
-
-    def session(self):
-        return FakeSession(self._store)
-
-
-class FakeStore:
-    """Tracks Cypher calls and emulates the minimum queries the ops hit."""
-
-    def __init__(self):
-        self.calls: List[Dict[str, Any]] = []
-        self.episodes: Dict[str, Dict[str, Any]] = {}
-        self.branch_points: Dict[str, Dict[str, Any]] = {}
-        self.branch_terminuses: List[Dict[str, Any]] = []
-        self.fork_points: Dict[str, Dict[str, Any]] = {}
-        self.departure_points: Dict[str, Dict[str, Any]] = {}  # Phase D
-        self.fork_returns: Dict[str, Dict[str, Any]] = {}       # Phase D
-        self.segments: Dict[str, Dict[str, Any]] = {}           # by segment_id
-        self.orphan_markers: Dict[str, Dict[str, Any]] = {}     # by fork_id (dedup)
-        self.merge_points: Dict[str, Dict[str, Any]] = {}
-        self.audit_records: List[Dict[str, Any]] = []
-        self.intents: Dict[str, Dict[str, Any]] = {}  # by idempotency_key
-        self.max_delta_sequence: Dict[str, int] = {}
-
-    def _record_call(self, query: str, params: Dict[str, Any]):
-        self.calls.append({"query": query, "params": params})
-
-    def run(self, query: str, params: Dict[str, Any]):
-        self._record_call(query, params)
-        q = " ".join(query.split())
-
-        # Episode status check
-        if "MATCH (e:AriadneEpisode" in q and "RETURN e.episode_status" in q:
-            eid = params.get("eid")
-            ep = self.episodes.get(eid)
-            if not ep:
-                return FakeResult([])
-            return FakeResult([{
-                "status": ep.get("status", "ACTIVE"),
-                "spine_hash": ep.get("spine_hash", ""),
-            }])
-
-        # Episode spine_hash only
-        if "MATCH (e:AriadneEpisode" in q and "RETURN e.spine_hash" in q and "episode_status" not in q:
-            eid = params.get("eid")
-            ep = self.episodes.get(eid)
-            if not ep:
-                return FakeResult([])
-            return FakeResult([{"spine_hash": ep.get("spine_hash", "")}])
-
-        # BranchPoint load
-        if "MATCH (bp:AriadneBranchPoint {branch_id: $bid})" in q:
-            bid = params.get("bid")
-            bp = self.branch_points.get(bid)
-            has_terminus = any(
-                t["branch_id"] == bid for t in self.branch_terminuses
-            )
-            if not bp:
-                return FakeResult([])
-            return FakeResult([{
-                "branch_point": bp,
-                "has_terminus": has_terminus,
-            }])
-
-        # BranchPoint for common ancestor lookup
-        if ("MATCH (bp:AriadneBranchPoint {branch_id: $branch_id})" in q
-                and "MATCH (e:AriadneEpisode {episode_id: $target_episode_id})" in q):
-            bid = params.get("branch_id")
-            tgt = params.get("target_episode_id")
-            bp = self.branch_points.get(bid)
-            if not bp or bp.get("parent_episode_id") != tgt:
-                return FakeResult([])
-            return FakeResult([{
-                "ancestor_segment_id": bp.get("source_segment_id"),
-                "branch_point_id": bp.get("branch_point_id"),
-                "parent_episode_id": bp.get("parent_episode_id"),
-                "anchor_merkle": bp.get("spine_merkle_snapshot"),
-            }])
-
-        # Load all fork points by fork_id
-        if "MATCH (fp:AriadneForkPoint {fork_id: $fork_id})" in q and "RETURN fp.fork_point_id" in q:
-            fork_id = params.get("fork_id")
-            rows = [
-                {
-                    "fpid": fp["fork_point_id"],
-                    "eid": fp["episode_id"],
-                    "status": fp.get("fork_status", "ACTIVE"),
-                    "origin_id": fp.get("origin_episode_id"),
-                }
-                for fp in self.fork_points.values()
-                if fp["fork_id"] == fork_id
-            ]
-            return FakeResult(rows)
-
-        # Create/Merge BranchPoint node
-        if "MERGE (bp:AriadneBranchPoint" in q and "branch_point_id" in q:
-            bpid = params.get("branch_point_id")
-            if bpid and bpid not in self.branch_points:
-                self.branch_points[params.get("branch_id")] = dict(params)
-                self.branch_points[params.get("branch_id")]["branch_point_id"] = bpid
-            return FakeResult([])
-
-        # Create BranchTerminus
-        if "MERGE (bt:AriadneBranchTerminus" in q:
-            self.branch_terminuses.append(dict(params))
-            return FakeResult([])
-
-        # Create ForkPoint
-        if "MERGE (fp:AriadneForkPoint" in q and "fork_point_id: $fork_point_id" in q:
-            self.fork_points[params.get("fork_point_id")] = dict(params)
-            self.fork_points[params.get("fork_point_id")]["fork_status"] = "ACTIVE"
-            return FakeResult([])
-
-        # Update ForkPoint status
-        if "MATCH (fp:AriadneForkPoint {fork_point_id: $fork_point_id}) SET fp.fork_status" in q:
-            fpid = params.get("fork_point_id")
-            if fpid in self.fork_points:
-                self.fork_points[fpid]["fork_status"] = params.get("status")
-            return FakeResult([])
-
-        # Create MergePoint
-        if "MERGE (mp:AriadneMergePoint" in q and "merge_point_id: $merge_point_id" in q:
-            self.merge_points[params.get("merge_point_id")] = dict(params)
-            return FakeResult([])
-
-        # Create AuditRecord
-        if "MERGE (ar:AriadneAuditRecord" in q:
-            self.audit_records.append(dict(params))
-            return FakeResult([])
-
-        # Get max delta_sequence
-        if "RETURN max(ar.delta_sequence)" in q:
-            eid = params.get("eid")
-            relevant = [
-                a["delta_sequence"]
-                for a in self.audit_records
-                if a.get("episode_id") == eid
-            ]
-            max_seq = max(relevant) if relevant else None
-            return FakeResult([{"max_seq": max_seq}])
-
-        # Get prior audit hash
-        if "RETURN ar.record_hash AS hash" in q:
-            eid = params.get("eid")
-            relevant = sorted(
-                (a for a in self.audit_records if a.get("episode_id") == eid),
-                key=lambda x: x.get("delta_sequence", 0),
-                reverse=True,
-            )
-            if relevant:
-                return FakeResult([{"hash": relevant[0].get("record_hash", "GENESIS")}])
-            return FakeResult([{"hash": None}])
-
-        # Intent record lookup
-        if "MATCH (ir:AriadneIntentRecord {idempotency_key: $key})" in q and "RETURN ir" in q:
-            key = params.get("key")
-            intent = self.intents.get(key)
-            if intent:
-                return FakeResult([{"intent": intent}])
-            return FakeResult([])
-
-        # Create intent
-        if "MERGE (ir:AriadneIntentRecord {idempotency_key: $key})" in q:
-            key = params.get("key")
-            if key not in self.intents:
-                self.intents[key] = {
-                    "intent_id": params.get("intent_id"),
-                    "intent_type": params.get("intent_type"),
-                    "initiator_id": params.get("initiator_id"),
-                    "status": "PENDING",
-                    "idempotency_key": key,
-                }
-            return FakeResult([])
-
-        # Complete intent
-        if "MATCH (ir:AriadneIntentRecord {idempotency_key: $key}) WHERE ir.status = 'PENDING'" in q:
-            key = params.get("key")
-            if key in self.intents:
-                self.intents[key]["status"] = "COMPLETE"
-                self.intents[key]["result_node_id"] = params.get("result_node_id")
-            return FakeResult([])
-
-        # Retrieve MergePoint for integrity
-        if "MATCH (mp:AriadneMergePoint {merge_id: $mid})" in q and "RETURN mp" in q:
-            mid = params.get("mid")
-            for mp in self.merge_points.values():
-                if mp.get("merge_id") == mid:
-                    return FakeResult([{"merge_point": mp}])
-            return FakeResult([])
-
-        # Retrieve MERGE_EXECUTED audit
-        if "MATCH (ar:AriadneAuditRecord {delta_type: 'MERGE_EXECUTED'})" in q:
-            mid = params.get("mid")
-            for a in self.audit_records:
-                if a.get("delta_type") == "MERGE_EXECUTED":
-                    fd = a.get("forward_delta", "")
-                    if mid in str(fd):
-                        return FakeResult([{"fd": fd}])
-            return FakeResult([])
-
-        # Create DepartureForkPoint (Phase D)
-        if "MERGE (fp:AriadneDepartureForkPoint" in q and "fork_point_id: $fork_point_id" in q:
-            self.departure_points[params.get("fork_point_id")] = dict(params)
-            return FakeResult([])
-
-        # Load DepartureForkPoint by fork_id (idempotent re-drive / replay reconstruction)
-        if "MATCH (fp:AriadneDepartureForkPoint {fork_id: $fid})" in q and "RETURN fp.fork_point_id AS pid" in q:
-            fid = params.get("fid")
-            for fp in self.departure_points.values():
-                if str(fp.get("fork_id")) == str(fid):
-                    return FakeResult([{
-                        "pid": fp.get("fork_point_id"),
-                        "eid": fp.get("fork_episode_id"),
-                        "tip": fp.get("spine_tip_hash_at_departure"),
-                    }])
-            return FakeResult([])
-
-        # Read a segment's sequence_index (STEP 6 fork_anchor_index resolution)
-        if "MATCH (s:AriadneSegment {segment_id: $sid})" in q and "RETURN s.sequence_index" in q:
-            seg = self.segments.get(params.get("sid"))
-            if seg is None:
-                return FakeResult([])
-            return FakeResult([{"idx": seg.get("sequence_index")}])
-
-        # Patch fork_anchor_index (STEP 6 two-phase field)
-        if "MATCH (e:AriadneEpisode {episode_id: $episode_id})" in q and "SET e.fork_anchor_index" in q:
-            ep = self.episodes.get(params.get("episode_id"))
-            if ep is not None:
-                ep["fork_anchor_index"] = params.get("anchor_index")
-            return FakeResult([])
-
-        # Phase D orphan: write ForkOrphanMarker (dedup on fork_id)
-        if "MERGE (m:AriadneForkOrphanMarker {fork_id: $fork_id})" in q:
-            fid = params.get("fork_id")
-            if fid not in self.orphan_markers:
-                self.orphan_markers[fid] = dict(params)
-            return FakeResult([])
-
-        # Phase D orphan: flag departure fork point orphaned (Class A)
-        if "MATCH (fp:AriadneDepartureForkPoint {fork_point_id: $fork_point_id})" in q and "SET fp.orphaned" in q:
-            dp = self.departure_points.get(params.get("fork_point_id"))
-            if dp is not None:
-                dp["orphaned"] = True
-            return FakeResult([])
-
-        # Phase D orphan: mark fork episode UNANCHORED (Class B, origin unreachable)
-        if "MATCH (e:AriadneEpisode {episode_id: $episode_id})" in q and "SET e.fork_orphaned" in q:
-            ep = self.episodes.get(params.get("episode_id"))
-            if ep is not None:
-                ep["fork_orphaned"] = True
-                ep["fork_orphan_class"] = "UNANCHORED"
-            return FakeResult([])
-
-        # Phase D orphan: correct fork status by recovery (Class C) — MUST precede generic fork_status
-        if "MATCH (e:AriadneEpisode {episode_id: $episode_id})" in q and "status_corrected_by_orphan_recovery" in q:
-            ep = self.episodes.get(params.get("episode_id"))
-            if ep is not None:
-                ep["fork_status"] = "COMPLETED"
-                ep["status_corrected_by_orphan_recovery"] = True
-                ep["status_corrected_at"] = params.get("ts")
-            return FakeResult([])
-
-        # Create departure-fork Episode node (Phase D — MERGE with ON CREATE SET)
-        if "MERGE (e:AriadneEpisode {episode_id: $episode_id}" in q and "fork_status" in q:
-            self.episodes[params.get("episode_id")] = dict(params)
-            return FakeResult([])
-
-        # Read departure fork status by episode_id
-        if "MATCH (e:AriadneEpisode {episode_id: $eid})" in q and "RETURN e.episode_id AS eid, e.fork_status AS st" in q:
-            ep = self.episodes.get(params.get("eid"))
-            if not ep:
-                return FakeResult([])
-            return FakeResult([{"eid": params.get("eid"), "st": ep.get("fork_status")}])
-
-        # Read departure fork status by fork_id
-        if "MATCH (e:AriadneEpisode {fork_id: $fid})" in q and "RETURN e.episode_id AS eid, e.fork_status AS st" in q:
-            fid = params.get("fid")
-            for eid, ep in self.episodes.items():
-                if str(ep.get("fork_id")) == str(fid):
-                    return FakeResult([{"eid": eid, "st": ep.get("fork_status")}])
-            return FakeResult([])
-
-        # Update departure fork status
-        if "MATCH (e:AriadneEpisode {episode_id: $episode_id})" in q and "SET e.fork_status" in q:
-            ep = self.episodes.get(params.get("episode_id"))
-            if ep is not None:
-                ep["fork_status"] = params.get("status")
-            return FakeResult([])
-
-        # Set fork_return_type on the fork episode
-        if "MATCH (e:AriadneEpisode {episode_id: $eid})" in q and "SET e.fork_return_type" in q:
-            ep = self.episodes.get(params.get("eid"))
-            if ep is not None:
-                ep["fork_return_type"] = params.get("rt")
-            return FakeResult([])
-
-        # Create ForkReturnNode (Phase D)
-        if "MERGE (fr:AriadneForkReturn {fork_return_id: $fork_return_id})" in q:
-            self.fork_returns[params.get("fork_return_id")] = dict(params)
-            return FakeResult([])
-
-        # Prior ForkReturn check by fork_id
-        if "MATCH (fr:AriadneForkReturn {fork_id: $fid})" in q and "RETURN fr.fork_return_id" in q:
-            fid = params.get("fid")
-            for fr in self.fork_returns.values():
-                if str(fr.get("fork_id")) == str(fid):
-                    return FakeResult([{"id": fr.get("fork_return_id")}])
-            return FakeResult([])
-
-        # Catch-all: edges / WIL / other merges — silently succeed
-        return FakeResult([])
-
-
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
 
-def _make_store_with_episodes(eids: List[str]) -> FakeStore:
-    s = FakeStore()
+def _make_store_with_episodes(eids: List[str]) -> InMemoryStore:
+    s = InMemoryStore()
     for eid in eids:
-        s.episodes[eid] = {"status": "ACTIVE", "spine_hash": f"spine-{eid[:8]}"}
+        s.episodes[eid] = {"episode_id": eid, "episode_status": "ACTIVE", "spine_hash": f"spine-{eid[:8]}"}
     return s
 
 
-def _make_branch(store: FakeStore, parent_episode_id: str,
+def _make_branch(store: InMemoryStore, parent_episode_id: str,
                  branch_id: str = None, segment_id: str = "seg-parent") -> Dict:
     """Simulate an existing BranchPoint in the store."""
     bp_id = str(uuid4())
@@ -415,7 +71,7 @@ def _make_branch(store: FakeStore, parent_episode_id: str,
         "parent_hash": "",
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
     }
-    store.branch_points[bid] = bp
+    store.branch_points[bp_id] = bp
     return bp
 
 
@@ -426,10 +82,9 @@ class TestCreateFork:
     def test_writes_n_fork_points_sharing_fork_id(self):
         eid = str(uuid4())
         store = _make_store_with_episodes([eid])
-        driver = FakeDriver(store)
 
         result = branch_operations.create_fork(
-            driver,
+            store,
             origin_episode_id=eid,
             origin_segment_id="seg-1",
             fork_objective="Explore two paths",
@@ -456,10 +111,9 @@ class TestCreateFork:
     def test_writes_fork_created_audit_record(self):
         eid = str(uuid4())
         store = _make_store_with_episodes([eid])
-        driver = FakeDriver(store)
 
         branch_operations.create_fork(
-            driver,
+            store,
             origin_episode_id=eid,
             origin_segment_id="seg-1",
             fork_objective="obj",
@@ -481,11 +135,10 @@ class TestCreateFork:
     def test_rejects_single_alternative(self):
         eid = str(uuid4())
         store = _make_store_with_episodes([eid])
-        driver = FakeDriver(store)
 
         with pytest.raises(ASTPGovernanceError):
             branch_operations.create_fork(
-                driver,
+                store,
                 origin_episode_id=eid,
                 origin_segment_id="s",
                 fork_objective="obj",
@@ -496,11 +149,10 @@ class TestCreateFork:
     def test_rejects_empty_fork_objective(self):
         eid = str(uuid4())
         store = _make_store_with_episodes([eid])
-        driver = FakeDriver(store)
 
         with pytest.raises(ASTPGovernanceError):
             branch_operations.create_fork(
-                driver,
+                store,
                 origin_episode_id=eid,
                 origin_segment_id="s",
                 fork_objective="",
@@ -516,10 +168,9 @@ class TestResolveFork:
     def test_promotes_selected_discards_others(self):
         eid = str(uuid4())
         store = _make_store_with_episodes([eid])
-        driver = FakeDriver(store)
 
         fork_result = branch_operations.create_fork(
-            driver,
+            store,
             origin_episode_id=eid,
             origin_segment_id="s",
             fork_objective="obj",
@@ -529,7 +180,7 @@ class TestResolveFork:
         selected = fork_result.fork_point_ids[1]
 
         result = branch_operations.resolve_fork(
-            driver,
+            store,
             fork_id=fork_result.fork_id,
             selected_fork_point_id=selected,
             resolution_rationale="option B showed best coherence",
@@ -554,16 +205,15 @@ class TestResolveFork:
     def test_rejects_empty_rationale(self):
         eid = str(uuid4())
         store = _make_store_with_episodes([eid])
-        driver = FakeDriver(store)
         fork_result = branch_operations.create_fork(
-            driver, origin_episode_id=eid, origin_segment_id="s",
+            store, origin_episode_id=eid, origin_segment_id="s",
             fork_objective="obj", fork_intent="int",
             alternatives=[{}, {}],
         )
 
         with pytest.raises(ASTPGovernanceError):
             branch_operations.resolve_fork(
-                driver,
+                store,
                 fork_id=fork_result.fork_id,
                 selected_fork_point_id=fork_result.fork_point_ids[0],
                 resolution_rationale="",
@@ -577,12 +227,11 @@ class TestExecuteMergeClean:
     def test_clean_merge_writes_all_three_records(self):
         eid = str(uuid4())
         store = _make_store_with_episodes([eid])
-        driver = FakeDriver(store)
 
         bp = _make_branch(store, eid)
 
         result = branch_operations.execute_merge(
-            driver,
+            store,
             source_branch_id=bp["branch_id"],
             target_episode_id=eid,
             merge_summary="clean synthesis of branch work",
@@ -608,7 +257,7 @@ class TestExecuteMergeClean:
 
         # BranchTerminus written with MERGED type + integrity link
         merged_termini = [
-            t for t in store.branch_terminuses
+            t for t in store.branch_termini.values()
             if t.get("terminus_type") == "merged"
         ]
         assert len(merged_termini) == 1
@@ -626,7 +275,6 @@ class TestExecuteMergeConflictSurface:
     def test_auto_returns_manifest_on_conflicts_even_with_resolutions(self):
         eid = str(uuid4())
         store = _make_store_with_episodes([eid])
-        driver = FakeDriver(store)
         bp = _make_branch(store, eid)
 
         conflicts = [{
@@ -643,7 +291,7 @@ class TestExecuteMergeConflictSurface:
         }]
 
         result = branch_operations.execute_merge(
-            driver,
+            store,
             source_branch_id=bp["branch_id"],
             target_episode_id=eid,
             merge_summary="attempted auto",
@@ -664,7 +312,6 @@ class TestExecuteMergeConflictSurface:
     def test_conflicts_without_resolutions_returns_manifest(self):
         eid = str(uuid4())
         store = _make_store_with_episodes([eid])
-        driver = FakeDriver(store)
         bp = _make_branch(store, eid)
 
         conflicts = [{
@@ -675,7 +322,7 @@ class TestExecuteMergeConflictSurface:
         }]
 
         result = branch_operations.execute_merge(
-            driver,
+            store,
             source_branch_id=bp["branch_id"],
             target_episode_id=eid,
             merge_summary="no resolutions supplied",
@@ -691,7 +338,6 @@ class TestExecuteMergeConflictSurface:
     def test_manual_review_with_resolutions_commits_as_resolved(self):
         eid = str(uuid4())
         store = _make_store_with_episodes([eid])
-        driver = FakeDriver(store)
         bp = _make_branch(store, eid)
 
         conflicts = [{
@@ -709,7 +355,7 @@ class TestExecuteMergeConflictSurface:
         }]
 
         result = branch_operations.execute_merge(
-            driver,
+            store,
             source_branch_id=bp["branch_id"],
             target_episode_id=eid,
             merge_summary="resolved conflicts by hand",
@@ -729,11 +375,10 @@ class TestMergeIntegrity:
     def test_integrity_holds_for_clean_merge(self):
         eid = str(uuid4())
         store = _make_store_with_episodes([eid])
-        driver = FakeDriver(store)
         bp = _make_branch(store, eid)
 
         merge_result = branch_operations.execute_merge(
-            driver,
+            store,
             source_branch_id=bp["branch_id"],
             target_episode_id=eid,
             merge_summary="clean",
@@ -741,7 +386,7 @@ class TestMergeIntegrity:
         )
 
         integrity = branch_operations.verify_merge_integrity(
-            driver, merge_result.merge_id
+            store, merge_result.merge_id
         )
         assert integrity is not None
         assert integrity.source_valid is True
@@ -757,15 +402,14 @@ class TestAuditChainContinuity:
     def test_fork_then_resolve_chains_correctly(self):
         eid = str(uuid4())
         store = _make_store_with_episodes([eid])
-        driver = FakeDriver(store)
 
         fork_result = branch_operations.create_fork(
-            driver, origin_episode_id=eid, origin_segment_id="s",
+            store, origin_episode_id=eid, origin_segment_id="s",
             fork_objective="obj", fork_intent="int",
             alternatives=[{}, {}],
         )
         branch_operations.resolve_fork(
-            driver,
+            store,
             fork_id=fork_result.fork_id,
             selected_fork_point_id=fork_result.fork_point_ids[0],
             resolution_rationale="winner",
@@ -789,10 +433,9 @@ class TestCreateDepartureFork:
     def test_creates_episode_point_and_audit(self):
         oid = str(uuid4())
         store = _make_store_with_episodes([oid])
-        driver = FakeDriver(store)
 
         result = branch_operations.create_departure_fork(
-            driver,
+            store,
             origin_episode_id=oid,
             origin_segment_id="seg-1",
             fork_objective="Explore the DAG tangent",
@@ -804,8 +447,8 @@ class TestCreateDepartureFork:
         assert result is not None
         assert result.fork_id and result.fork_point_id and result.fork_episode_id
         # single departure point written (no siblings)
-        assert len(store.departure_points) == 1
-        dp = store.departure_points[result.fork_point_id]
+        assert len(store.departure_fork_points) == 1
+        dp = store.departure_fork_points[result.fork_point_id]
         assert dp["fork_creation_trigger"] == "TOPIC_SHIFT"
         # the fork episode was created ACTIVE with provenance
         fe = store.episodes[result.fork_episode_id]
@@ -821,12 +464,11 @@ class TestCreateDepartureFork:
         """spine_tip_hash_at_departure (point) == fork_origin_spine_tip_hash (episode)."""
         oid = str(uuid4())
         store = _make_store_with_episodes([oid])
-        driver = FakeDriver(store)
         result = branch_operations.create_departure_fork(
-            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            store, origin_episode_id=oid, origin_segment_id="seg-1",
             fork_objective="obj", fork_creation_trigger="PARALLEL_THREAD", initiator="x",
         )
-        dp = store.departure_points[result.fork_point_id]
+        dp = store.departure_fork_points[result.fork_point_id]
         fe = store.episodes[result.fork_episode_id]
         assert dp["spine_tip_hash_at_departure"] == fe["fork_origin_spine_tip_hash"]
         assert result.spine_tip_hash_at_departure == dp["spine_tip_hash_at_departure"]
@@ -835,26 +477,24 @@ class TestCreateDepartureFork:
         """A departure does NOT resolve or alter the origin — it continues."""
         oid = str(uuid4())
         store = _make_store_with_episodes([oid])
-        driver = FakeDriver(store)
         branch_operations.create_departure_fork(
-            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            store, origin_episode_id=oid, origin_segment_id="seg-1",
             fork_objective="obj", fork_creation_trigger="EXPLICIT_FORK", initiator="x",
         )
-        assert store.episodes[oid]["status"] == "ACTIVE"  # origin unchanged
+        assert store.episodes[oid]["episode_status"] == "ACTIVE"  # origin unchanged
 
     def test_agent_escalation_requires_trigger_segment(self):
         oid = str(uuid4())
         store = _make_store_with_episodes([oid])
-        driver = FakeDriver(store)
         # missing fork_trigger_segment_id → governance error
         with pytest.raises(ASTPGovernanceError):
             branch_operations.create_departure_fork(
-                driver, origin_episode_id=oid, origin_segment_id="seg-1",
+                store, origin_episode_id=oid, origin_segment_id="seg-1",
                 fork_objective="obj", fork_creation_trigger="AGENT_ESCALATION", initiator="agent-a",
             )
         # with the trigger segment → succeeds
         result = branch_operations.create_departure_fork(
-            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            store, origin_episode_id=oid, origin_segment_id="seg-1",
             fork_objective="obj", fork_creation_trigger="AGENT_ESCALATION",
             initiator="agent-a", fork_trigger_segment_id="seg-trigger",
         )
@@ -863,14 +503,13 @@ class TestCreateDepartureFork:
     def test_idempotent_on_repeat(self):
         oid = str(uuid4())
         store = _make_store_with_episodes([oid])
-        driver = FakeDriver(store)
         kw = dict(origin_episode_id=oid, origin_segment_id="seg-1",
                   fork_objective="same obj", fork_creation_trigger="TOPIC_SHIFT", initiator="x")
-        r1 = branch_operations.create_departure_fork(driver, **kw)
-        r2 = branch_operations.create_departure_fork(driver, **kw)
+        r1 = branch_operations.create_departure_fork(store, **kw)
+        r2 = branch_operations.create_departure_fork(store, **kw)
         assert r1 is not None and r2 is not None
         # second call short-circuits on the COMPLETE intent — no second departure point
-        assert len(store.departure_points) == 1
+        assert len(store.departure_fork_points) == 1
 
     def test_fork_anchor_index_patched_to_origin_segment_index(self):
         """STEP 6: fork_anchor_index (null at episode-create) is patched to the ORIGIN
@@ -878,9 +517,8 @@ class TestCreateDepartureFork:
         oid = str(uuid4())
         store = _make_store_with_episodes([oid])
         store.segments["seg-1"] = {"sequence_index": 7}
-        driver = FakeDriver(store)
         result = branch_operations.create_departure_fork(
-            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            store, origin_episode_id=oid, origin_segment_id="seg-1",
             fork_objective="obj", fork_creation_trigger="TOPIC_SHIFT", initiator="x",
         )
         assert store.episodes[result.fork_episode_id]["fork_anchor_index"] == 7
@@ -890,60 +528,56 @@ class TestCreateDepartureFork:
         unresolved) rather than a wrong value. The point is still written."""
         oid = str(uuid4())
         store = _make_store_with_episodes([oid])  # no segment seeded
-        driver = FakeDriver(store)
         result = branch_operations.create_departure_fork(
-            driver, origin_episode_id=oid, origin_segment_id="seg-missing",
+            store, origin_episode_id=oid, origin_segment_id="seg-missing",
             fork_objective="obj", fork_creation_trigger="TOPIC_SHIFT", initiator="x",
         )
         assert store.episodes[result.fork_episode_id].get("fork_anchor_index") is None
-        assert len(store.departure_points) == 1
+        assert len(store.departure_fork_points) == 1
 
     def test_supplied_fork_id_is_used(self):
         """A caller may pin fork_id (retry/recovery); it flows through to the result + point."""
         oid = str(uuid4())
         store = _make_store_with_episodes([oid])
-        driver = FakeDriver(store)
         pinned = str(uuid4())
         result = branch_operations.create_departure_fork(
-            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            store, origin_episode_id=oid, origin_segment_id="seg-1",
             fork_objective="obj", fork_creation_trigger="TOPIC_SHIFT", initiator="x",
             fork_id=pinned,
         )
         assert result.fork_id == pinned
-        assert str(store.departure_points[result.fork_point_id]["fork_id"]) == pinned
+        assert str(store.departure_fork_points[result.fork_point_id]["fork_id"]) == pinned
 
     def test_supplied_fork_id_idempotent_no_duplicate(self):
         """Re-drive with a pinned fork_id whose point already exists short-circuits (STEP 2b)
         — no second departure point, even though the intent guard would not fire (fresh key)."""
         oid = str(uuid4())
         store = _make_store_with_episodes([oid])
-        driver = FakeDriver(store)
         pinned = str(uuid4())
         pid = str(uuid4())
-        store.departure_points[pid] = {  # a prior attempt's already-written point
+        store.departure_fork_points[pid] = {  # a prior attempt's already-written point
             "fork_point_id": pid, "fork_id": pinned,
             "fork_episode_id": "fork-ep-x", "spine_tip_hash_at_departure": "tip-x",
         }
         result = branch_operations.create_departure_fork(
-            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            store, origin_episode_id=oid, origin_segment_id="seg-1",
             fork_objective="a different objective", fork_creation_trigger="TOPIC_SHIFT",
             initiator="x", fork_id=pinned,
         )
         assert result.fork_id == pinned
         assert result.fork_point_id == pid            # returned the existing point
         assert result.fork_episode_id == "fork-ep-x"
-        assert len(store.departure_points) == 1        # no duplicate created
+        assert len(store.departure_fork_points) == 1        # no duplicate created
 
     def test_idempotent_replay_returns_full_result(self):
         """The intent-COMPLETE replay reconstructs the FULL original result (point + episode
         + tip), not a degraded empty shell."""
         oid = str(uuid4())
         store = _make_store_with_episodes([oid])
-        driver = FakeDriver(store)
         kw = dict(origin_episode_id=oid, origin_segment_id="seg-1",
                   fork_objective="same obj", fork_creation_trigger="TOPIC_SHIFT", initiator="x")
-        r1 = branch_operations.create_departure_fork(driver, **kw)
-        r2 = branch_operations.create_departure_fork(driver, **kw)
+        r1 = branch_operations.create_departure_fork(store, **kw)
+        r2 = branch_operations.create_departure_fork(store, **kw)
         assert r2.fork_id == r1.fork_id
         assert r2.fork_point_id == r1.fork_point_id and r2.fork_point_id
         assert r2.fork_episode_id == r1.fork_episode_id and r2.fork_episode_id
@@ -955,54 +589,53 @@ class TestDepartureForkFSM:
 
     def _make_active_fork(self, store):
         oid = str(uuid4())
-        store.episodes[oid] = {"status": "ACTIVE", "spine_hash": f"spine-{oid[:8]}"}
-        driver = FakeDriver(store)
+        store.episodes[oid] = {"episode_id": oid, "episode_status": "ACTIVE", "spine_hash": f"spine-{oid[:8]}"}
         res = branch_operations.create_departure_fork(
-            driver, origin_episode_id=oid, origin_segment_id="seg-1",
+            store, origin_episode_id=oid, origin_segment_id="seg-1",
             fork_objective="tangent", fork_creation_trigger="TOPIC_SHIFT", initiator="a",
         )
-        return oid, res, driver
+        return oid, res, store
 
     def test_complete_transitions_active_to_completed(self):
-        store = FakeStore()
-        _oid, res, driver = self._make_active_fork(store)
-        ok = branch_operations.complete_departure_fork(driver, res.fork_episode_id, actor="fork-agent")
+        store = InMemoryStore()
+        _oid, res, store = self._make_active_fork(store)
+        ok = branch_operations.complete_departure_fork(store, res.fork_episode_id, actor="fork-agent")
         assert ok is True
         assert store.episodes[res.fork_episode_id]["fork_status"] == "COMPLETED"
         assert any(a.get("delta_type") == "DEPARTURE_FORK_COMPLETED" for a in store.audit_records)
 
     def test_abandon_transitions_active_to_abandoned(self):
-        store = FakeStore()
-        _oid, res, driver = self._make_active_fork(store)
-        ok = branch_operations.abandon_departure_fork(driver, res.fork_episode_id, actor="origin-agent")
+        store = InMemoryStore()
+        _oid, res, store = self._make_active_fork(store)
+        ok = branch_operations.abandon_departure_fork(store, res.fork_episode_id, actor="origin-agent")
         assert ok is True
         assert store.episodes[res.fork_episode_id]["fork_status"] == "ABANDONED"
         assert any(a.get("delta_type") == "DEPARTURE_FORK_ABANDONED" for a in store.audit_records)
 
     def test_cannot_abandon_a_completed_fork(self):
-        store = FakeStore()
-        _oid, res, driver = self._make_active_fork(store)
-        branch_operations.complete_departure_fork(driver, res.fork_episode_id)
-        ok = branch_operations.abandon_departure_fork(driver, res.fork_episode_id)
+        store = InMemoryStore()
+        _oid, res, store = self._make_active_fork(store)
+        branch_operations.complete_departure_fork(store, res.fork_episode_id)
+        ok = branch_operations.abandon_departure_fork(store, res.fork_episode_id)
         assert ok is False  # COMPLETED forks return, they are not abandoned
         assert store.episodes[res.fork_episode_id]["fork_status"] == "COMPLETED"
 
     def test_declare_return_requires_completed(self):
-        store = FakeStore()
-        oid, res, driver = self._make_active_fork(store)
+        store = InMemoryStore()
+        oid, res, store = self._make_active_fork(store)
         # fork is ACTIVE — return must be blocked
         with pytest.raises(ASTPGovernanceError):
             branch_operations.declare_fork_return(
-                driver, fork_id=res.fork_id, origin_episode_id=oid,
+                store, fork_id=res.fork_id, origin_episode_id=oid,
                 return_type="INCORPORATED", returned_by="origin-agent",
             )
 
     def test_declare_return_writes_return_node_and_audit(self):
-        store = FakeStore()
-        oid, res, driver = self._make_active_fork(store)
-        branch_operations.complete_departure_fork(driver, res.fork_episode_id)
+        store = InMemoryStore()
+        oid, res, store = self._make_active_fork(store)
+        branch_operations.complete_departure_fork(store, res.fork_episode_id)
         result = branch_operations.declare_fork_return(
-            driver, fork_id=res.fork_id, origin_episode_id=oid,
+            store, fork_id=res.fork_id, origin_episode_id=oid,
             return_type="INCORPORATED", returned_by="origin-agent",
             synthesis_summary="took the DAG insight",
         )
@@ -1014,119 +647,15 @@ class TestDepartureForkFSM:
         assert store.episodes[res.fork_episode_id].get("fork_return_type") == "INCORPORATED"
 
     def test_no_double_return(self):
-        store = FakeStore()
-        oid, res, driver = self._make_active_fork(store)
-        branch_operations.complete_departure_fork(driver, res.fork_episode_id)
+        store = InMemoryStore()
+        oid, res, store = self._make_active_fork(store)
+        branch_operations.complete_departure_fork(store, res.fork_episode_id)
         branch_operations.declare_fork_return(
-            driver, fork_id=res.fork_id, origin_episode_id=oid,
+            store, fork_id=res.fork_id, origin_episode_id=oid,
             return_type="ACKNOWLEDGED", returned_by="origin-agent",
         )
         with pytest.raises(ASTPGovernanceError):
             branch_operations.declare_fork_return(
-                driver, fork_id=res.fork_id, origin_episode_id=oid,
+                store, fork_id=res.fork_id, origin_episode_id=oid,
                 return_type="INCORPORATED", returned_by="origin-agent",
             )
-
-
-class TestForkOrphanRecovery:
-    """Phase D §19.3.7 — orphan-detection write primitives (protocol exposes writes;
-    the host application orchestrates detection). All append-only or set-once; no deletes."""
-
-    def _dfp(self, tip="backdated-tip", initiator="recovery"):
-        from astp.core.branching import (
-            DepartureForkPointNode, compute_departure_fork_point_hash, ForkCreationTrigger,
-        )
-        now = datetime(2026, 7, 5, tzinfo=timezone.utc)
-        dfp = DepartureForkPointNode(
-            fork_id=uuid4(), fork_episode_id=uuid4(), origin_episode_id=uuid4(),
-            origin_segment_id="seg-1", fork_objective="obj",
-            fork_creation_trigger=ForkCreationTrigger.TOPIC_SHIFT, fork_title_snapshot="t",
-            spine_tip_hash_at_departure=tip, initiator=initiator, timestamp_utc=now,
-        )
-        dfp.content_hash = compute_departure_fork_point_hash(
-            str(dfp.fork_point_id), str(dfp.fork_id), str(dfp.fork_episode_id),
-            str(dfp.origin_episode_id), dfp.origin_segment_id, dfp.fork_objective,
-            dfp.fork_creation_trigger.value, dfp.spine_tip_hash_at_departure,
-            dfp.initiator, dfp.timestamp_utc.isoformat(), dfp.parent_hash,
-        )
-        return dfp, now
-
-    def test_orphan_marker_hash_deterministic_and_self_hashed(self):
-        from astp.core.branching import (
-            compute_fork_orphan_marker_hash, ForkOrphanMarker, OrphanClass,
-        )
-        args = ("mid", "fid", "oid", "CLASS_A", 5, "drid", "did stuff", True, "2026-07-05T00:00:00+00:00")
-        h1 = compute_fork_orphan_marker_hash(*args)
-        h2 = compute_fork_orphan_marker_hash(*args)
-        h3 = compute_fork_orphan_marker_hash("mid", "fid", "oid", "CLASS_B", 5, "drid", "did stuff", True, "2026-07-05T00:00:00+00:00")
-        assert h1 == h2 and h1 != h3
-        # satellite: self-hashed (content_hash) but NOT chained (no parent_hash field)
-        m = ForkOrphanMarker(
-            fork_id=uuid4(), origin_episode_id=uuid4(), orphan_class=OrphanClass.CLASS_A,
-            sequence_index=1, detection_run_id=uuid4(), recovery_action="x",
-            requires_operator_review=True,
-        )
-        assert hasattr(m, "content_hash") and not hasattr(m, "parent_hash")
-
-    def test_write_orphan_marker_dedup_on_fork_id(self):
-        from astp.core.branching import ForkOrphanMarker, OrphanClass
-        store = FakeStore()
-        driver = FakeDriver(store)
-        fid = uuid4()
-        for action in ("first", "second"):
-            neo4j_writer.write_fork_orphan_marker_sync(driver, ForkOrphanMarker(
-                fork_id=fid, origin_episode_id=uuid4(), orphan_class=OrphanClass.CLASS_A,
-                sequence_index=1, detection_run_id=uuid4(), recovery_action=action,
-                requires_operator_review=True,
-            ))
-        assert len(store.orphan_markers) == 1            # one marker per orphaned fork
-        assert str(fid) in store.orphan_markers
-        assert store.orphan_markers[str(fid)]["recovery_action"] == "first"  # ON CREATE only
-
-    def test_class_a_flags_point_orphaned_append_only(self):
-        store = FakeStore()
-        driver = FakeDriver(store)
-        pid = str(uuid4())
-        store.departure_points[pid] = {"fork_point_id": pid, "fork_id": str(uuid4())}
-        neo4j_writer.mark_departure_fork_point_orphaned_sync(driver, pid)
-        assert store.departure_points[pid]["orphaned"] is True
-        assert pid in store.departure_points                 # never deleted (append-only)
-
-    def test_class_b_retroactive_write_appends_backdated_and_byte_identical(self):
-        from astp.core.branching import compute_departure_fork_point_hash
-        store = FakeStore()
-        driver = FakeDriver(store)
-        dfp, now = self._dfp(tip="backdated-tip")
-        neo4j_writer.write_retroactive_departure_fork_point_sync(driver, dfp, now)
-        stored = store.departure_points[str(dfp.fork_point_id)]
-        assert stored["retroactive"] is True
-        assert stored["orphan_recovery_timestamp"] == now.isoformat()
-        # backdated anchor preserved (cross-verifiable invariant holds by construction)
-        assert stored["spine_tip_hash_at_departure"] == "backdated-tip"
-        # byte-identical to an on-time write — the retroactive flag is outside the hash preimage
-        recomputed = compute_departure_fork_point_hash(
-            str(dfp.fork_point_id), str(dfp.fork_id), str(dfp.fork_episode_id),
-            str(dfp.origin_episode_id), dfp.origin_segment_id, dfp.fork_objective,
-            dfp.fork_creation_trigger.value, dfp.spine_tip_hash_at_departure,
-            dfp.initiator, dfp.timestamp_utc.isoformat(), dfp.parent_hash,
-        )
-        assert stored["content_hash"] == recomputed
-
-    def test_class_b_unanchored_marks_episode(self):
-        store = FakeStore()
-        driver = FakeDriver(store)
-        eid = str(uuid4())
-        store.episodes[eid] = {"status": "ACTIVE", "fork_status": "ACTIVE"}
-        neo4j_writer.mark_fork_episode_unanchored_sync(driver, eid)
-        assert store.episodes[eid]["fork_orphaned"] is True
-        assert store.episodes[eid]["fork_orphan_class"] == "UNANCHORED"
-
-    def test_class_c_corrects_status(self):
-        store = FakeStore()
-        driver = FakeDriver(store)
-        eid = str(uuid4())
-        store.episodes[eid] = {"status": "ACTIVE", "fork_status": "ACTIVE"}
-        neo4j_writer.correct_fork_status_by_orphan_recovery_sync(driver, eid)
-        assert store.episodes[eid]["fork_status"] == "COMPLETED"
-        assert store.episodes[eid]["status_corrected_by_orphan_recovery"] is True
-        assert store.episodes[eid]["status_corrected_at"] is not None

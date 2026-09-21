@@ -438,69 +438,20 @@ class TestCandidateRejectedDelta:
         assert len(dumped["inference_signals"]) == 1
 
 
-# ─── Phase 2 — Operation layer (driver-mocked) ──────────────────────────────
+# ─── Phase 2 — Operation layer (in-memory store) ─────────────────────────────
 
-
-class _FakeResult:
-    def __init__(self, rows=None):
-        self._rows = rows or []
-
-    def single(self):
-        return self._rows[0] if self._rows else None
-
-    def __iter__(self):
-        return iter(self._rows)
-
-
-class _FakeSession:
-    def __init__(self, store):
-        self.store = store
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
-
-    def run(self, query, params=None):
-        return self.store.run(query, params or {})
-
-
-class _FakeDriver:
-    """Captures AuditRecord writes for assertion. Returns empty results for
-    audit-chain lookups so the first record on each chain anchors to
-    GENESIS."""
-
-    def __init__(self):
-        self.audit_records = []
-
-    def session(self):
-        return _FakeSession(self)
-
-    def run(self, query, params):
-        q = " ".join(query.split())
-        # Chain lookups — return empty so caller falls back to seq=1, prior=GENESIS.
-        if "AriadneAuditRecord" in q and "RETURN" in q and "MERGE" not in q:
-            return _FakeResult([])
-        # AuditRecord MERGE — capture the write.
-        if "MERGE (ar:AriadneAuditRecord" in q:
-            self.audit_records.append(dict(params))
-            return _FakeResult([])
-        # Episode→AuditRecord edge — accept silently.
-        if "AUDIT_TRAIL" in q:
-            return _FakeResult([])
-        return _FakeResult([])
+from astp.adapters.memory import InMemoryStore  # noqa: E402
 
 
 class TestProposeLinkCandidate:
     def test_emits_link_proposed_audit_event(self):
         from astp.core.cross_episode import propose_link_candidate
 
-        driver = _FakeDriver()
+        store = InMemoryStore()
         src = str(uuid4())
         tgt = str(uuid4())
         audit_id = propose_link_candidate(
-            driver,
+            store,
             source_episode=src,
             target_episode=tgt,
             proposed_link_type=LinkType.INFORMED_BY,
@@ -511,8 +462,8 @@ class TestProposeLinkCandidate:
             proposing_agent="agent-a",
         )
         assert UUID(audit_id)
-        assert len(driver.audit_records) == 1
-        rec = driver.audit_records[0]
+        assert len(store.audit_records) == 1
+        rec = store.audit_records[0]
         assert rec["delta_type"] == "LINK_PROPOSED"
         assert rec["agent_id"] == "agent-a"
         assert rec["caught_by"] == "AGENT"
@@ -527,9 +478,9 @@ class TestProposeLinkCandidate:
         from astp.core.cross_episode import propose_link_candidate
         import json as _json
 
-        driver = _FakeDriver()
+        store = InMemoryStore()
         propose_link_candidate(
-            driver,
+            store,
             source_episode=str(uuid4()),
             target_episode=str(uuid4()),
             proposed_link_type=LinkType.REFERENCES,
@@ -539,7 +490,7 @@ class TestProposeLinkCandidate:
             auto_accept_threshold=0.95,
             proposing_agent="agent-a",
         )
-        forward = _json.loads(driver.audit_records[0]["forward_delta"])
+        forward = _json.loads(store.audit_records[0]["forward_delta"])
         # The whole point of audit-the-decision (§12.2) — thresholds are
         # frozen on the record so the score is reinterpretable later.
         assert forward["discovery_threshold_at_creation"] == 0.70
@@ -551,9 +502,9 @@ class TestRecordCandidateRejection:
     def test_emits_candidate_rejected_audit_event(self):
         from astp.core.cross_episode import record_candidate_rejection
 
-        driver = _FakeDriver()
+        store = InMemoryStore()
         audit_id = record_candidate_rejection(
-            driver,
+            store,
             source_episode=str(uuid4()),
             target_episode=str(uuid4()),
             proposed_link_type=LinkType.REFERENCES,
@@ -563,7 +514,7 @@ class TestRecordCandidateRejection:
             detecting_agent="agent-a",
         )
         assert UUID(audit_id)
-        rec = driver.audit_records[0]
+        rec = store.audit_records[0]
         assert rec["delta_type"] == "CANDIDATE_REJECTED"
         assert rec["trigger_context"] == "agent_detected"
         assert rec["caught_by"] == "AGENT"
@@ -574,10 +525,10 @@ class TestRecordLinkRejection:
         from astp.core.cross_episode import record_link_rejection
         import json as _json
 
-        driver = _FakeDriver()
+        store = InMemoryStore()
         proposal_id = str(uuid4())
         record_link_rejection(
-            driver,
+            store,
             proposed_audit_event_id=proposal_id,
             source_episode=str(uuid4()),
             target_episode=str(uuid4()),
@@ -586,7 +537,7 @@ class TestRecordLinkRejection:
             rejection_reason=RejectionReason.NOT_RELATED,
             rejection_note="overlap is coincidental",
         )
-        rec = driver.audit_records[0]
+        rec = store.audit_records[0]
         assert rec["delta_type"] == "LINK_REJECTED"
         # Human-driven rejection from a review queue.
         assert rec["caught_by"] == "HUMAN"
