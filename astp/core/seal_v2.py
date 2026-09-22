@@ -338,7 +338,7 @@ def reproduce_episode_root(
     root already reproduced for that version (``astp.core.schema.reproduce_spine_root``
     for 0 and 1, :func:`compute_spine_root_sav2` for 2 and 3). Version 2 binds the
     Episode's UUID and the structural manifest; versions 0 and 1 bind neither.
-    Version 3 (the 6.0.0 draft, ``astp.core.context_v1``) adds the context
+    Version 3 (6.0.0, ``astp.core.context_v1``) adds the context
     manifest and needs ``capture_posture`` and the entry hashes. Unknown
     versions are refused."""
     if spine_algorithm_version in (0, 1):
@@ -351,7 +351,7 @@ def reproduce_episode_root(
             compute_signal_manifest_hash_v2(signal_content_hashes), compute_structural_manifest_hash(structural_member_hashes),
             compute_exclusion_hash_v2(excluded_content_hashes))
     if spine_algorithm_version == 3:
-        from astp.core.context_v1 import reproduce_episode_root_v3   # draft 6.0.0; not ratified
+        from astp.core.context_v1 import reproduce_episode_root_v3
         if capture_posture is None:
             raise ValueError("a version 3 root binds the capture posture: capture_posture is required")
         return reproduce_episode_root_v3(
