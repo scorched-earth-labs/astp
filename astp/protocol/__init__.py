@@ -43,7 +43,8 @@ from astp.protocol.audit import AuditRecord, AuditChain, compute_audit_hash
 from astp.protocol.retrieval_audit import RetrievalAuditRecord, compute_retrieval_audit_hash
 from astp.protocol.rebalance import RebalanceEventNode, create_rebalance_event
 from astp.protocol.keys import (
-    derive_workspace_key, derive_node_key, derive_seal_key,
+    derive_workspace_key, derive_node_key, derive_seal_key, derivation_info,
+    KEY_DERIVATION_VERSION_CURRENT, KEY_DERIVATION_VERSIONS,
     NodeKeyRecord, enforce_key_version_monotonicity,
     compute_public_key_fingerprint,
 )
@@ -110,6 +111,9 @@ __all__ = [
     "derive_workspace_key",
     "derive_node_key",
     "derive_seal_key",
+    "derivation_info",
+    "KEY_DERIVATION_VERSION_CURRENT",
+    "KEY_DERIVATION_VERSIONS",
     "NodeKeyRecord",
     "enforce_key_version_monotonicity",
     "compute_public_key_fingerprint",

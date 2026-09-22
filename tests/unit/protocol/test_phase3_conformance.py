@@ -99,6 +99,19 @@ class TestKeyHierarchy:
         with pytest.raises(MonotonicityViolation):
             enforce_key_version_monotonicity(3, 3)
 
+    def test_kh006_derivation_version_is_selectable(self):
+        """KH-006: version 2 by default; version 1 reproduces the pre-5.2.0 key."""
+        from astp.protocol.keys import KEY_DERIVATION_VERSION_CURRENT, NodeKeyRecord
+        v2 = derive_workspace_key(ROOT_KEY, WORKSPACE_ID)
+        v1 = derive_workspace_key(ROOT_KEY, WORKSPACE_ID, derivation_version=1)
+        assert v2 != v1 and KEY_DERIVATION_VERSION_CURRENT == 2
+        assert derive_workspace_key(ROOT_KEY, WORKSPACE_ID, derivation_version=2) == v2
+        rec = NodeKeyRecord(node_id=NODE_ID, node_type="episode", workspace_id=WORKSPACE_ID, key_version=1, public_key_fingerprint="00" * 32)
+        assert rec.derivation_version == 2
+        assert NodeKeyRecord.model_validate({**rec.model_dump(), "derivation_version": 1}).derivation_version == 1
+        with pytest.raises(ValueError):
+            derive_node_key(v2, NODE_ID, "episode", derivation_version=0)
+
     def test_kh005_node_type_always_in_derivation(self):
         """KH-005: No code path derives a node key without node_type."""
         wk = derive_workspace_key(ROOT_KEY, WORKSPACE_ID)

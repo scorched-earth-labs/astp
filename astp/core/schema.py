@@ -842,7 +842,8 @@ class HITLEventNode(BaseModel):
     invocation_signature: Optional[str] = None          # Hex-encoded Ed25519 sig over context_hash
     invocation_key_fingerprint: Optional[str] = None    # SHA3-256 of agent's public key
     resolution_signature: Optional[str] = None          # Hex-encoded Ed25519 sig over resolution_hash
-    resolution_key_fingerprint: Optional[str] = None    # SHA3-256 of human's public key
+    resolution_key_fingerprint: Optional[str] = None
+    key_derivation_version: int = 1  # SPEC §4.6 / §16.2.1: the derivation the signing keys used; a stored event without it is 1    # SHA3-256 of human's public key
 
 
 # ── HITL Hash Functions ──────────────────────────────────────────────────────

@@ -6,6 +6,18 @@ All notable changes to ASTP (the AI State Tree Protocol). Version numbering foll
 
 The next change-set queues here.
 
+## [5.2.0] — 2026-09-22
+
+**MINOR.** Key derivation is versioned, and version 2 carries the protocol's name. No hash construction changes; every seal and every stored record is untouched.
+
+### Changed
+- **§16.2.1 Derivation version 2 (current):** `astp.workspace.v2`, `astp.node.v2:{node_type}`, `astp.seal.v2`. The `ariadne.*.v1` strings are **derivation version 1, retained** as the definition of every key derived before 5.2.0; a string is never edited, a version is added. A signed record carries the derivation version of the key that made it — `derivation_version` on `NodeKeyRecord` (§16.2.4), `key_derivation_version` on `HITLEventNode` (§4.6) — a record without one is version 1, and a verifier that re-derives a key to check a fingerprint selects the version the record names. An implementation MAY keep deriving under version 1 for a workspace whose keys it does not wish to rotate.
+- **`CONFORMANCE.md` 2.1.0:** KH-001…003 state the version 2 strings; **KH-006** (new) requires version 2 by default, version 1 reproducible on request, absence read as 1, and an unknown version refused.
+- `IMPLEMENTATION-PHASE3.md` §3 states both versions.
+
+### Reference package (`astp` 1.1.0)
+- `derive_workspace_key` / `derive_node_key` / `derive_seal_key` take `derivation_version=` (default `KEY_DERIVATION_VERSION_CURRENT = 2`); `derivation_info(level, version, node_type=)` exposes the strings; `NodeKeyRecord.derivation_version`; `HITLEventNode.key_derivation_version` (default 1, the value a stored event without it has). `tests/unit/protocol/test_wire_constants.py` pins both versions.
+
 ### Changed (reference package 1.0.0 — MAJOR: the protocol package names no store)
 - **The reference deployment's adapter leaves the package.** `astp.adapters.neo4j` (writer, queries, crystallization, WIL, rebalance, retrieval audit, seal-input reader, `Neo4jStructuralStore`), its implementation guides (`IMPLEMENTATION-BFM.md`, `IMPLEMENTATION-CROSS-EPISODE-LINKING.md`, `IMPLEMENTATION-LAYER3.md`) and its tests move to the deployment that runs it (Ignis OS, `ignis.ariadne.astp_adapter`). The `[neo4j]` install extra is gone. `IMPLEMENTATION-PHASE3.md` stays: it describes protocol constructions, not a store.
 - **`astp.core.wil` names roles only.** The provider enum (`StoreLayer`) and the coordinator key/TTL policy left with the adapter. `WriteIntentEntry.stores_involved` / `last_completed_store` are role names (§12.1), validated through `store_role_of`, which keeps the fixed 4.x correspondence (`LEGACY_STORE_VALUES`) §12.1 requires the reference implementation to publish — stored data a reader maps, never a value a writer emits. `enforce_write_order` and `enforce_provisional_state_guard` take roles or any value that resolves to one. `QDRANT_DEGRADATION_RECOVERABLE` → `SEMANTIC_INDEX_DEGRADATION_RECOVERABLE`.
