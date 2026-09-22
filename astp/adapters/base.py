@@ -505,6 +505,51 @@ class StructuralStore(ABC):
         ``COMPLETE`` entry whose pre- and post-state hash is ``node_id``."""
         ...
 
+    # ── Context commitment (SPEC 6.0.0 §4.8, §4.9, §5.7.3) ─────────────────
+    # A context entry is a stored node; the content it commits to lives behind
+    # ``content_ref`` (and its salt behind ``salt_ref``) in the deployment's
+    # content plane, which this contract does not model. The store holds the
+    # entry's fields; it never holds content or salts.
+
+    @abstractmethod
+    def write_context_entry(self, entry: Any) -> None:
+        """Store a ``ContextEntryNode`` (``astp.core.context_v1``). Entries are
+        append-only: the only later change is the erasure of §4.9, through
+        :meth:`tombstone_context_entry`."""
+        ...
+
+    @abstractmethod
+    def context_entry(self, entry_id: str) -> Optional[dict]:
+        """The stored entry, or None."""
+        ...
+
+    @abstractmethod
+    def context_entries_of(self, episode_id: str) -> List[dict]:
+        """Every context entry of the Episode, tombstoned ones included — every
+        entry is a manifest member (§5.7.3)."""
+        ...
+
+    @abstractmethod
+    def set_capture_posture(self, episode_id: str, posture: str) -> None:
+        """Record the Episode's capture posture (§5.7.3, G-41). It is sealed
+        into the manifest; a runtime sets it before the seal."""
+        ...
+
+    @abstractmethod
+    def capture_posture(self, episode_id: str) -> Optional[str]:
+        """The Episode's capture posture, or None when none was set."""
+        ...
+
+    @abstractmethod
+    def tombstone_context_entry(self, entry_id: str, tombstone: Any, codicil: Any) -> None:
+        """The stored-node half of erasure (§4.9.2 steps 3–4), in one write:
+        null ``content_ref`` and ``salt_ref``, set ``erasure_state`` to
+        ``tombstoned``, and store the codicil whose content is the
+        ``ErasureTombstone``. Every other field of the entry is untouched
+        (G-43). The destruction of the content and the salt themselves
+        (steps 1–2) is the deployment's, before this is called."""
+        ...
+
 
 def as_structural_store(store: Any) -> "StructuralStore":
     """The ``StructuralStore`` an operation was given. Until 1.0.0 a raw driver

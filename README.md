@@ -152,7 +152,7 @@ import astp
 
 ## Status
 
-**6.0.0.** The protocol is ratified at 6.0.0 (Episode of Record `80e5a2dd-3d9f-45d0-abfb-6489c8caf1b8`, [`docs/RATIFICATION-6.0.0.md`](./docs/RATIFICATION-6.0.0.md)): a sealed Episode now proves what its agents were *given* — a context manifest as the sixth field of the Episode root under `spine_algorithm_version` 3 — and the seal proves history, not retention: content behind a sealed pointer can be lawfully erased with a witnessed tombstone and no sealed value moves. The reference package implements the constructions (`astp.core.context_v1`); the reference deployment does not yet write context entries or seal under version 3.
+**6.0.0.** The protocol is ratified at 6.0.0 (Episode of Record `80e5a2dd-3d9f-45d0-abfb-6489c8caf1b8`, [`docs/RATIFICATION-6.0.0.md`](./docs/RATIFICATION-6.0.0.md)): a sealed Episode now proves what its agents were *given* — a context manifest as the sixth field of the Episode root under `spine_algorithm_version` 3 — and the seal proves history, not retention: content behind a sealed pointer can be lawfully erased with a witnessed tombstone and no sealed value moves. The reference package implements the constructions (`astp.core.context_v1`), the store contract and operations (`astp.core.context_operations`, package 2.1.0) and the proof of record's sixth field; the reference deployment does not yet write context entries or seal under version 3 ([`IMPLEMENTATION-CONTEXT.md`](./IMPLEMENTATION-CONTEXT.md) §7).
 
 **5.1.0.** The protocol was ratified at 5.0.0 (Episode of Record `ce3f569c-9cdc-4a3d-913a-b9d8573d9a28`) and at 5.1.0 the reference deployment (Ignis OS, cutover 2026-09-19) seals under `spine_algorithm_version` 2 — `astp.core.seal_v2.compute_episode_seal_v2` over the adapter's `seal_inputs` reader — with no feature flag and nothing swallowed. A version 2 seal takes its identifiers from the `SealV2` result; `astp.core.schema.SPINE_ALGORITHM_VERSION_CURRENT` names the retained version 1 construction and reads `1` by design. Every construction has machine-readable vectors. The protocol specification is in `SPEC.md`.
 
@@ -189,7 +189,7 @@ The protocol is one normative document (`SPEC.md`) plus, per feature surface, a 
 | Reproducibility — spine leaf set, episode root, version identifiers | §5.6–§5.8, §9.3, G-1 | — | [`CONFORMANCE-REPRODUCIBILITY.md`](./CONFORMANCE-REPRODUCIBILITY.md) |
 | Trust Infrastructure — keys, anchoring, witnesses, chain proofs | §16 | [`IMPLEMENTATION-PHASE3.md`](./IMPLEMENTATION-PHASE3.md) | [`CONFORMANCE.md`](./CONFORMANCE.md) |
 | Seal constructions — encoding, leaf hash, spine, manifests, Episode root, inclusion proofs | §5, §9.2 | — | [`CONFORMANCE-REPRODUCIBILITY.md`](./CONFORMANCE-REPRODUCIBILITY.md) RP-009–011, [`vectors/5.0.0/`](./vectors/5.0.0/) |
-| Context commitment — context entries, content commitments, context manifest, Episode root version 3, erasure | §4.8, §4.9, §5.7.3, G-41–G-43 | — | [`CONFORMANCE-CONTEXT.md`](./CONFORMANCE-CONTEXT.md) CM-001–010, [`vectors/6.0.0/`](./vectors/6.0.0/) |
+| Context commitment — context entries, content commitments, context manifest, Episode root version 3, erasure | §4.8, §4.9, §5.7.3, G-41–G-43 | [`IMPLEMENTATION-CONTEXT.md`](./IMPLEMENTATION-CONTEXT.md) | [`CONFORMANCE-CONTEXT.md`](./CONFORMANCE-CONTEXT.md) CM-001–010, [`vectors/6.0.0/`](./vectors/6.0.0/) |
 
 Supporting: [`VERSIONING.md`](./VERSIONING.md) (canonical version policy), [`GLOSSARY.md`](./GLOSSARY.md), [`CHANGELOG.md`](./CHANGELOG.md).
 

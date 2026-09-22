@@ -32,7 +32,8 @@ astp/protocol/   Node-generic layer. Operates on CognitiveNode only.
 astp/nodes/      Node-type instantiation (episode/, segment/). Each defines its NodePayload.
 astp/core/       Episode-era schema, governance, WIL, branching, grouping,
                  cross-episode linking, workflow_execution (Layer 3), seal_v2
-                 (5.0.0 seal constructions), context_v1 (6.0.0 context commitment).
+                 (5.0.0 seal constructions), context_v1 and context_operations
+                 (6.0.0 context commitment: constructions, and the operations over StructuralStore).
 astp/adapters/   ASTPAdapter + StructuralStore contracts; InMemoryStore implements both.
 ```
 

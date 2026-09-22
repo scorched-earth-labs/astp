@@ -25,6 +25,13 @@ The next change-set queues here.
 - `tests/conformance/test_context_commitment_v1_vectors.py` reproduces every vector value from the library and from a `hashlib`-only implementation of the SPEC text. `__version__` 2.0.0; `PROTOCOL_VERSION` 6.0.0.
 - **Not yet in the package** (queued for 2.1.0): `InMemoryStore` / `StructuralStore` context-entry, tombstone and posture operations; `proof_of_record` learning the sixth field. The reference deployment does not yet write context entries or seal under version 3.
 
+### Reference package (`astp` 2.1.0 — the store and the operations)
+- **`StructuralStore`** gains the context-commitment contract: `write_context_entry`, `context_entry`, `context_entries_of`, `set_capture_posture`, `capture_posture`, `tombstone_context_entry` (the stored-node half of erasure in one write). `InMemoryStore` implements it.
+- **`astp.core.context_operations`**: `commit_context_entry` (refuses an Episode that admits no further provision, a duplicate, a bad `resolves`, and — G-42 — low-entropy personal data committed plain, before anything is written; ledgers `CONTEXT_COMMIT`); `set_capture_posture` (G-41; refused once sealed); `context_seal_inputs` / `episode_context_manifest_hash` (the seal-time readers, G-41 and G-42 re-applied); `erase_context_entry` (builds the tombstone over the unchanged entry hash, stores it as a `CodicilNode`, nulls the two pointers, ledgers `CODICIL_APPEND`; takes the caller's assertion that content and salt were destroyed together, and refuses without it — G-43).
+- **`proof_of_record`** learns the sixth field: a `spine_algorithm_version` 3 document carries `context_manifest_hash`, `capture_posture` and `context_entry_count`, the full profile carries the stored entries, and the verifier reproduces the manifest and the root through `compute_episode_seal_v3`; an attested document says the entry list is withheld.
+- **`IMPLEMENTATION-CONTEXT.md`** (new): what an implementer writes, when, from where; posture and the seal; the erasure sequence; verification and export; and the reference deployment's status (§7 — no seam writes entries yet).
+- `tests/unit/adapters/test_context_operations.py`: the seven ratified entries committed through the store seal to the vector root; erasure through the store leaves it unchanged; a version 3 proof of record round-trips and fails on tampering.
+
 ## [5.2.0] — 2026-09-22
 
 **MINOR.** Key derivation is versioned, and version 2 carries the protocol's name. No hash construction changes; every seal and every stored record is untouched.

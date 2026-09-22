@@ -42,6 +42,7 @@ from uuid import UUID
 from astp import PROTOCOL_VERSION
 from astp.core.schema import reproduce_spine_root
 from astp.core.seal_v2 import SegmentSealInput, compute_episode_seal_v2, reproduce_episode_root
+from astp.core.context_v1 import ContextEntryNode, compute_episode_seal_v3
 
 FORMAT = "astp-proof-of-record/1"
 PROFILES = ("attested", "full")
@@ -72,11 +73,15 @@ def build_proof_of_record(
     exclusion_hash: Optional[str],
     episode_root_hash: Optional[str],
     structural_manifest_hash: Optional[str] = None,
+    context_manifest_hash: Optional[str] = None,     # version 3 (6.0.0): the sixth root field
+    capture_posture: Optional[str] = None,           # version 3: sealed with the manifest
+    context_entry_count: Optional[int] = None,
     leaf_count: Optional[int] = None,
     segments: Optional[List[dict]] = None,             # full, version 2: six fields each; versions 0/1: {sequence_index|leaf_index, content_hash}
     signal_content_hashes: Optional[List[str]] = None,
     excluded_content_hashes: Optional[List[str]] = None,
     structural_member_hashes: Optional[List[str]] = None,
+    context_entries: Optional[List[dict]] = None,       # full, version 3: the stored fields of every context entry
     resolved_signal_order: Optional[List[str]] = None,
     title: Optional[str] = None,
     notes: Optional[str] = None,
@@ -92,13 +97,16 @@ def build_proof_of_record(
         "seal": {
             "spine_algorithm_version": spine_algorithm_version,
             "ordering_version": ordering_version,
-            "hash_version": 2 if spine_algorithm_version == 2 else 1,
+            "hash_version": 2 if spine_algorithm_version in (2, 3) else 1,
             "sealed_at": sealed_at,
             "closed_at": closed_at,
             "spine_root": spine_root,
             "signal_manifest_hash": signal_manifest_hash,
             "exclusion_hash": exclusion_hash,
             "structural_manifest_hash": structural_manifest_hash,
+            "context_manifest_hash": context_manifest_hash,
+            "capture_posture": capture_posture,
+            "context_entry_count": context_entry_count,
             "episode_root_hash": episode_root_hash,
             "leaf_count": leaf_count,
         },
@@ -110,6 +118,7 @@ def build_proof_of_record(
             "signal_content_hashes": list(signal_content_hashes or []),
             "excluded_content_hashes": list(excluded_content_hashes or []),
             "structural_member_hashes": list(structural_member_hashes or []),
+            "context_entries": list(context_entries or []),
             "resolved_signal_order": resolved_signal_order,
         }
     return doc
@@ -130,20 +139,25 @@ def verify_proof_of_record(doc: dict) -> ProofVerification:
     # spine_root is the one root every seal has. The manifests and the Episode root
     # were introduced at 4.3.0; a seal made before that carries none, and a proof
     # says so with null rather than inventing them. Version 2 always has all four.
-    for k in ("spine_root", "signal_manifest_hash", "exclusion_hash", "episode_root_hash", "structural_manifest_hash"):
+    for k in ("spine_root", "signal_manifest_hash", "exclusion_hash", "episode_root_hash", "structural_manifest_hash", "context_manifest_hash"):
         val = seal.get(k)
         if val is not None and (not isinstance(val, str) or len(val) != 64):
             v.failures.append(f"seal.{k} is not a 64-hex digest")
     if not seal.get("spine_root"):
         v.failures.append("seal.spine_root missing")
-    if sav == 2:
+    if sav in (2, 3):
         for k in ("signal_manifest_hash", "exclusion_hash", "structural_manifest_hash", "episode_root_hash"):
             if not seal.get(k):
-                v.failures.append(f"version 2 seal without {k}")
-    if sav not in (0, 1, 2) or ov not in (1, 2):
+                v.failures.append(f"version {sav} seal without {k}")
+    if sav == 3:
+        if not seal.get("context_manifest_hash"):
+            v.failures.append("version 3 seal without context_manifest_hash")
+        if not seal.get("capture_posture"):
+            v.failures.append("version 3 seal without capture_posture (G-41)")
+    if sav not in (0, 1, 2, 3) or ov not in (1, 2):
         v.failures.append(f"unknown version identifiers sav={sav!r} ov={ov!r}")
-    if sav == 2 and ov != 2:
-        v.failures.append("spine_algorithm_version 2 requires ordering_version 2")
+    if sav in (2, 3) and ov != 2:
+        v.failures.append(f"spine_algorithm_version {sav} requires ordering_version 2")
     if seal.get("sealed_at") and seal.get("closed_at") and seal["sealed_at"] < seal["closed_at"]:
         v.failures.append("sealed_at precedes closed_at (G-40)")
     if v.failures:
@@ -151,8 +165,10 @@ def verify_proof_of_record(doc: dict) -> ProofVerification:
 
     if v.profile == "attested":
         v.not_checked += ["spine_root (leaf list withheld)", "signal_manifest_hash and exclusion_hash membership (hash lists withheld)"]
-        if sav == 2:
+        if sav in (2, 3):
             v.not_checked.append("structural_manifest_hash membership (member list withheld)")
+        if sav == 3:
+            v.not_checked.append("context_manifest_hash membership (entry list withheld)")
         v.checks.append("document internally consistent; version identifiers known")
         v.checks.append("attested profile: the Episode root's composition is verifiable only with the component hash lists, which this profile withholds — request the full profile to reproduce it")
         v.ok = True
@@ -163,8 +179,20 @@ def verify_proof_of_record(doc: dict) -> ProofVerification:
     excl = list(stored.get("excluded_content_hashes") or [])
     members = list(stored.get("structural_member_hashes") or [])
     segs = stored.get("segments") or []
+    entries = stored.get("context_entries") or []
     try:
-        if sav == 2:
+        if sav == 3:
+            inputs = [SegmentSealInput(node_id=UUID(s["node_id"]), node_type=s.get("node_type", "segment"),
+                                       schema_version=s["schema_version"], sequence_index=int(s["sequence_index"]),
+                                       content_hash=s["content_hash"], parent_node_id=UUID(s["parent_node_id"]) if s.get("parent_node_id") else None)
+                      for s in segs]
+            sealed3 = compute_episode_seal_v3(UUID(eid), inputs, capture_posture=str(seal.get("capture_posture")),
+                                              context_entries=[ContextEntryNode(**e) for e in entries],
+                                              signal_content_hashes=sigs, excluded_content_hashes=excl, structural_member_hashes=members)
+            root, ep_root = sealed3.spine_root, sealed3.episode_root_hash
+            comp = {"signal_manifest_hash": sealed3.signal_manifest_hash, "exclusion_hash": sealed3.exclusion_hash,
+                    "structural_manifest_hash": sealed3.structural_manifest_hash, "context_manifest_hash": sealed3.context_manifest_hash}
+        elif sav == 2:
             inputs = [SegmentSealInput(node_id=UUID(s["node_id"]), node_type=s.get("node_type", "segment"),
                                        schema_version=s["schema_version"], sequence_index=int(s["sequence_index"]),
                                        content_hash=s["content_hash"], parent_node_id=UUID(s["parent_node_id"]) if s.get("parent_node_id") else None)
@@ -211,6 +239,8 @@ def verify_proof_of_record(doc: dict) -> ProofVerification:
     check("episode_root_hash", ep_root, seal["episode_root_hash"])
     if seal.get("leaf_count") is not None and int(seal["leaf_count"]) != len(segs):
         v.failures.append(f"leaf_count {seal['leaf_count']} != {len(segs)} segments supplied")
+    if sav == 3 and seal.get("context_entry_count") is not None and int(seal["context_entry_count"]) != len(entries):
+        v.failures.append(f"context_entry_count {seal['context_entry_count']} != {len(entries)} entries supplied")
     v.ok = not v.failures
     return v
 
