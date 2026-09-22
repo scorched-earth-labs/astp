@@ -25,7 +25,7 @@ types. Keys derived for "episode" are distinct from "signal" or
 Node keys support signing only at the protocol layer. Encryption
 is implementation-defined and outside the protocol surface.
 
-Per IMPLEMENTATION-PHASE3.md Section 3.
+Per IMPLEMENTATION-PHASE3.md Section 3. Derivations are versioned (SPEC §16.2.1).
 """
 
 from datetime import datetime, timezone
@@ -41,39 +41,67 @@ from astp.protocol.errors import MonotonicityViolation
 
 
 # ── HKDF Derivation ─────────────────────────────────────────────────────────
+#
+# A derivation is named by its HKDF ``info`` string, and the string carries the
+# version (SPEC §16.2.1). Version 2 (current) uses the protocol's name; version
+# 1 is retained as the definition of every key derived before 5.2.0 and is
+# selected by ``derivation_version``. Changing a string changes every key it
+# derives, so a string is never edited — a new version is added.
+
+KEY_DERIVATION_VERSION_CURRENT = 2
+KEY_DERIVATION_VERSIONS = (1, 2)
+
+_INFO = {
+    1: {"workspace": "ariadne.workspace.v1", "node": "ariadne.node.v1:{node_type}", "seal": "ariadne.seal.v1"},
+    2: {"workspace": "astp.workspace.v2", "node": "astp.node.v2:{node_type}", "seal": "astp.seal.v2"},
+}
+
+
+def derivation_info(level: str, derivation_version: int = KEY_DERIVATION_VERSION_CURRENT, *, node_type: str = "") -> bytes:
+    """The HKDF ``info`` bytes of one level of the hierarchy under one derivation
+    version — ``"workspace"``, ``"node"`` (needs ``node_type``) or ``"seal"``."""
+    if derivation_version not in _INFO:
+        raise ValueError(f"unknown key derivation version {derivation_version!r}; known: {KEY_DERIVATION_VERSIONS}")
+    return _INFO[derivation_version][level].format(node_type=node_type).encode("utf-8")
+
+
+def _hkdf(ikm: bytes, salt: bytes, info: bytes) -> bytes:
+    return HKDF(algorithm=SHA3_256(), length=32, salt=salt, info=info).derive(ikm)
+
 
 def derive_workspace_key(
     root_key_material: bytes,
     workspace_id: str,
+    *,
+    derivation_version: int = KEY_DERIVATION_VERSION_CURRENT,
 ) -> bytes:
     """Derive a workspace key from root key material.
 
-    HKDF(ikm=root_key_material, salt=workspace_id, info="ariadne.workspace.v1")
+    HKDF(ikm=root_key_material, salt=workspace_id, info="astp.workspace.v2")
+    (version 1, retained: info="ariadne.workspace.v1")
 
     Args:
         root_key_material: 32 bytes from KMS/HSM (implementation-defined source)
         workspace_id: Workspace identifier string
+        derivation_version: which derivation (SPEC §16.2.1); 2 unless reproducing a key derived under 1
 
     Returns:
         32-byte workspace key
     """
-    hkdf = HKDF(
-        algorithm=SHA3_256(),
-        length=32,
-        salt=workspace_id.encode("utf-8"),
-        info=b"ariadne.workspace.v1",
-    )
-    return hkdf.derive(root_key_material)
+    return _hkdf(root_key_material, workspace_id.encode("utf-8"), derivation_info("workspace", derivation_version))
 
 
 def derive_node_key(
     workspace_key: bytes,
     node_id: str,
     node_type: str,
+    *,
+    derivation_version: int = KEY_DERIVATION_VERSION_CURRENT,
 ) -> bytes:
     """Derive a node key from a workspace key.
 
-    HKDF(ikm=workspace_key, salt=node_id, info="ariadne.node.v1:{node_type}")
+    HKDF(ikm=workspace_key, salt=node_id, info="astp.node.v2:{node_type}")
+    (version 1, retained: info="ariadne.node.v1:{node_type}")
 
     The node_type MUST appear in the info string (G-16). This creates
     cryptographic domain separation between node types.
@@ -82,27 +110,24 @@ def derive_node_key(
         workspace_key: 32-byte workspace key
         node_id: CognitiveNode identifier (UUID string)
         node_type: Node type string (e.g., "episode", "signal", "artifact")
+        derivation_version: which derivation (SPEC §16.2.1)
 
     Returns:
         32-byte node key
     """
-    info = f"ariadne.node.v1:{node_type}".encode("utf-8")
-    hkdf = HKDF(
-        algorithm=SHA3_256(),
-        length=32,
-        salt=node_id.encode("utf-8"),
-        info=info,
-    )
-    return hkdf.derive(workspace_key)
+    return _hkdf(workspace_key, node_id.encode("utf-8"), derivation_info("node", derivation_version, node_type=node_type))
 
 
 def derive_seal_key(
     node_key: bytes,
     spine_root_at_seal: str,
+    *,
+    derivation_version: int = KEY_DERIVATION_VERSION_CURRENT,
 ) -> bytes:
     """Derive a seal key from a node key.
 
-    HKDF(ikm=node_key, salt=spine_root_at_seal_bytes, info="ariadne.seal.v1")
+    HKDF(ikm=node_key, salt=spine_root_at_seal_bytes, info="astp.seal.v2")
+    (version 1, retained: info="ariadne.seal.v1")
 
     The spine_root is used as RAW BYTES (hex-decoded), not as a UTF-8
     string. This binds the seal key to a specific node state — a seal
@@ -112,17 +137,12 @@ def derive_seal_key(
     Args:
         node_key: 32-byte node key
         spine_root_at_seal: Hex-encoded spine root hash at seal time
+        derivation_version: which derivation (SPEC §16.2.1)
 
     Returns:
         32-byte seal key
     """
-    hkdf = HKDF(
-        algorithm=SHA3_256(),
-        length=32,
-        salt=bytes.fromhex(spine_root_at_seal),
-        info=b"ariadne.seal.v1",
-    )
-    return hkdf.derive(node_key)
+    return _hkdf(node_key, bytes.fromhex(spine_root_at_seal), derivation_info("seal", derivation_version))
 
 
 # ── Key Identity ─────────────────────────────────────────────────────────────
@@ -147,6 +167,7 @@ class NodeKeyRecord(BaseModel):
     workspace_id: str
     key_version: int
     public_key_fingerprint: str  # SHA3-256 of public key bytes
+    derivation_version: int = KEY_DERIVATION_VERSION_CURRENT  # SPEC §16.2.1; a stored record without it is 1
     derivation_path: str = ""  # Human-readable: "workspace/{wid}/node/{nid}"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

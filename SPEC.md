@@ -1,9 +1,9 @@
 # ASTP — AI State Tree Protocol Specification
 
-**Version:** 5.1.0
+**Version:** 5.2.0
 **Status:** Stable — ratified in Episode of Record `ce3f569c-9cdc-4a3d-913a-b9d8573d9a28` (below)
 **Authors:** Scorched Earth Labs
-**Date:** 2026-09-19
+**Date:** 2026-09-22
 **Supersedes:** [`SPEC-v4.md`](./docs/history/SPEC-v4.md) (4.5.0); earlier, [`SPEC-v3.md`](./docs/history/SPEC-v3.md) (3.5.1) and [`SPEC-v1.md`](./docs/history/SPEC-v1.md) (0.1.0-draft)
 **Change history:** [`CHANGELOG.md`](./CHANGELOG.md)
 **Versioning policy:** [`VERSIONING.md`](./VERSIONING.md)
@@ -290,6 +290,7 @@ HITLEventNode {
   invocation_key_fingerprint: string?  (SHA3-256 of agent public key)
   resolution_signature:   string?      (Ed25519 sig over resolution_hash, hex-encoded)
   resolution_key_fingerprint: string?  (SHA3-256 of human public key)
+  key_derivation_version: int?         (§16.2.1: the derivation the signing keys used; 1 when absent)
 }
 ```
 
@@ -1183,14 +1184,16 @@ Phase 3 adds cryptographic trust infrastructure to the `CognitiveNode` primitive
 
 #### 16.2.1 Derivation Path
 
-All node keys are derived using HKDF-SHA3-256:
+All node keys are derived using HKDF-SHA3-256. A derivation is named by its `info` string, and the string carries a **derivation version**; changing a string changes every key it derives, so a string is never edited — a new version is added and the old one retained. **Derivation version 2 (current):**
 
 ```
 Root Key Material
-    └── Workspace Key: HKDF(RKM, salt=workspace_id, info="ariadne.workspace.v1")
-            └── Node Key: HKDF(WK, salt=node_id, info="ariadne.node.v1:{node_type}")
-                    └── Seal Key: HKDF(NK, salt=spine_root_at_seal, info="ariadne.seal.v1")
+    └── Workspace Key: HKDF(RKM, salt=workspace_id, info="astp.workspace.v2")
+            └── Node Key: HKDF(WK, salt=node_id, info="astp.node.v2:{node_type}")
+                    └── Seal Key: HKDF(NK, salt=spine_root_at_seal, info="astp.seal.v2")
 ```
+
+**Derivation version 1 (retained).** Keys derived before 5.2.0 used `info="ariadne.workspace.v1"`, `"ariadne.node.v1:{node_type}"` and `"ariadne.seal.v1"`, with the same salts and the same HKDF-SHA3-256. Version 1 is retained as the definition of those keys: a record that carries a signature also carries the `derivation_version` of the key that made it (§16.2.4; `key_derivation_version` on a `HITLEventNode`, §4.6), a record that lacks it is version 1, and a verifier that re-derives a key to check a fingerprint selects the derivation the record names. An implementation MAY continue to derive under version 1 for a workspace whose keys it does not wish to rotate; a new workspace derives under 2.
 
 The `node_type` participates in the HKDF `info` string at the Node Key level. Keys derived for `node_type="episode"` are cryptographically distinct from keys derived for `node_type="signal"` or `node_type="artifact"`. New node types automatically receive distinct key spaces without protocol changes.
 
@@ -1216,6 +1219,7 @@ NodeKeyRecord {
   workspace_id:            string
   key_version:             int       (monotonically increasing — G-15)
   public_key_fingerprint:  string    (SHA3-256 of public key bytes)
+  derivation_version:      int       (§16.2.1: 1 · 2 (current); a stored record without it is 1)
   derivation_path:         string    (human-readable: "workspace/{wid}/node/{nid}")
   created_at:              datetime
 }
