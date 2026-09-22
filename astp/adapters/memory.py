@@ -82,6 +82,7 @@ class InMemoryStore(ASTPAdapter, StructuralStore):
         self.consultation_participants: Dict[str, Dict[str, Any]] = {}
         self.closure_records: Dict[str, Dict[str, Any]] = {}
         self.codicils: Dict[str, Dict[str, Any]] = {}
+        self.context_entries: Dict[str, Dict[str, Any]] = {}      # SPEC 6.0.0 §4.8; posture lives on the episode dict
         self.amendment_links: Dict[str, Dict[str, Any]] = {}
         self.segment_references: List[Dict[str, Any]] = []   # {source, target, reference_type}
         # Structural record
@@ -551,6 +552,41 @@ class InMemoryStore(ASTPAdapter, StructuralStore):
             intent["status"] = "COMPLETE"
             intent["completed_at"] = _now()
             intent["result_node_id"] = result_node_id
+
+    # ── Context commitment (SPEC 6.0.0) ─────────────────────────────────────
+
+    def write_context_entry(self, entry: Any) -> None:
+        d = _dump(entry)
+        if d["entry_id"] in self.context_entries:
+            raise ValueError(f"context entry {d['entry_id']} already exists: entries are append-only")
+        self.context_entries[d["entry_id"]] = d
+
+    def context_entry(self, entry_id: str) -> Optional[dict]:
+        d = self.context_entries.get(entry_id)
+        return dict(d) if d else None
+
+    def context_entries_of(self, episode_id: str) -> List[dict]:
+        return [dict(d) for d in self.context_entries.values() if d["episode_id"] == episode_id]
+
+    def set_capture_posture(self, episode_id: str, posture: str) -> None:
+        ep = self.episodes.get(episode_id)
+        if ep is None:
+            raise ValueError(f"episode {episode_id} does not exist")
+        ep["capture_posture"] = posture
+
+    def capture_posture(self, episode_id: str) -> Optional[str]:
+        ep = self.episodes.get(episode_id)
+        return ep.get("capture_posture") if ep else None
+
+    def tombstone_context_entry(self, entry_id: str, tombstone: Any, codicil: Any) -> None:
+        d = self.context_entries.get(entry_id)
+        if d is None:
+            raise ValueError(f"context entry {entry_id} does not exist")
+        c = _dump(codicil)
+        self.codicils.setdefault(c["codicil_id"], c)
+        d["content_ref"] = None
+        d["salt_ref"] = None
+        d["erasure_state"] = "tombstoned"
 
     def write_completed_wil_entry(self, intent_id: str, operation: str, episode_id: str,
                                   node_id: str, timestamp: str) -> None:
