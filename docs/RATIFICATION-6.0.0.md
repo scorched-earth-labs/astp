@@ -1,14 +1,14 @@
 # ASTP 6.0.0 — Ratification Statement (for the Episode of Record)
 
-**Version:** 1.0.0-draft
-**Status:** Draft — the text the maintainers will post as the opening Segment of the 6.0.0 Episode of Record; record table filled after the seal
+**Version:** 1.0.0
+**Status:** Sealed — Segment 18 of Episode of Record `80e5a2dd-3d9f-45d0-abfb-6489c8caf1b8`, completed by codicil `9bcc9240-4221-4ab6-a63c-3172e65815fe`; record table filled after the seal
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-22
-**Applies To:** [`docs/SPEC-6.0.0-DRAFT-context-commitment.md`](./SPEC-6.0.0-DRAFT-context-commitment.md) (draft.2), proposed text for [`SPEC.md`](../SPEC.md) 6.0.0; [`GOVERNANCE.md`](../GOVERNANCE.md) § Episode of Record
+**Applies To:** [`SPEC.md`](../SPEC.md) 6.0.0, folded from [`docs/history/SPEC-6.0.0-DRAFT-context-commitment.md`](./history/SPEC-6.0.0-DRAFT-context-commitment.md) (draft.2); [`GOVERNANCE.md`](../GOVERNANCE.md) § Episode of Record
 
 ---
 
-This is the text the maintainers post to open the Episode of Record for ASTP 6.0.0. The Episode is the cryptographic anchor of the amendment; `SPEC.md` is its human-readable result. When the Episode is sealed, its identifier and `episode_root_hash` are recorded here, in the `SPEC.md` header and in `CHANGELOG.md`; the draft is folded into `SPEC.md` and retained under `docs/history/`, and the `-draft` suffix is stripped from `SPEC.md` ([`VERSIONING.md`](../VERSIONING.md)).
+This is the text the maintainers posted to the Episode of Record for ASTP 6.0.0, at Segment 18. The Episode is the cryptographic anchor of the amendment; `SPEC.md` is its human-readable result. When the Episode is sealed, its identifier and `episode_root_hash` are recorded here, in the `SPEC.md` header and in `CHANGELOG.md`; the draft is folded into `SPEC.md` and retained under `docs/history/`, and the `-draft` suffix is stripped from `SPEC.md` ([`VERSIONING.md`](../VERSIONING.md)).
 
 ## The through-line
 
@@ -26,7 +26,7 @@ The amendment adds one thing and states one thing.
 
 ## What is ratified
 
-The text of [`docs/SPEC-6.0.0-DRAFT-context-commitment.md`](./SPEC-6.0.0-DRAFT-context-commitment.md) at the commit this Episode's opening Segment cites, as proposed text for `SPEC.md`, comprising:
+The text of [`docs/history/SPEC-6.0.0-DRAFT-context-commitment.md`](./history/SPEC-6.0.0-DRAFT-context-commitment.md) at the commit the Episode cites (`4ec1de1`, Segments 15 and 20), as proposed text for `SPEC.md`, comprising:
 
 1. **The context entry** (`ContextEntryNode`, §4.8): one node type, `entry_type` discriminating `attachment`, `retrieval`, `external` and `tool_output`; *provided* means the content entered the context window of an agent whose reasoning is recorded as Segments in this Episode; the claim is "what the agent was given," never "what it relied on."
 2. **The entry hash** (`CONTEXT_ENTRY:v1:`, §6.1) binding the entry's identity, type, recipient, time, the spine position it preceded, capture state, content commitment, which construction made it, verifiability at seal, media type, source version and the entry it resolves. Provenance and content-plane fields — `source_ref`, `content_ref`, `salt_ref`, `erasure_state` — are outside the preimage and outside every root.
@@ -42,7 +42,7 @@ The text of [`docs/SPEC-6.0.0-DRAFT-context-commitment.md`](./SPEC-6.0.0-DRAFT-c
 12. **Verification** (§10): §9.3 extends to the sixth field with no out-of-band state; the conformance requirements CM-01 … CM-10 (§13), including **CM-09**, *safe only together* — an implementation claiming 6.0.0 context commitment without G-42 is non-conformant — and **CM-10**, a version 2 seal of an Episode holding context entries still reproduces under version 2.
 13. **The retained constructions**: `hash_version` 1 and 2, `spine_algorithm_version` 0, 1 and 2, exactly as 5.2.0 defines them. Nothing sealed under them becomes unverifiable, and nothing sealed under them is rewritten.
 
-The reference vectors, [`vectors/6.0.0/context-commitment.json`](../vectors/6.0.0/context-commitment.json), are part of what is ratified: every value in them is reproduced by a from-prose implementation that imports nothing from the reference package, as the 5.0.0 vectors were.
+The reference vectors, [`vectors/6.0.0/context-commitment.json`](../vectors/6.0.0/context-commitment.json) (`vectors/6.0.0-draft/` at the cited commit), are part of what is ratified: every value in them is reproduced by a from-prose implementation that imports nothing from the reference package, as the 5.0.0 vectors were.
 
 ## Record-notes
 
@@ -62,10 +62,10 @@ The design Episode's spec retrieval served the pre-5.0.0 text for part of its co
 
 | | |
 |---|---|
-| Episode identifier | *(recorded after the seal)* ("6.0.0 Episode of Record") |
-| Draft commit ratified | *(recorded after the seal)* — `docs/SPEC-6.0.0-DRAFT-context-commitment.md` SHA3-256 *(digest)* (git blob *(id)*, *(bytes)* bytes, carrying `**Version:** 6.0.0-draft.2` by design); `vectors/6.0.0/context-commitment.json` SHA3-256 *(digest)*. The content digest is the binding citation; the commit is the navigable pointer. |
-| Sealed under | *(recorded after the seal)* — the reference deployment's adapter seals under the version it can currently emit; the amendment that defines version 3 is expected to be sealed under an earlier version, and that is coherent: what a specification ratifies and what the sealing deployment can currently emit are two different clocks. |
-| `episode_root_hash` | *(recorded after the seal)* |
-| Sealed at | *(recorded after the seal)* |
+| Episode identifier | `80e5a2dd-3d9f-45d0-abfb-6489c8caf1b8` ("6.0.0 Episode of Record") |
+| Draft commit ratified | `4ec1de187f66521d07344e742a24bfe4fa5dae10` — `docs/SPEC-6.0.0-DRAFT-context-commitment.md` SHA3-256 `2d96f27949715118a3c9b6a2a431ff6df009de37bf8c9d2a39907cd6d9c5647c` (git blob `523fe81903adfc8ae5f4364d7673ec64d7b92aff`, 40,274 bytes, carrying `**Version:** 6.0.0-draft.2` by design); `vectors/6.0.0-draft/context-commitment.json` SHA3-256 `f493080713fc1de58ae11e5c4891e524ba98c70510a93f3eb045eeeb1ba4e3ae` (git blob `3f1c1985b8640a664973c6d45412ec945e46ebf4`, 16,967 bytes). The content digest is the binding citation; the commit is the navigable pointer. |
+| Sealed under | `spine_algorithm_version` 2, `ordering_version` 2 — the reference deployment's adapter seals under the version it can currently emit; the amendment that defines version 3 is itself sealed under version 2, and that is coherent: what a specification ratifies and what the sealing deployment can currently emit are two different clocks. |
+| `episode_root_hash` | `45cd50c5d34c6d1ec49fa9a6fd7989036e2d91d624f66e9eb8e93c9904f27d3e` |
+| Sealed at | `2026-09-22T22:18:46.261957+00:00` (closed `2026-09-22T22:18:46.261957+00:00`); 21 Segments; verified by the reference deployment's verifier and by the exported proof of record [`docs/proofs/episode-of-record-6.0.0.80e5a2dd.full.json`](./proofs/episode-of-record-6.0.0.80e5a2dd.full.json) |
 
-The Episode identifier, cited commit, content digests, `episode_root_hash` and `sealed_at` recorded in this file are written after the seal, drawn from the seal. The Episode is the anchor; this file trails it. A verifier reconciling the two reads the Episode as authoritative and this file as its human-readable result: the opening Segment carries this text with its placeholders unresolved and the `-draft` digest, and the released file differs from it in exactly those cells and the suffix, and in nothing normative.
+The Episode identifier, cited commit, content digests, `episode_root_hash` and `sealed_at` recorded in this file were written after the seal, drawn from the seal. The Episode is the anchor; this file trails it. A verifier reconciling the two reads the Episode as authoritative and this file as its human-readable result. Segment 18 carries this text through item 13 of "What is ratified" — the paste that produced it was cut there — and codicil `9bcc9240-4221-4ab6-a63c-3172e65815fe` (`CODICIL_APPEND`, §12.4.1, appended 2026-09-22T22:59:15Z) carries the remainder verbatim with the two content digests; between them the sealed record and this file differ in exactly the record-table cells, the header status and the file paths that moved at release, and in nothing normative. The opening Segment (1) is the maintainers' summary; Segment 16 is a working enumeration by the Clotho faculty that Segment 20 records as superseded by this text wherever they differ. The retained draft under `docs/history/` carries a provenance banner; the ratified bytes are the blob at the cited commit.

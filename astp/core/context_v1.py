@@ -12,20 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Context-commitment constructions for the SPEC 6.0.0 draft
-(``docs/SPEC-6.0.0-DRAFT-context-commitment.md``, draft.2; design Episode
-ec31d0c0-50eb-4a2a-9f95-32536c9e645e). **Draft: not ratified, not normative.**
-Nothing here applies to any existing seal; every construction is new and
-versioned, and seals made under ``spine_algorithm_version`` 0, 1 and 2 stay
-defined by ``astp.core.schema`` and ``astp.core.seal_v2``.
+Context-commitment constructions for SPEC 6.0.0 (§4.8, §4.9, §5.7.3, §5.7,
+§5.8, G-41 … G-43), ratified in Episode of Record 80e5a2dd-3d9f-45d0-abfb-6489c8caf1b8
+(design Episode ec31d0c0-50eb-4a2a-9f95-32536c9e645e; the amendment text is
+retained at ``docs/history/SPEC-6.0.0-DRAFT-context-commitment.md``).
+Every construction is new and versioned; seals made under
+``spine_algorithm_version`` 0, 1 and 2 stay defined by ``astp.core.schema`` and
+``astp.core.seal_v2`` and stay reproducible.
 
-What the amendment adds (draft §0):
+What 6.0.0 adds:
 
 * **A context entry** (§4.8): one stored node per provision of external content
   to one agent — an attachment, a retrieval, an external fetch, a Layer 3 tool
   result — or per attempted provision whose content was not captured. Kind is a
   property (``entry_type``), not a node type.
-* **A content commitment with two constructions and one sealed bit** (§5.3):
+* **A content commitment with two constructions and one sealed bit** (§4.8.3):
   plain, or salted with a per-entry CSPRNG salt kept in a namespace separate
   from the content. ``salted`` is in the entry preimage; the salt's pointer is
   not, so erasure can destroy the salt without moving a sealed preimage.
@@ -33,11 +34,11 @@ What the amendment adds (draft §0):
   in ascending bytewise order — a function of the *set*, so membership binds and
   insertion order does not, and one entry can be proven present without the
   others — bound with the Episode's sealed ``capture_posture`` (G-41).
-* **Episode root version 3** (§7): the version 2 root with
+* **Episode root version 3** (§5.7): the version 2 root with
   ``context_manifest_hash`` appended as its sixth field, selected by
   ``spine_algorithm_version`` 3 in the single §5.8 identifier. The spine root
   under 3 is byte-identical to 2; nothing is re-sealed.
-* **Content-plane erasure** (G-43, §8): destroy content and salt atomically,
+* **Content-plane erasure** (G-43, §4.9): destroy content and salt atomically,
   append an ``ErasureTombstone`` as a §12.4.1 codicil, null the pointers, touch
   nothing else. The Episode root verifies identically before and after.
 
@@ -55,10 +56,10 @@ from astp.protocol.merkle import InclusionProofV2, compute_merkle_root_v2, gener
 from astp.core.seal_v2 import (SegmentSealInput, compute_episode_seal_v2, compute_exclusion_hash_v2,
                                compute_signal_manifest_hash_v2, compute_structural_manifest_hash)
 
-SPINE_ALGORITHM_VERSION_3 = 3      # draft §7: selects the entire seal construction, Episode root version 3 included
+SPINE_ALGORITHM_VERSION_3 = 3      # SPEC §5.8: selects the entire seal construction, Episode root version 3 included
 EPISODE_ROOT_VERSION_3 = 3
 
-# ── domain prefix registry (draft §7: §5.1.3 gains these; none is a prefix of another) ──
+# ── domain prefix registry (SPEC §5.1.3, 6.0.0; none is a prefix of another) ──
 CONTEXT_ENTRY_V1 = b"CONTEXT_ENTRY:v1:"
 CONTEXT_CONTENT_V1 = b"CONTEXT_CONTENT:v1:"
 CONTEXT_CONTENT_SALTED_V1 = b"CONTEXT_CONTENT_SALTED:v1:"
@@ -66,16 +67,16 @@ CONTEXT_MANIFEST_V1 = b"CONTEXT_MANIFEST:v1:"
 EPISODE_ROOT_V3 = b"EPISODE_ROOT:v3:"
 ERASURE_TOMBSTONE_V1 = b"ERASURE_TOMBSTONE:v1:"
 
-# ── enumerations (draft §4.8, §6.3, §8) ─────────────────────────────────────────
+# ── enumerations (SPEC §4.8, §5.7.3, §4.9) ─────────────────────────────────────────
 ENTRY_TYPES = frozenset({"attachment", "retrieval", "external", "tool_output"})
 CAPTURE_STATES = frozenset({"captured", "declared_incomplete"})
 VERIFIABILITY_STATES = frozenset({"verifiable", "attested"})
 CAPTURE_POSTURES = frozenset({"all_external", "declared_only", "none"})
 ERASURE_STATES = frozenset({"present", "tombstoned"})
-SALT_LENGTH = 32                   # draft §5.3: 32 bytes from a CSPRNG at write time
+SALT_LENGTH = 32                   # SPEC §4.8.3: 32 bytes from a CSPRNG at write time
 
-# The implementation-side classification that selects the construction (draft
-# §8.1). The protocol names the value that MUST be salted and nothing else.
+# The implementation-side classification that selects the construction (SPEC
+# §4.9.1). The protocol names the value that MUST be salted and nothing else.
 PII_LOW_ENTROPY = "low_entropy_personal"
 
 
@@ -94,7 +95,7 @@ class G43Violation(ValueError):
     different states."""
 
 
-# ── content commitment (draft §5.3) ─────────────────────────────────────────────
+# ── content commitment (§4.8.3) ─────────────────────────────────────────────
 
 def compute_context_content_hash_v1(content: bytes, salt: Optional[bytes] = None) -> str:
     """``CONTEXT_CONTENT:v1:`` over the bytes as provided, or
@@ -107,11 +108,11 @@ def compute_context_content_hash_v1(content: bytes, salt: Optional[bytes] = None
     return hash_fields(CONTEXT_CONTENT_SALTED_V1, [(BYTES, bytes(salt)), (BYTES, bytes(content))])
 
 
-# ── the entry and its hash (draft §4.8, §6.1) ───────────────────────────────────
+# ── the entry and its hash (§4.8, §5.7.3) ───────────────────────────────────
 
 class ContextEntryNode(BaseModel):
     """One provision of external content to one agent — or one attempted
-    provision whose content was not captured (draft §4.8).
+    provision whose content was not captured (§4.8).
 
     The fields above the side-channel line are the entry's claims and are in
     its preimage (§6.1). ``source_ref``, ``content_ref``, ``salt_ref`` and
@@ -133,9 +134,9 @@ class ContextEntryNode(BaseModel):
     media_type: Optional[str] = None
     source_version_hash: Optional[str] = None
     resolves: Optional[UUID] = None
-    schema_version: str = "6.0.0-draft"
+    schema_version: str = "6.0.0"
 
-    # provenance and content plane — outside the preimage; draft §5.6
+    # provenance and content plane — outside the preimage; §4.8.6
     source_ref: Optional[str] = None
     content_ref: Optional[str] = None
     salt_ref: Optional[str] = None
@@ -149,7 +150,7 @@ def compute_context_entry_hash_v1(
     verifiability_at_seal: Optional[str], media_type: Optional[str], source_version_hash: Optional[str],
     resolves_entry_hash: Optional[str],
 ) -> str:
-    """Draft §6.1. Every field is recomputable from the stored node alone;
+    """SPEC §5.7.3. Every field is recomputable from the stored node alone;
     ``resolves_entry_hash`` is the entry hash of the entry named by ``resolves``,
     or NULL. A declared-incomplete entry carries NULL content, ``salted`` false,
     NULL verifiability."""
@@ -203,7 +204,7 @@ def context_entry_hashes(entries: Iterable[ContextEntryNode]) -> List[str]:
     return out
 
 
-# ── the manifest (draft §6.2, §6.3) ─────────────────────────────────────────────
+# ── the manifest (§5.7.3) ─────────────────────────────────────────────
 
 def sort_entry_hashes(entry_hashes: Iterable[str]) -> List[str]:
     """Canonical leaf order: ascending bytewise over the raw 32-byte values."""
@@ -230,7 +231,7 @@ def compute_context_manifest_hash_v1(capture_posture: str, entry_hashes: Iterabl
     return hash_fields(CONTEXT_MANIFEST_V1, [(STRING, capture_posture), (UINT, len(hashes)), (HASH, root)])
 
 
-# ── inclusion proofs over the manifest (draft §10) ──────────────────────────────
+# ── inclusion proofs over the manifest (§9.2) ──────────────────────────────
 
 class ContextInclusionProofV1(BaseModel):
     """The §9.2 proof over the context tree. ``leaf_index`` is the entry's
@@ -265,7 +266,7 @@ def verify_context_inclusion_proof_v1(proof: ContextInclusionProofV1, capture_po
     return want == context_manifest_hash
 
 
-# ── Episode root version 3 (draft §7) ───────────────────────────────────────────
+# ── Episode root version 3 (§5.7) ───────────────────────────────────────────
 
 def compute_episode_root_hash_v3(episode_id: UUID, spine_root: str, signal_manifest_hash: str,
                                  structural_manifest_hash: str, exclusion_hash: str, context_manifest_hash: str) -> str:
@@ -279,7 +280,7 @@ def compute_episode_root_hash_v3(episode_id: UUID, spine_root: str, signal_manif
 class SealV3(BaseModel):
     """A version 3 seal and the identifiers that name its construction. The
     first five roots are exactly what a version 2 seal of the same Episode
-    would carry (draft §7; CM-10)."""
+    would carry (§5.7; CM-010)."""
     episode_id: UUID
     spine_root: str
     signal_manifest_hash: str
@@ -350,7 +351,7 @@ def reproduce_episode_root_v3(*, episode_id: UUID, spine_root: str, signal_conte
         compute_context_manifest_hash_v1(capture_posture, context_entry_hashes))
 
 
-# ── erasure (draft §8.2, §8.3; G-43) ────────────────────────────────────────────
+# ── erasure (§4.9.2, §4.9.3; G-43) ────────────────────────────────────────────
 
 class ErasureTombstone(BaseModel):
     """The content of a ``CodicilNode`` appended by ``CODICIL_APPEND`` to witness

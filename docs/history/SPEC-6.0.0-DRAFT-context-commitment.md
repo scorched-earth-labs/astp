@@ -1,3 +1,5 @@
+> **HISTORICAL — retained for provenance.** This is the amendment draft (draft.2) ratified in Episode of Record `80e5a2dd-3d9f-45d0-abfb-6489c8caf1b8` at commit `4ec1de1` (SHA3-256 `2d96f27949715118a3c9b6a2a431ff6df009de37bf8c9d2a39907cd6d9c5647c` of the file as it stood there, before this banner) and folded into [`SPEC.md`](../../SPEC.md) 6.0.0 after the seal ([`RATIFICATION-6.0.0.md`](../RATIFICATION-6.0.0.md)). Do not implement from this document.
+
 # ASTP 6.0.0 — Context Commitment (Draft)
 
 **Version:** 6.0.0-draft.2

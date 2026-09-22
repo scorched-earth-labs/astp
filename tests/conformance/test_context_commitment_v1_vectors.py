@@ -12,12 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-SPEC 6.0.0 draft context-commitment constructions, checked against
-``vectors/6.0.0-draft/``. **Draft: not ratified.**
+SPEC 6.0.0 context-commitment constructions, checked against ``vectors/6.0.0/``.
 
 Two checks per value. The library must produce it — and so must the few lines
-of ``hashlib`` below, written from the draft text alone, which import nothing
-from ``astp``. Each CM-nn of the draft's §13 conformance sketch is one test.
+of ``hashlib`` below, written from the SPEC text alone, which import nothing
+from ``astp``. Each CM-nnn of CONFORMANCE-CONTEXT.md is one test.
 """
 
 import hashlib
@@ -34,7 +33,7 @@ from astp.core import seal_v2
 from astp.core.seal_v2 import SegmentSealInput, reproduce_episode_root
 
 ROOT = Path(__file__).resolve().parents[2]
-VECTORS = json.loads((ROOT / "vectors" / "6.0.0-draft" / "context-commitment.json").read_text(encoding="utf-8"))
+VECTORS = json.loads((ROOT / "vectors" / "6.0.0" / "context-commitment.json").read_text(encoding="utf-8"))
 BASE50 = json.loads((ROOT / "vectors" / "5.0.0" / "seal-constructions.json").read_text(encoding="utf-8"))
 B = VECTORS["base_episode"]
 EPISODE = UUID(B["episode_id"])
@@ -43,7 +42,7 @@ HASHES = [e["entry_hash"] for e in ENTRIES]
 POSTURE = "declared_only"
 
 
-# ── an independent implementation, from the draft text ────────────────────────
+# ── an independent implementation, from the SPEC text ────────────────────────
 
 def _sha3(b: bytes) -> bytes:
     return hashlib.sha3_256(b).digest()
@@ -392,9 +391,9 @@ def test_g41_posture_is_required_and_an_undeclared_gap_blocks_the_seal():
 def test_vector_file_is_current():
     import subprocess, sys
 
-    gen = ROOT / "vectors" / "6.0.0-draft" / "generate.py"
-    assert subprocess.run([sys.executable, str(gen), "--check"]).returncode == 0, "run vectors/6.0.0-draft/generate.py"
+    gen = ROOT / "vectors" / "6.0.0" / "generate.py"
+    assert subprocess.run([sys.executable, str(gen), "--check"]).returncode == 0, "run vectors/6.0.0/generate.py"
 
 
-def test_status_says_draft():
-    assert VECTORS["status"].startswith("DRAFT")
+def test_status_says_ratified():
+    assert VECTORS["status"].startswith("Ratified with SPEC 6.0.0")

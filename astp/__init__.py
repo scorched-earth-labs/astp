@@ -29,7 +29,7 @@ Packages:
     astp.adapters.memory     — reference implementation (both contracts, in memory)
 """
 
-__version__ = "1.1.0"
+__version__ = "2.0.0"
 
 # The SPEC.md version this package implements.
-PROTOCOL_VERSION = "5.2.0"
+PROTOCOL_VERSION = "6.0.0"

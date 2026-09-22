@@ -64,6 +64,7 @@ class WILOperation(str, Enum):
     EPISODE_CLOSE = "EPISODE_CLOSE"                  # Episode sealed (closure)
     CODICIL_APPEND = "CODICIL_APPEND"                # Codicil added to sealed episode
     ATTACHMENT_COMMIT = "ATTACHMENT_COMMIT"          # External content injected (§4.7)
+    CONTEXT_COMMIT = "CONTEXT_COMMIT"                # Context entry written — content provided to an agent (§4.8, 6.0.0)
     CONSULTATION_COMMIT = "CONSULTATION_COMMIT"      # Cross-agent exchange (G-8, G-9)
     # Branch / Fork / Merge lifecycle (SPEC §19).
     #

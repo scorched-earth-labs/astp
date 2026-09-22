@@ -11,13 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Regenerate context-commitment.json from the 6.0.0 draft reference constructions.
+"""Regenerate context-commitment.json from the 6.0.0 reference constructions.
 
-    python vectors/6.0.0-draft/generate.py            # rewrite the file
-    python vectors/6.0.0-draft/generate.py --check    # exit 1 if the file is stale
+    python vectors/6.0.0/generate.py            # rewrite the file
+    python vectors/6.0.0/generate.py --check    # exit 1 if the file is stale
 
 The JSON is the artifact: a second implementation needs it and the draft text,
 not this script. The script exists so the file is never edited by hand.
+The values were generated while 6.0.0 was a draft and are unchanged by ratification.
 
 The Episode is the one the ratified 5.0.0 vectors seal (same identifier,
 Segments, Signals and structural members), so the version 2 roots here are
@@ -146,8 +147,7 @@ def build() -> dict:
 
     sorted_order = X.sort_entry_hashes(hashes)
     return {
-        "status": "DRAFT — generated from docs/SPEC-6.0.0-DRAFT-context-commitment.md draft.2. Not ratified, not normative. "
-                  "On ratification this file moves to vectors/6.0.0/ and every value stays as it is here.",
+        "status": "Ratified with SPEC 6.0.0 (Episode of Record 80e5a2dd-3d9f-45d0-abfb-6489c8caf1b8). Every value is fixed: a construction never changes in place, so a different value is a new versioned construction.",
         "hash": "SHA3-256 (FIPS 202). Hash values are lowercase hex here; they enter every construction as 32 raw bytes.",
         "note_on_identifiers": "entry_id, tombstone_id and the base Episode's node_id values are fixed so the vectors are reproducible. Real identifiers MUST be random.",
         "note_on_salts": "The salt below is fixed so the salted commitment is reproducible. A real salt MUST be 32 bytes from a CSPRNG, stored in a namespace separate from the content, and destroyed with it (draft §5.3, §8.2).",
