@@ -1,6 +1,6 @@
 # ASTP 6.0.0 — Context Commitment (Draft)
 
-**Version:** 6.0.0-draft.1
+**Version:** 6.0.0-draft.2
 **Status:** Draft for review — **not ratified, not normative.** Nothing here applies to any existing seal. A MAJOR change under [`VERSIONING.md`](../VERSIONING.md): it needs an Episode of Record before it is folded into `SPEC.md`.
 **Authors:** Scorched Earth Labs — rulings by Clotho with Devin, structure by Daedalus, in design Episode `ec31d0c0-50eb-4a2a-9f95-32536c9e645e` ("Attachments, RAG, External Websites and Privacy/RTD", 2026-09-22); the erasure question descends from Episode `531a045b-a945-4aa2-8648-edf618067a11` ("Ariadne and Data Privacy, Right to Delete", 2026-03-30).
 **Date:** 2026-09-22
@@ -27,11 +27,11 @@ The amendment adds one thing and states one thing.
 
 ## 1. Re-basing notes — what the design Episode saw, and what changed
 
-The Episode's spec retrieval served the pre-5.0.0 text: a three-component Episode root under `NODE:`, `SIGNAL_MANIFEST:v1:` joined by `|`, `hash_version 1 (default)`, `spine_algorithm_version 0 · 1`. Every ruling below is preserved in substance; where 5.0.0–5.2.0 already changed the ground the ruling stood on, the draft says so here and marks the item **REQUIRES RE-RULING** where the Episode's decision and the ratified text conflict. Clotho's corpus has since been re-indexed at main.
+The Episode's spec retrieval served the pre-5.0.0 text: a three-component Episode root under `NODE:`, `SIGNAL_MANIFEST:v1:` joined by `|`, `hash_version 1 (default)`, `spine_algorithm_version 0 · 1`. Every ruling below is preserved in substance; where 5.0.0–5.2.0 already changed the ground the ruling stood on, the draft says so here and marks the item **REQUIRES RE-RULING** where the Episode's decision and the ratified text conflict. Clotho's corpus has since been re-indexed at main, and the one conflicting item (R1) was re-ruled in the same Episode at segment 57 (draft.2). R4 still awaits confirmation.
 
 | # | Episode ruling | 5.2.0 ground | Disposition |
 |---|---|---|---|
-| R1 | A **standalone third §5.8 axis**, `root_composition_version` (1 = three-component root, 2 = four-component), because "neither existing axis governs root composition" (segments 26–28). | 5.0.0 §5.8 rules the opposite: *"`spine_algorithm_version` 2 selects the entire seal construction … There is deliberately no separate identifier for the Episode root: a second identifier would make an invalid combination representable, and one identifier makes it unrepresentable. Read the name as seal construction version."* The Episode's premise — that a spine-only identifier would misdescribe a root-only change — was true of the 4.x text and is not true of 5.0.0's. | **REQUIRES RE-RULING.** This draft uses **`spine_algorithm_version` 3** (§7): same spine as 2, Episode root version 3. Every property the Episode wanted from a separate axis holds — the spine root is byte-identical, old seals reproduce forever, the identifier is outside every preimage. What the separate axis would add is exactly the representable-invalid-combination 5.0.0 removed. If the standalone axis is re-affirmed, §7 becomes a `root_composition_version` row and the invalid-combination rule of §5.8 must be amended to admit it. |
+| R1 | A **standalone third §5.8 axis**, `root_composition_version` (1 = three-component root, 2 = four-component), because "neither existing axis governs root composition" (segments 26–28). | 5.0.0 §5.8 rules the opposite: *"`spine_algorithm_version` 2 selects the entire seal construction … There is deliberately no separate identifier for the Episode root: a second identifier would make an invalid combination representable, and one identifier makes it unrepresentable. Read the name as seal construction version."* The Episode's premise — that a spine-only identifier would misdescribe a root-only change — was true of the 4.x text and is not true of 5.0.0's. | **RE-RULED (Episode `ec31d0c0`, segment 57, 2026-09-22): the standalone axis is rescinded in full, and the context manifest is carried by `spine_algorithm_version` 3 as the sixth root field under `EPISODE_ROOT:v3:`.** Clotho, re-reading ratified §5.7/§5.8: a standalone `root_composition_version` "is precisely the second identifier §5.8 forbids"; version 3 gives the hard version gate, the unrepresentable invalid combination and no retroactive re-seal, so the change is a re-basing, not a re-design. §7 is as written; nothing else in the draft moves. |
 | R2 | The context manifest is the **fourth** root component beside spine, signal manifest and exclusion set. | Since 5.0.0 the root already has four components: the **structural manifest** (§5.7.1) is the fourth. | Carried as the **fifth component / sixth field** of `EPISODE_ROOT:v3:` (§7). No ruling changes. |
 | R3 | Preimages written as `SHA3-256(b"ASTP_MANIFEST_ENTRY_V1:" + type.to_bytes(1) + id.bytes + …)` and `"ASTP_ATTACHMENT_V1:" + bytes`. | 5.0.0 §5.1.1 fixes one canonical field encoding for every construction and §5.1.3 one registered prefix per construction and version, of the form `NAME:vN:`. | Rewritten in 5.0.0 form (§5, §6). Same fields, same claims; different byte form. Not a re-ruling. |
 | R4 | Attachments: Devin chose the standalone axis *"for now; we'll tackle the attachments when we get to it"* (seg. 27), which the Episode records as a live fork; the final artifact (seg. 51) then includes `AttachmentNode` as a manifest entry (its §4) as if the fork were closed. | — | **CONFIRM.** This draft includes attachments as an entry type (§4.8). It is the natural reading of the artifact and of Finding 1 as summarised at seg. 49; the Episode never recorded the closing of the fork it opened. |
@@ -226,7 +226,7 @@ The first five fields are the version 2 construction unchanged; the spine root o
 | `0` · `1` · `2` | as ratified | | | |
 | `3` | `hash_version` 2 leaf hash, `sequence_index` order | raw bytes | none | **version 3** (§5.7, with §5.7.3) |
 
-*(R1: if the standalone `root_composition_version` axis is re-affirmed, this section becomes that axis's definition and §5.8's invalid-combination rule is amended to admit two identifiers.)*
+*(R1 re-ruled in-Episode, segment 57: `spine_algorithm_version` 3, no standalone axis. §1.)*
 
 **§5.1.3 gains** `CONTEXT_ENTRY:v1:` · `CONTEXT_CONTENT:v1:` · `CONTEXT_CONTENT_SALTED:v1:` · `CONTEXT_MANIFEST:v1:` · `EPISODE_ROOT:v3:` · `ERASURE_TOMBSTONE:v1:`. None is a prefix of another or of an existing one.
 
@@ -348,4 +348,4 @@ Vectors go in `vectors/6.0.0/context-commitment.json`, generated, never hand-wri
 
 ---
 
-*ASTP 6.0.0 — Context Commitment, draft.1. The seal proves history, not retention.*
+*ASTP 6.0.0 — Context Commitment, draft.2. The seal proves history, not retention.*
