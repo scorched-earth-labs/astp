@@ -328,7 +328,7 @@ The same discipline applies to a Segment: its content lives behind `content_ref`
 | CM-09 | REQUIRED | *Safe only together*: an implementation whose `ConformanceDeclaration` claims 6.0.0 context commitment and does not implement G-42 is non-conformant. |
 | CM-10 | REQUIRED | A version 2 seal of an Episode that has context entries reproduces under version 2 (the entries are not members of a version 2 root). |
 
-Vectors go in `vectors/6.0.0/context-commitment.json`, generated, never hand-written.
+Vectors go in `vectors/6.0.0/context-commitment.json`, generated, never hand-written. *(While this is a draft they live at `vectors/6.0.0-draft/context-commitment.json` with `CONFORMANCE-CONTEXT.md`, generated over the ratified 5.0.0 Episode; on ratification the directory is renamed and no value changes.)*
 
 ---
 

@@ -330,13 +330,17 @@ def reproduce_episode_root(
     signal_content_hashes: Iterable[str],
     excluded_content_hashes: Iterable[str],
     structural_member_hashes: Iterable[str] = (),
+    capture_posture: Optional[str] = None,
+    context_entry_hashes: Iterable[str] = (),
 ) -> str:
     """Recompute a sealed Episode root under the construction its
     ``spine_algorithm_version`` names (SPEC §5.7, §5.7.2, §9.3), given a spine
     root already reproduced for that version (``astp.core.schema.reproduce_spine_root``
-    for 0 and 1, :func:`compute_spine_root_sav2` for 2). Version 2 binds the
+    for 0 and 1, :func:`compute_spine_root_sav2` for 2 and 3). Version 2 binds the
     Episode's UUID and the structural manifest; versions 0 and 1 bind neither.
-    Unknown versions are refused."""
+    Version 3 (the 6.0.0 draft, ``astp.core.context_v1``) adds the context
+    manifest and needs ``capture_posture`` and the entry hashes. Unknown
+    versions are refused."""
     if spine_algorithm_version in (0, 1):
         from astp.core.schema import compute_episode_root_hash, compute_exclusion_hash, compute_signal_manifest_hash
         return compute_episode_root_hash(spine_root, compute_signal_manifest_hash(list(signal_content_hashes)),
@@ -346,4 +350,13 @@ def reproduce_episode_root(
             episode_id if isinstance(episode_id, UUID) else UUID(str(episode_id)), spine_root,
             compute_signal_manifest_hash_v2(signal_content_hashes), compute_structural_manifest_hash(structural_member_hashes),
             compute_exclusion_hash_v2(excluded_content_hashes))
+    if spine_algorithm_version == 3:
+        from astp.core.context_v1 import reproduce_episode_root_v3   # draft 6.0.0; not ratified
+        if capture_posture is None:
+            raise ValueError("a version 3 root binds the capture posture: capture_posture is required")
+        return reproduce_episode_root_v3(
+            episode_id=episode_id if isinstance(episode_id, UUID) else UUID(str(episode_id)), spine_root=spine_root,
+            signal_content_hashes=signal_content_hashes, excluded_content_hashes=excluded_content_hashes,
+            structural_member_hashes=structural_member_hashes, capture_posture=capture_posture,
+            context_entry_hashes=context_entry_hashes)
     raise ValueError(f"unknown spine_algorithm_version {spine_algorithm_version!r}")
