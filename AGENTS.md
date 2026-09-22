@@ -31,7 +31,8 @@ The suite needs no database and no network: the operations run against `astp.ada
 astp/protocol/   Node-generic layer. Operates on CognitiveNode only.
 astp/nodes/      Node-type instantiation (episode/, segment/). Each defines its NodePayload.
 astp/core/       Episode-era schema, governance, WIL, branching, grouping,
-                 cross-episode linking, workflow_execution (Layer 3).
+                 cross-episode linking, workflow_execution (Layer 3), seal_v2
+                 (5.0.0 seal constructions), context_v1 (6.0.0 context commitment).
 astp/adapters/   ASTPAdapter + StructuralStore contracts; InMemoryStore implements both.
 ```
 
