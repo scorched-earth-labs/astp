@@ -113,8 +113,8 @@ A plain-hashed entry's `content_hash` remains exactly as reversible as it always
 | Retrieval tools | Not yet. |
 | Web fetch | Not yet. |
 | Layer 3 `tool_output` | Not yet. |
-| Spine position (§4.8.2) | Filled at seal time from the recipient's first later Segment (`backfill_provided_before_positions_sync`); the seal-input reader (`fetch_seal_inputs_v2`) returns the posture and the entries and says whether a version 3 seal is possible (`sealable_under_v3`). |
-| **Sealing under version 3** | **Not yet.** The crystallize handler still seals under version 2; a version 2 seal of an Episode with entries reproduces unchanged (CM-010). The cutover is the next step: backfill positions, then `compute_episode_seal_v3` from the same reader, and the verifier and exporter learn version 3. |
+| Spine position (§4.8.2) | Filled at seal time, before the read, from the recipient's first later Segment (`backfill_provided_before_positions`); the seal-input reader (`fetch_seal_inputs_v2`) returns the posture and the entries, hashes them, and says whether a version 3 seal is possible (`sealable_under_v3`). |
+| **Sealing under version 3** | **Live (2026-09-23).** The crystallize handler fills entry positions (§4.8.2), reads posture and entries through the same reader the verifier uses, and seals under version 3 when the reader says it can — otherwise version 2, with the refusals logged. The verifier reproduces version 3 seals (`seal_v3`); the exporter carries the sixth field. Unsealed Episodes that predate the seam were given `declared_only`. First sealed context manifest: Episode `29c9ec3b-f020-49e4-830c-991bdf2d0217`, one attachment entry, proof reproduced by the package alone. |
 | Salt namespace, erasure | Not yet. The store half exists (`erase_context_entry` through `Neo4jStructuralStore` hangs the tombstone codicil off the entry, verified live); no content plane destroys a pair yet, and no attachment entry is salted. |
 
-The remaining order: version 3 cutover (so the first sealed manifests exist), then the retrieval and web-fetch seams, then Layer 3, then `all_external`, then the salt namespace and the erasure path.
+The remaining order: the retrieval and web-fetch seams, then Layer 3, then `all_external`, then the salt namespace and the erasure path.
