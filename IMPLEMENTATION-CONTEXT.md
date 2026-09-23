@@ -107,4 +107,14 @@ A plain-hashed entry's `content_hash` remains exactly as reversible as it always
 
 ## 7. The reference deployment (Ignis OS) — status
 
-The seams at which the reference deployment provides content to an agent are known: attachment injection into a prompt, the retrieval tools (beside their §11.1 audit), the web-fetch tool, and `tool_output` from Layer 3 `SkillInvocation` results. **As of 2.1.0 none of them writes a context entry**, no Episode is sealed under version 3, and no salt namespace or erasure path exists in the deployment. The intended order: attachment injection first (its shape was ruled in the design Episode), then retrieval, then web fetch, then Layer 3; posture `declared_only` until all four write, then `all_external`; the crystallize handler cuts over to version 3 once entries flow; the salt namespace and erasure last, since there is nothing to erase until a manifest exists. This section is updated as each lands.
+| Seam / step | Status (2026-09-22) |
+|---|---|
+| **Attachment injection** — a document's text placed in an agent's prompt | **Writing entries.** `ignis.ariadne.context_provision` records one `attachment` entry per provided form per agent (elective under `declared_only`: the same form re-injected on later turns is not committed again); hashed over the text as provided; `verifiable` with `content_ref` naming the document node when the whole document was provided, `attested` when it was cut to the prompt budget — the cut is now visible in the record. Stored as `(:AstpContextEntry)` off the Episode, `PROVIDED_FROM` the document; `CONTEXT_COMMIT` ledgered. `Neo4jStructuralStore` implements the six contract methods; new Episodes carry `capture_posture = declared_only`. |
+| Retrieval tools | Not yet. |
+| Web fetch | Not yet. |
+| Layer 3 `tool_output` | Not yet. |
+| Spine position (§4.8.2) | Filled at seal time from the recipient's first later Segment (`backfill_provided_before_positions_sync`); the seal-input reader (`fetch_seal_inputs_v2`) returns the posture and the entries and says whether a version 3 seal is possible (`sealable_under_v3`). |
+| **Sealing under version 3** | **Not yet.** The crystallize handler still seals under version 2; a version 2 seal of an Episode with entries reproduces unchanged (CM-010). The cutover is the next step: backfill positions, then `compute_episode_seal_v3` from the same reader, and the verifier and exporter learn version 3. |
+| Salt namespace, erasure | Not yet. The store half exists (`erase_context_entry` through `Neo4jStructuralStore` hangs the tombstone codicil off the entry, verified live); no content plane destroys a pair yet, and no attachment entry is salted. |
+
+The remaining order: version 3 cutover (so the first sealed manifests exist), then the retrieval and web-fetch seams, then Layer 3, then `all_external`, then the salt namespace and the erasure path.
