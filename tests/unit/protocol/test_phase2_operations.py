@@ -24,6 +24,7 @@ against the in-memory reference store (``astp.adapters.memory.InMemoryStore``). 
   - fork siblings share fork_id; resolve promotes one, discards others
 """
 
+import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 from uuid import uuid4
@@ -47,6 +48,11 @@ def _make_store_with_episodes(eids: List[str]) -> InMemoryStore:
     s = InMemoryStore()
     for eid in eids:
         s.episodes[eid] = {"episode_id": eid, "episode_status": "ACTIVE", "spine_hash": f"spine-{eid[:8]}"}
+        # One spine leaf per Episode: merge roots are live spine roots (2.2.0),
+        # computed from Segments, not read from a stored spine hash.
+        sid = str(uuid4())
+        s.segments[sid] = {"segment_id": sid, "episode_id": eid, "sequence_index": 0,
+                           "content_hash": hashlib.sha3_256(eid.encode()).hexdigest(), "retention_tier": "PERSISTENT"}
     return s
 
 

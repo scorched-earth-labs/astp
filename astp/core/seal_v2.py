@@ -285,6 +285,25 @@ class SealV2(BaseModel):
     hash_version: int = 2
 
 
+def spine_leaf_hashes_v2(segments: Iterable["SegmentSealInput"]) -> List[str]:
+    """The ``hash_version`` 2 leaf hashes of ``segments`` (the non-ephemeral
+    Segments) in ``sequence_index`` order — the leaves of the version 2 spine.
+
+    One construction for every spine root: the seal's, and a live Episode's
+    (``live_spine_root``), so a snapshot taken before the seal is the root the
+    seal would compute over the same Segments. Refuses a duplicated
+    ``sequence_index`` (the leaf order would not be total); an empty input
+    gives an empty list."""
+    segs = sorted(segments, key=lambda s: s.sequence_index)
+    seen = set()
+    for s in segs:
+        if s.sequence_index in seen:
+            raise ValueError(f"duplicate sequence_index {s.sequence_index}: the leaf order is not total")
+        seen.add(s.sequence_index)
+    return [compute_leaf_hash_v2(s.node_id, s.node_type, s.schema_version, s.sequence_index, s.content_hash, s.parent_node_id)
+            for s in segs]
+
+
 def compute_episode_seal_v2(
     episode_id: UUID,
     segments: Iterable[SegmentSealInput],
@@ -301,16 +320,9 @@ def compute_episode_seal_v2(
     Segments', ``structural_member_hashes`` the ``:v2:`` member hashes of §5.7.1.
     Refuses an Episode with no spine leaf (the root of an empty list is
     undefined) and a duplicated ``sequence_index``."""
-    segs = sorted(segments, key=lambda s: s.sequence_index)
-    if not segs:
+    leaves = spine_leaf_hashes_v2(segments)
+    if not leaves:
         raise ValueError("an Episode with no non-ephemeral Segment has no spine root and cannot be sealed")
-    seen = set()
-    for s in segs:
-        if s.sequence_index in seen:
-            raise ValueError(f"duplicate sequence_index {s.sequence_index}: the leaf order is not total")
-        seen.add(s.sequence_index)
-    leaves = [compute_leaf_hash_v2(s.node_id, s.node_type, s.schema_version, s.sequence_index, s.content_hash, s.parent_node_id)
-              for s in segs]
     spine_root = compute_spine_root_sav2(leaves)
     sig = compute_signal_manifest_hash_v2(signal_content_hashes)
     exc = compute_exclusion_hash_v2(excluded_content_hashes)

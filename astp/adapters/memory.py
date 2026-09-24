@@ -288,6 +288,20 @@ class InMemoryStore(ASTPAdapter, StructuralStore):
                 found[str(sid)] = (seg.get("sequence_index"), seg["content_hash"])
         return found
 
+    def spine_segments(self, episode_id: str) -> List[Any]:
+        from astp.core.schema import ASTP_SCHEMA_VERSION
+        from astp.core.seal_v2 import SegmentSealInput
+        return [
+            SegmentSealInput(
+                node_id=UUID(str(s["segment_id"])), node_type="segment",
+                schema_version=s.get("schema_version") or ASTP_SCHEMA_VERSION,
+                sequence_index=int(s["sequence_index"]), content_hash=s["content_hash"],
+                parent_node_id=UUID(str(episode_id)),
+            )
+            for s in self._episode_segments(str(episode_id))
+            if s.get("content_hash") and s.get("retention_tier", "PERSISTENT") != "EPHEMERAL"
+        ]
+
     # ── Branches ───────────────────────────────────────────────────────────
 
     def write_branch_point(self, branch_point: Any) -> None:

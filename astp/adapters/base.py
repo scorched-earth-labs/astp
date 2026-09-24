@@ -354,6 +354,20 @@ class StructuralStore(ABC):
         among ``segment_ids`` and carry a content hash (SPEC §19.4)."""
         ...
 
+    @abstractmethod
+    def spine_segments(self, episode_id: str) -> List[Any]:
+        """The Episode's spine leaves as ``astp.core.seal_v2.SegmentSealInput`` —
+        its non-ephemeral Segments that carry a content hash, each with the six
+        fields a version 2 leaf hashes: ``node_id``, ``node_type`` (``"segment"``),
+        ``schema_version`` (as stored; ``ASTP_SCHEMA_VERSION`` when absent),
+        ``sequence_index``, ``content_hash`` and ``parent_node_id`` — the
+        Episode's id (§3.4.1: a Segment's parent is its Episode). Any order.
+
+        MUST return exactly what the deployment's seal reads for the same
+        Episode: ``live_spine_root`` over this list is the ``spine_root`` the
+        seal will compute, and a structural node binds it (SPEC §5.7.1)."""
+        ...
+
     # ── Branches ───────────────────────────────────────────────────────────
 
     @abstractmethod
