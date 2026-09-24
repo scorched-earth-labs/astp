@@ -96,6 +96,32 @@ from astp.core.audit_chain import (
 logger = logging.getLogger("astp.branch_operations")
 
 
+def live_spine_root(store, episode_id: str, through_segment_id: Optional[str] = None) -> Optional[str]:
+    """The version 2 spine root of a live Episode (SPEC §5.7.1).
+
+    The root the seal computes, taken now: ``compute_spine_root_sav2`` over the
+    ``hash_version`` 2 leaves of the Episode's non-ephemeral Segments — through
+    ``through_segment_id`` (inclusive) when given, else all of them. This is the
+    value a BranchPoint's ``spine_merkle_snapshot`` and a MergePoint's roots bind:
+    "the history it left from". An Episode has no stored spine hash until it
+    is sealed, so reading that (as before 2.2.0) gave "" for every live Episode
+    and left each such node unhashable under version 2.
+
+    None when there is no leaf to root (no non-ephemeral Segment, or an unknown
+    ``through_segment_id``) — the root of an empty list is undefined."""
+    from astp.core.seal_v2 import compute_spine_root_sav2, spine_leaf_hashes_v2
+
+    store = as_structural_store(store)
+    segments = store.spine_segments(str(episode_id))
+    if through_segment_id is not None:
+        through = store.segment_sequence_index(str(through_segment_id))
+        if through is None:
+            return None
+        segments = [seg for seg in segments if seg.sequence_index <= through]
+    leaves = spine_leaf_hashes_v2(segments)
+    return compute_spine_root_sav2(leaves) if leaves else None
+
+
 def create_branch(
     store,
     source_episode_id: str,
@@ -175,8 +201,9 @@ def create_branch(
         # STEP 3: Access policy check (placeholder — fail-open for Phase 1)
         # Access policy enforcement is not wired into this step.
 
-        # STEP 4: Capture spine Merkle snapshot
-        spine_merkle_snapshot = store.episode_spine_hash(source_episode_id) or ""
+        # STEP 4: Capture spine Merkle snapshot — the live root through the
+        # source Segment: the history the branch leaves from (SPEC §5.7.1).
+        spine_merkle_snapshot = live_spine_root(store, source_episode_id, source_segment_id) or ""
 
         # STEP 5: Create BranchPointNode
         branch_point = BranchPointNode(
@@ -345,9 +372,9 @@ def abandon_branch(
         episode_id = branch_point_data.get("episode_id", "")
         branch_point_hash = branch_point_data.get("content_hash", "")
 
-        # STEP 2: Capture final branch state
-        # The spine hash stands in for the branch state
-        final_merkle_root = store.episode_spine_hash(episode_id) or ""  # Branch-specific Merkle root
+        # STEP 2: Capture final branch state — the Episode's live spine root
+        # at termination (HASH|NULL in the version 2 member; "" reads as NULL).
+        final_merkle_root = live_spine_root(store, episode_id) or ""
 
         # Compute duration
         created_at_str = branch_point_data.get("timestamp_utc", "")
@@ -1322,7 +1349,10 @@ def execute_merge(
         if target is None:
             logger.error(f"Target episode {target_episode_id} not found")
             return None
-        target_status, target_spine_hash = target
+        target_status, _ = target
+        # The target's live root before the merge (a live Episode has no
+        # stored spine hash; reading one refused every merge of live Episodes).
+        target_spine_hash = live_spine_root(store, target_episode_id)
         if target_status not in ("ACTIVE", "PENDING_HITL"):
             logger.error(
                 f"Target episode not in ACTIVE state: {target_status}"
@@ -1332,8 +1362,9 @@ def execute_merge(
 
         # STEP 2: Capture pre-merge Merkle roots (immutable after this point)
         source_merkle_root = bp_data.get("spine_merkle_snapshot", "") or ""
-        # Prefer the current spine hash of the source episode if distinct
-        source_merkle_root = store.episode_spine_hash(source_episode_id) or source_merkle_root
+        # Prefer the source Episode's live root now; the branch-time snapshot
+        # is the fallback when the source has no leaf to root.
+        source_merkle_root = live_spine_root(store, source_episode_id) or source_merkle_root
 
         target_merkle_root_pre = target_spine_hash
 
