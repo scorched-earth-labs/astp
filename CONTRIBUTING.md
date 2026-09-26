@@ -64,4 +64,35 @@ Any change to normative text updates the `Version:` field in `SPEC.md` and adds 
 
 ## Pull requests
 
-Keep them to one purpose. Say which kind of change it is (PATCH, MINOR, MAJOR, or no protocol change), which sections of `SPEC.md` it touches, and how you tested it. By submitting a contribution you agree that it is licensed under the [Apache License 2.0](./LICENSE.txt), as set out in section 5 of that licence.
+Keep them to one purpose. Say which kind of change it is (PATCH, MINOR, MAJOR, or no protocol change), which sections of `SPEC.md` it touches, and how you tested it. Every commit must carry a `Signed-off-by` line certifying its origin — see **Certificate of origin** below.
+
+## Certificate of origin
+
+This project uses the [Developer Certificate of Origin](https://developercertificate.org/)
+1.1. It is a statement about where your contribution came from and that you have
+the right to submit it. There is nothing to sign and no account to create.
+
+Add a `Signed-off-by` line to every commit, matching the name and address you
+commit under:
+
+    Signed-off-by: Jane Developer <jane@example.com>
+
+`git commit -s` adds it for you. `git rebase --signoff` adds it to commits you
+have already made.
+
+By signing off you certify the DCO, reproduced in [`DCO.txt`](./DCO.txt), and
+you agree that your contribution is licensed under the
+[Apache License 2.0](./LICENSE.txt). Section 5 of that licence covers what you
+grant, including the patent grant in section 3.
+
+**Specification changes carry more weight than code.** A contribution to
+`SPEC.md` becomes part of the text that [`PATENTS.md`](./PATENTS.md) pledges
+against and that [`PROTOCOL-CONFORMANCE.md`](./PROTOCOL-CONFORMANCE.md) defines
+conformance to. Apache 2.0 governs what you contribute, and the sign-off is your
+statement that it is yours to contribute. If a proposed change touches
+`SPEC.md`, say in the pull request whether any of it derives from work owned by
+an employer or a third party, or is covered by a patent or application you know
+of. It does not necessarily prevent the change; it does need to be known before
+the change is merged.
+
+A pull request whose commits are not signed off cannot be merged.
