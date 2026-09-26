@@ -98,10 +98,8 @@ The integrity substrate. No ASTP claim is meaningful without it.
 | Delta records | §7 |
 | Tamper-evident audit chain | §8 |
 | Five-test gate; inclusion proof; reproducibility obligation | §9.1–§9.3 |
-| Agent-directed retrieval, where provided: node scoping, snapshot isolation, tail write advisory | §10–§10.5 |
 | Retrieval side-effect contract | §11 |
 | Write Intent Log; ledgered operations | §12 |
-| Authoritative spine tip; rebalance events and root preservation | §13, §14 |
 | Adapter requirements | §15 |
 | Dual-index invariant; namespace firewall | §3.2–§3.3 |
 
@@ -136,8 +134,7 @@ proofs. `SPEC.md` §16. Governance: **G-11 – G-16.**
 
 ### 3.4 Human-in-the-Loop — OPTIONAL
 
-HITLEventNode and its two-phase lifecycle; the HITL re-validation gate on
-retrieval. `SPEC.md` §4.6, §10.6. Governance:
+HITLEventNode and its two-phase lifecycle. `SPEC.md` §4.6. Governance:
 **G-17, G-18.**
 
 ### 3.5 Branch / Fork / Merge — OPTIONAL
@@ -168,7 +165,25 @@ committing them produces an Episode root that is wrong rather than merely
 incomplete, and is non-conforming at Core, because §5.7 is a Core requirement.
 
 The same principle applies generally: a supported surface is held to its
-requirements in full.
+requirements in full. Two provisions of `SPEC.md` bind only an implementation
+that does what they govern, and are held to that standard here rather than
+listed in any profile:
+
+- **Agent-directed retrieval (§10).** An implementation that serves agent
+  retrieval MUST provide the operations of §10 with their node scoping and
+  verbatim-content rule, and MUST read each agent turn against a consistent
+  snapshot (§10.4). The tail write advisory (§10.5) and the HITL re-validation
+  gate (§10.6) bind it at the strength `SPEC.md` gives them, no more. An
+  implementation that writes and seals but serves no agent retrieval is not
+  bound by §10.
+- **Rebalance (§14).** An implementation that rebalances its tree MUST record
+  each rebalance as §14 requires and MUST preserve the root across it (§14.1).
+  An implementation that never rebalances never triggers §14.
+
+The spine tip cache (§13) is a SHOULD, and `SPEC.md` calls it "a performance
+optimization, not a source of truth"; declining it does not affect conformance.
+The authoritative spine-tip query that §13 and §15 require is part of Core
+through §15.
 
 ---
 
