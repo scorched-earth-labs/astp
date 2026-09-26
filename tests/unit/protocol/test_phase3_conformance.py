@@ -14,7 +14,7 @@
 """
 Phase 3 Conformance Test Vectors
 
-Implements the REQUIRED vectors from CONFORMANCE.md. All vectors
+Implements the REQUIRED vectors from CONFORMANCE-TRUST.md. All vectors
 must pass for Phase 3 Protocol Conformance (Level 1).
 """
 
