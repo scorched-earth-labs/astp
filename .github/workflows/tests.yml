@@ -44,3 +44,26 @@ jobs:
       - run: pip install build twine
       - run: python -m build
       - run: twine check dist/*
+
+  dco:
+    # CONTRIBUTING.md, "Certificate of origin": every commit carries its author's sign-off.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Every commit is signed off by its author
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          status=0
+          for c in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            want="Signed-off-by: $(git log -1 --format='%an <%ae>' "$c")"
+            if ! git log -1 --format='%(trailers:key=Signed-off-by,unfold)' "$c" | grep -qxF "$want"; then
+              echo "::error::$(git log -1 --format='%h %s' "$c") lacks '$want'"
+              status=1
+            fi
+          done
+          exit $status
