@@ -1,10 +1,14 @@
 include LICENSE.txt
+include NOTICE
+include PATENTS.md
+include DCO.txt
 include README.md
 include CHANGELOG.md
 include SPEC.md
 include GLOSSARY.md
 include VERSIONING.md
 include CONFORMANCE*.md
+include PROTOCOL-CONFORMANCE.md
 include IMPLEMENTATION-PHASE3.md
 graft docs
 graft tests
