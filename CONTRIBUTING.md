@@ -85,14 +85,102 @@ you agree that your contribution is licensed under the
 [Apache License 2.0](./LICENSE.txt). Section 5 of that licence covers what you
 grant, including the patent grant in section 3.
 
+A pull request whose commits are not signed off cannot be merged.
+
 **Specification changes carry more weight than code.** A contribution to
 `SPEC.md` becomes part of the text that [`PATENTS.md`](./PATENTS.md) pledges
 against and that [`PROTOCOL-CONFORMANCE.md`](./PROTOCOL-CONFORMANCE.md) defines
-conformance to. Apache 2.0 governs what you contribute, and the sign-off is your
-statement that it is yours to contribute. If a proposed change touches
-`SPEC.md`, say in the pull request whether any of it derives from work owned by
-an employer or a third party, or is covered by a patent or application you know
-of. It does not necessarily prevent the change; it does need to be known before
-the change is merged.
+conformance to. The additional requirements are below.
 
-A pull request whose commits are not signed off cannot be merged.
+## Specification contributions and patent disclosure
+
+Normative changes to the ASTP Specification are subject to the following
+patent-disclosure requirements.
+
+### 1. DCO requirement
+
+Every contributor submitting a specification change must provide the Developer
+Certificate of Origin sign-off required by this repository's contribution
+policy.
+
+The DCO governs contributor provenance and authority to submit the contribution.
+It does not modify or expand the patent commitments described in
+[`PATENTS.md`](./PATENTS.md).
+
+### 2. Patent disclosure
+
+A contributor proposing a normative specification change must disclose, in the
+applicable pull request, any patent, patent application, or known third-party
+patent right of which the contributor has actual knowledge and that the
+contributor reasonably believes may contain a claim necessarily infringed by
+implementation of the proposed normative requirement.
+
+Where the contributor is acting on behalf of an employer or other organization,
+the contributor must disclose any relevant patent ownership or control known to
+the contributor or identified through the contributor's applicable
+organizational review process.
+
+A disclosure should identify, to the extent reasonably available:
+
+- the patent or patent application;
+- the owner or applicant;
+- the specification section or requirement implicated; and
+- any known licensing commitment applicable to the disclosed claim.
+
+### 3. No patent warranty
+
+A patent disclosure is not a representation that a patent claim is valid,
+enforceable, essential, or necessarily infringed by the Specification. It is a
+disclosure of known or reasonably identified patent rights for consideration by
+the maintainers.
+
+Contributors are not required to identify patents of which they have no actual
+knowledge.
+
+### 4. Disclosure does not create a license
+
+Disclosure of a patent or patent application does not, by itself, grant a patent
+license or create a commitment by the patent owner to license the disclosed
+patent.
+
+Patent rights applicable to contributions remain governed by the Apache License,
+Version 2.0, any separate agreement with the relevant rights holder, and
+[`PATENTS.md`](./PATENTS.md), as applicable.
+
+### 5. Normative changes affecting patent rights
+
+Before merging a normative specification change, maintainers should determine
+whether a disclosed patent right presents an issue for implementation of the
+proposed requirement.
+
+Where appropriate, the maintainers may:
+
+- obtain an appropriate patent licensing commitment;
+- modify the proposed requirement to avoid the disclosed claim;
+- make the feature optional rather than mandatory;
+- document that the relevant patent right is outside the project's patent
+  commitment; or
+- decline to merge the proposed requirement.
+
+No specification contribution shall be understood to expand the patent pledge
+beyond the express terms of [`PATENTS.md`](./PATENTS.md).
+
+### 6. Employer and organizational rights
+
+A contributor must not represent that a patent right is available for licensing
+on behalf of an employer or other organization unless the contributor is
+authorized to make that commitment.
+
+Where a proposed normative change is owned or controlled by an employer or other
+organization, the maintainers may require a written patent commitment from the
+applicable rights holder before incorporating the change into a normative
+Specification Version.
+
+### 7. Apache License
+
+Specification text accepted into the repository is subject to the applicable
+copyright and patent terms of the Apache License, Version 2.0, unless a separate
+written agreement provides otherwise.
+
+Nothing in this policy limits the patent rights granted by Apache License §3 or
+modifies the terms of Apache License §5.
