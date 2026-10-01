@@ -1,5 +1,8 @@
 # Patent Policy and Patent Pledge
 
+**Version:** 1.0.0
+**Status:** Stable — ratified in Episode of Record `df3434bd-6936-441c-a896-254149f2bd48` ([`docs/RATIFICATION-PATENTS-1.0.0.md`](./docs/RATIFICATION-PATENTS-1.0.0.md))
+**Date:** 2026-10-01
 **Protocol:** ASTP — the AI State Tree Protocol
 **Maintainer:** Scorched Earth Labs, LLC
 **License:** Apache License, Version 2.0
