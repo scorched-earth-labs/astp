@@ -30,6 +30,8 @@ Outside contributors do not need to run ASTP, or have access to any deployment, 
 
 An Episode of Record also ratifies a normative companion document that carries its own version under [`VERSIONING.md`](./VERSIONING.md) — today, [`PROTOCOL-CONFORMANCE.md`](./PROTOCOL-CONFORMANCE.md), whose definition of a Conforming Implementation is what [`PATENTS.md`](./PATENTS.md) §4.2 grants against. Each version of such a document is ratified in an Episode of Record before it is released, whether or not `SPEC.md` changes with it, and the Episode cites the text it ratifies by content digest. Where a revision changes nothing that conformance requires (an editorial correction, for instance), the ratifying Episode may record that fact and be correspondingly brief: it still seals the revised text's digest, but there is no decision to deliberate.
 
+An Episode of Record may also ratify `SPEC.md` as a whole document at a version it already carries, whatever that version's change class. Such an Episode changes no specification text. It cites the document by content digest, and it accounts for every change since the last whole-document ratification, ruling for each whether it was made under the process its change class required. `SPEC.md` is not edited after the seal, so for that version the ratified digest, the digest of the published file and any digest pinned elsewhere are the same.
+
 ## Releases
 
 A release is a git tag `vMAJOR.MINOR.PATCH` on the commit whose `SPEC.md` carries that version. The reference package `astp` is versioned separately from the protocol; the protocol version a given package implements is exposed as `astp.PROTOCOL_VERSION`.
