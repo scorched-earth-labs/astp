@@ -4,6 +4,10 @@ All notable changes to ASTP (the AI State Tree Protocol). Version numbering foll
 
 ## [Unreleased]
 
+### Ratified
+- **`SPEC.md` 6.0.2, as a whole document**, ratified in Episode of Record `46490010-e8a7-4d79-8092-a1a82de3c93f` (sealed 2026-10-01 under `spine_algorithm_version` 3, `episode_root_hash` `3a543f6ba5a777258d6a2066452f843c63c965574dde66bdd30ea2ccff900da8`) — [`docs/RATIFICATION-SPEC-6.0.2.md`](./docs/RATIFICATION-SPEC-6.0.2.md). Cited by content digest `fc0a205ad4b7a0a04e1b5f2583ebc02184d3e33885915aef62bed1ec1d38e0cb`; `SPEC.md` is not edited, so for 6.0.2 the ratified digest, the published digest and the digest `PATENTS.md` §4.1 pledges against are one value, for the first time. The Episode accounts for every change since 5.0.0: 6.0.1 (§5.7.1 spine-state fields) and 6.0.2 (§2.5.2) ruled errata; the 6.0.0 fold established as faithful to the ratified draft; and four commits (#55, #58, #59, #62) recorded as having changed `SPEC.md` without the version change `VERSIONING.md` requires, harmlessly. Carried to the next revision: the CodicilNode `content_hash` annotation (§4.9.3), the `CONTEXT_COMMIT` wording (§12.4.1), and the G-40 Episode-identifier rule for version 3.
+- **[`PROTOCOL-CONFORMANCE.md`](./PROTOCOL-CONFORMANCE.md) 1.0.1**, ratified in the same Episode by content digest `dca786fa8780dd19563acf39d3369010256f7570d8212d092060a5117094236a` (final bytes; ratified = published). Editorial: the header and §7.3 now record that the 6.0.2 digest is a ratified one. It changes nothing conformance requires.
+
 ### Reference package (`astp` 2.2.1 — `PROTOCOL_VERSION` 6.0.2)
 - `astp.PROTOCOL_VERSION` names 6.0.2, the `SPEC.md` version the package implements. 6.0.2 changed no normative surface the package touches, so the constant was left at 6.0.1, as the MAJOR.MINOR comparison in `tests/unit/protocol/test_protocol_version.py` allows. But a proof of record stamps the constant into its `protocol_version` field, so proofs exported against 6.0.2 said 6.0.1 — among them the `PROTOCOL-CONFORMANCE` 1.0.0 Episode of Record's. That field is informational and outside every root; the published proof is left as exported. No other code change.
 
