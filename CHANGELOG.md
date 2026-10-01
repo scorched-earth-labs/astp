@@ -4,6 +4,9 @@ All notable changes to ASTP (the AI State Tree Protocol). Version numbering foll
 
 ## [Unreleased]
 
+### Reference package (`astp` 2.2.1 — `PROTOCOL_VERSION` 6.0.2)
+- `astp.PROTOCOL_VERSION` names 6.0.2, the `SPEC.md` version the package implements. 6.0.2 changed no normative surface the package touches, so the constant was left at 6.0.1, as the MAJOR.MINOR comparison in `tests/unit/protocol/test_protocol_version.py` allows. But a proof of record stamps the constant into its `protocol_version` field, so proofs exported against 6.0.2 said 6.0.1 — among them the `PROTOCOL-CONFORMANCE` 1.0.0 Episode of Record's. That field is informational and outside every root; the published proof is left as exported. No other code change.
+
 ### Ratified (companion document)
 - **[`PROTOCOL-CONFORMANCE.md`](./PROTOCOL-CONFORMANCE.md) 1.0.0**, applying to `SPEC.md` 6.0.2, ratified in Episode of Record `19d4390f-ac46-4840-bc9a-f419c6626fb4` (sealed 2026-10-01 under `spine_algorithm_version` 3, `episode_root_hash` `5918cbcd74506fec2e8eed11af3a4c6c5c32c10c571c2bf389c6efa4f730d9ce`) — [`docs/RATIFICATION-PROTOCOL-CONFORMANCE-1.0.0.md`](./docs/RATIFICATION-PROTOCOL-CONFORMANCE-1.0.0.md). The Episode cites the text by content digest (`5b8e5c2fa0baa509d2bb89a4507bca7a78dedd428e95a22f554a3ab8c3c0eacd`, the `-draft` bytes at `d5ae006`); the `Version:` and `Status:` lines were changed after the seal and nothing else, so the published file differs from the ratified bytes in exactly those two lines, by design. It ratifies the conformance definition, not `SPEC.md`: the `SPEC.md` digest `PATENTS.md` §4.1 pledges against remains a direct content digest. The first Episode of Record that is itself a conforming record under the definition it ratifies — capture posture `all_external`, a context manifest of 35 entries. Exported proof of record under `docs/proofs/`.
 
