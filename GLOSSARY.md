@@ -502,7 +502,7 @@ An exported file with which a third party verifies a sealed Episode — an *Epis
 
 ### Episode of Record
 
-The ASTP Episode, opened and sealed by the maintainers, in which a MAJOR change is deliberated and ratified — the protocol recording its own amendment. The specification text is the human-readable result; the Episode is the anchor. It cites what it ratifies by **content digest** (the bytes survive a history rewrite; a commit hash does not). 4.0.0: `458fb62b-faee-4e42-9f92-c63187c1b59a`; 5.0.0: `ce3f569c-9cdc-4a3d-913a-b9d8573d9a28` ([`docs/RATIFICATION-5.0.0.md`](./docs/RATIFICATION-5.0.0.md)). `GOVERNANCE.md`, `VERSIONING.md`.
+The ASTP Episode, opened and sealed by the maintainers, in which a MAJOR change — or a version of a normative companion document that carries its own version, such as `PROTOCOL-CONFORMANCE.md` — is deliberated and ratified: the protocol recording its own amendment. The specification text is the human-readable result; the Episode is the anchor. It cites what it ratifies by **content digest** (the bytes survive a history rewrite; a commit hash does not). 4.0.0: `458fb62b-faee-4e42-9f92-c63187c1b59a`; 5.0.0: `ce3f569c-9cdc-4a3d-913a-b9d8573d9a28` ([`docs/RATIFICATION-5.0.0.md`](./docs/RATIFICATION-5.0.0.md)). `GOVERNANCE.md`, `VERSIONING.md`.
 
 ### Design Episode
 

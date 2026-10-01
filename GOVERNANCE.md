@@ -28,6 +28,8 @@ An Episode of Record is an ASTP Episode, opened by the maintainers, in which a M
 
 Outside contributors do not need to run ASTP, or have access to any deployment, to propose or shape a MAJOR change. The proposal, the draft, and the review all happen in this repository. Opening and sealing the Episode of Record is the maintainers' step.
 
+An Episode of Record also ratifies a normative companion document that carries its own version under [`VERSIONING.md`](./VERSIONING.md) — today, [`PROTOCOL-CONFORMANCE.md`](./PROTOCOL-CONFORMANCE.md), whose definition of a Conforming Implementation is what [`PATENTS.md`](./PATENTS.md) §4.2 grants against. Each version of such a document is ratified in an Episode of Record before it is released, whether or not `SPEC.md` changes with it, and the Episode cites the text it ratifies by content digest. Where a revision changes nothing that conformance requires (an editorial correction, for instance), the ratifying Episode may record that fact and be correspondingly brief: it still seals the revised text's digest, but there is no decision to deliberate.
+
 ## Releases
 
 A release is a git tag `vMAJOR.MINOR.PATCH` on the commit whose `SPEC.md` carries that version. The reference package `astp` is versioned separately from the protocol; the protocol version a given package implements is exposed as `astp.PROTOCOL_VERSION`.
