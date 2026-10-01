@@ -17,6 +17,7 @@ The verifier reproduces every root the document's profile allows from the stored
 
 | File | Episode | Sealed | Construction | Reproduces |
 |---|---|---|---|---|
+| `episode-of-record-spec-6.0.2.46490010.full.json` | Episode of Record for `SPEC.md` 6.0.2 (whole document) and `PROTOCOL-CONFORMANCE.md` 1.0.1 (`46490010-e8a7-4d79-8092-a1a82de3c93f`) | 2026-10-01 | `spine_algorithm_version` 3, `ordering_version` 2 | spine root, signal manifest, structural manifest, exclusion set, context manifest, Episode root |
 | `episode-of-record-protocol-conformance-1.0.0.19d4390f.full.json` | Episode of Record for `PROTOCOL-CONFORMANCE.md` 1.0.0 (`19d4390f-ac46-4840-bc9a-f419c6626fb4`) | 2026-10-01 | `spine_algorithm_version` 3, `ordering_version` 2 | spine root, signal manifest, structural manifest, exclusion set, context manifest, Episode root |
 | `episode-of-record-6.0.0.80e5a2dd.full.json` | Episode of Record for 6.0.0 (`80e5a2dd-3d9f-45d0-abfb-6489c8caf1b8`) | 2026-09-22 | `spine_algorithm_version` 2, `ordering_version` 2 | spine root, signal manifest, structural manifest, exclusion set, Episode root |
 | `episode-of-record-5.0.0.ce3f569c.full.json` | Episode of Record for 5.0.0 (`ce3f569c-9cdc-4a3d-913a-b9d8573d9a28`) | 2026-09-18 | `spine_algorithm_version` 1, `ordering_version` 2 | spine root, signal manifest, exclusion set, Episode root |
