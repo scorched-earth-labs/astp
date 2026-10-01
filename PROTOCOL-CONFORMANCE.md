@@ -1,7 +1,7 @@
 # ASTP — Protocol Conformance
 
-**Version:** 1.0.0-draft
-**Status:** DRAFT — pending ratification in an Episode of Record. No open item blocks it; see §11.
+**Version:** 1.0.0
+**Status:** Stable — ratified in Episode of Record `19d4390f-ac46-4840-bc9a-f419c6626fb4` ([`docs/RATIFICATION-PROTOCOL-CONFORMANCE-1.0.0.md`](./docs/RATIFICATION-PROTOCOL-CONFORMANCE-1.0.0.md))
 **Authors:** Scorched Earth Labs
 **Date:** 2026-09-29
 **Applies To:** [`SPEC.md`](./SPEC.md) 6.0.2
