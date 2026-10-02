@@ -2,6 +2,17 @@
 
 Guidance for AI coding agents (Claude Code, Codex, Copilot, Cursor and others) working in this repository. Human contributors: start with [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
+## Release freeze (from `v6.0.2` until public launch)
+
+`main` is frozen at the commit tagged `v6.0.2`: SPEC 6.0.2 ratified as a whole document, `PROTOCOL-CONFORMANCE.md` 1.0.1, `PATENTS.md` 1.0.0, reference package `astp` 2.2.1, six proofs of record. Everything before that tag is in the release; nothing after it is, until the freeze is lifted.
+
+- **Frozen: content.** No change to any file in this repository (specification, companion documents, package, tests, vectors, CI, or this file) is merged to `main`.
+- **Not frozen: tags.** A tag points at an existing commit and changes no file and no digest. Adding one is not a change to the release.
+- **Exception: a security fix.** A vulnerability in the reference package or in this repository's own workflows may be fixed during the freeze. It carries its own version under [`VERSIONING.md`](./VERSIONING.md), and the freeze resumes at that version's tag.
+- **Who lifts it:** the maintainers, by a commit that removes this section. That commit is the first change after the freeze.
+
+**For agents:** while this section exists, do not open a pull request against `main`. Prepare work on a branch and hold it. If you believe a change is a security fix, say so and wait for a maintainer to decide.
+
 ## What this repository is
 
 ASTP is a **protocol** — a specification plus a reference implementation — not an application. It ships:
