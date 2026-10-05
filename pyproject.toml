@@ -4,18 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astp"
-version = "2.2.1"
-description = "ASTP (AI State Tree Protocol) — a cognitive persistence protocol for multi-agent AI systems"
+version = "2.2.2"
+description = "Reference implementation of ASTP 6.0.2 (AI State Tree Protocol) — a cognitive persistence protocol for multi-agent AI systems"
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE.txt"]
+license-files = ["LICENSE.txt", "NOTICE"]
 requires-python = ">=3.11"
 authors = [
     { name = "Scorched Earth Labs", email = "dev@scorchedearthlabs.com" },
 ]
 keywords = ["ai", "agents", "persistence", "protocol", "cognitive", "memory"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
