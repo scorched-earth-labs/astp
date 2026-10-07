@@ -1,0 +1,9 @@
+# Map build-machine and personal identities to their project identities.
+#
+# This file changes only what git DISPLAYS. It rewrites no commit, changes no
+# SHA, and therefore leaves intact the commit identifiers cited in the
+# ratification records under docs/ and in SPEC.md.
+#
+# Format: Proper Name <proper@email> Commit Name <commit@email>
+
+Scorched Earth Labs <dev@scorchedearthlabs.com> selserver <selserver@og-ca-app01-sel-local.tail24b730.ts.net>
