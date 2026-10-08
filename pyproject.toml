@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astp"
-version = "2.2.2"
+version = "2.2.3"
 description = "Reference implementation of ASTP 6.0.2 (AI State Tree Protocol) — a cognitive persistence protocol for multi-agent AI systems"
 readme = "README.md"
 license = "Apache-2.0"
