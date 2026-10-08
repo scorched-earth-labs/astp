@@ -2,18 +2,6 @@
 
 Guidance for AI coding agents (Claude Code, Codex, Copilot, Cursor and others) working in this repository. Human contributors: start with [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
-## Release freeze (from `v6.0.2` until public launch)
-
-`main` is frozen at the commit tagged `v6.0.2`: SPEC 6.0.2 ratified as a whole document, `PROTOCOL-CONFORMANCE.md` 1.0.1, `PATENTS.md` 1.0.0, reference package `astp` 2.2.1, six proofs of record. Everything before that tag is in the release; nothing after it is, until the freeze is lifted.
-
-- **Frozen: the ratified surface.** No change to `SPEC.md`, to a normative companion document that carries its own version ([`PROTOCOL-CONFORMANCE.md`](./PROTOCOL-CONFORMANCE.md), [`PATENTS.md`](./PATENTS.md)), to a hash preimage or canonical form under `astp/`, or to `vectors/`. These move digests that sealed Episodes of Record cite, and correcting one cascades into the others.
-- **Not frozen: distribution.** Packaging metadata (`pyproject.toml`, `MANIFEST.in`), `README.md`, CI workflows, and `astp.__version__` may change, provided `SPEC.md` is untouched and `astp.PROTOCOL_VERSION` is unchanged. Such a change is a package release, not a protocol release: it carries no `vMAJOR.MINOR.PATCH` tag ([`GOVERNANCE.md`](./GOVERNANCE.md) §Releases) and needs no Episode of Record.
-- **Not frozen: tags.** A tag points at an existing commit and changes no file and no digest. Adding one is not a change to the release.
-- **Exception: a security fix.** A vulnerability in the reference package or in this repository's own workflows may be fixed during the freeze. It carries its own version under [`VERSIONING.md`](./VERSIONING.md), and the freeze resumes at that version's tag.
-- **Who lifts it:** the maintainers, by a commit that removes this section. No change to the frozen surface above is merged before it.
-
-**For agents:** while this section exists, do not open a pull request that touches the frozen surface above. A change confined to the unfrozen distribution surface is allowed; say in the pull request body which files it touches and that `SPEC.md` is unchanged. If you believe a change to the frozen surface is a security fix, say so and wait for a maintainer to decide.
-
 ## What this repository is
 
 ASTP is a **protocol** — a specification plus a reference implementation — not an application. It ships:
