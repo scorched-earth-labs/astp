@@ -137,7 +137,13 @@ What does not exist yet: an adapter-parameterized harness that a third-party imp
 
 Requires Python >= 3.11. The distribution name and the import name are both `astp`.
 
-The package is not yet published to a package index. Install from a checkout:
+Install the published package from [PyPI](https://pypi.org/project/astp/):
+
+```bash
+pip install astp
+```
+
+To work on the protocol itself, install from a checkout instead:
 
 ```bash
 pip install -e ".[dev]"         # editable install with test dependencies
@@ -156,7 +162,7 @@ import astp
 
 **5.1.0.** The protocol was ratified at 5.0.0 (Episode of Record `ce3f569c-9cdc-4a3d-913a-b9d8573d9a28`) and at 5.1.0 the reference deployment (Ignis OS, cutover 2026-09-19) seals under `spine_algorithm_version` 2 — `astp.core.seal_v2.compute_episode_seal_v2` over the adapter's `seal_inputs` reader — with no feature flag and nothing swallowed. A version 2 seal takes its identifiers from the `SealV2` result; `astp.core.schema.SPINE_ALGORITHM_VERSION_CURRENT` names the retained version 1 construction and reads `1` by design. Every construction has machine-readable vectors. The protocol specification is in `SPEC.md`.
 
-The first consumer of this protocol is Ignis OS, Scorched Earth Labs' agent runtime, and integration tests for the reference adapter run there rather than in this repository. Not recommended for production use elsewhere until the first stable release.
+The first consumer of this protocol is Ignis OS, Scorched Earth Labs' agent runtime, and integration tests for the reference adapter run there rather than in this repository. The package is published on [PyPI](https://pypi.org/project/astp/); its version is separate from the protocol version, and each release is recorded in [`CHANGELOG.md`](https://github.com/scorched-earth-labs/astp/blob/main/CHANGELOG.md).
 
 ---
 
