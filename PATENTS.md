@@ -1,7 +1,7 @@
 # Patent Policy and Patent Pledge
 
 **Version:** 1.1.0
-**Status:** Draft — to be ratified in Episode of Record `[FILL: Episode of Record ID]`, together with `SPEC.md` 7.0.0. 1.0.0 was ratified in Episode of Record `df3434bd-6936-441c-a896-254149f2bd48` ([`docs/RATIFICATION-PATENTS-1.0.0.md`](./docs/RATIFICATION-PATENTS-1.0.0.md))
+**Status:** Stable — ratified in Episode of Record `a2aa7ef2-8775-4ad7-964e-9678f712796b` ([`docs/RATIFICATION-7.0.0.md`](./docs/RATIFICATION-7.0.0.md)), together with `SPEC.md` 7.0.0. 1.0.0 was ratified in Episode of Record `df3434bd-6936-441c-a896-254149f2bd48` ([`docs/RATIFICATION-PATENTS-1.0.0.md`](./docs/RATIFICATION-PATENTS-1.0.0.md))
 **Date:** 2026-10-20
 **Protocol:** ASTP — the AI State Tree Protocol
 **Maintainer:** Scorched Earth Labs, LLC
@@ -58,7 +58,7 @@ SHA3-256 digest of its text:
 
 | Protocol version | SHA3-256 digest of `SPEC.md` |
 |---|---|
-| 7.0.0 | `@SPEC_DIGEST@` |
+| 7.0.0 | `51d1584879142baaee123e732a76310d7f8ccb96f3790001755a79c7a23cb6ab` |
 | 6.0.2 | `fc0a205ad4b7a0a04e1b5f2583ebc02184d3e33885915aef62bed1ec1d38e0cb` |
 
 and any later version expressly designated by Scorched Earth Labs as being
@@ -72,7 +72,7 @@ python3 -c "import hashlib,sys; print(hashlib.sha3_256(open(sys.argv[1],'rb').re
 ```
 
 `SPEC.md` 7.0.0 is ratified as a whole document in Episode of Record
-`[FILL: Episode of Record ID]`
+`a2aa7ef2-8775-4ad7-964e-9678f712796b`
 ([`docs/RATIFICATION-7.0.0.md`](./docs/RATIFICATION-7.0.0.md)), together with
 version 1.1.0 of this policy, which adds the 7.0.0 row above (§15). The 7.0.0
 digest is therefore the ratified digest, the published digest and the pledged

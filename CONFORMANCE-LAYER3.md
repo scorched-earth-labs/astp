@@ -1,7 +1,7 @@
 # ASTP — Layer 3 (Workflow & Execution DAG) Conformance Test Vectors
 
 **Version:** 1.2.0
-**Status:** Draft
+**Status:** Stable
 **Authors:** Scorched Earth Labs
 **Date:** 2026-10-20
 **Applies To:** SPEC.md §21 (Layer 3 — Workflow & Execution DAG), 7.0.0 (adds L3-I6 and G-1's Layer 3 extension; see the note in §1)

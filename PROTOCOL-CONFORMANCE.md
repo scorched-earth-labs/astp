@@ -1,7 +1,7 @@
 # ASTP — Protocol Conformance
 
 **Version:** 1.1.0
-**Status:** Draft — to be ratified in Episode of Record `[FILL: Episode of Record ID]`, together with `SPEC.md` 7.0.0. 1.0.1 (Episode of Record `46490010-e8a7-4d79-8092-a1a82de3c93f`) remains the conformance definition for `SPEC.md` 6.0.2 (§7, §7.1)
+**Status:** Stable — 1.1.0 ratified in Episode of Record `a2aa7ef2-8775-4ad7-964e-9678f712796b` ([`docs/RATIFICATION-7.0.0.md`](./docs/RATIFICATION-7.0.0.md)), together with `SPEC.md` 7.0.0. 1.0.1 (Episode of Record `46490010-e8a7-4d79-8092-a1a82de3c93f`) remains the conformance definition for `SPEC.md` 6.0.2 (§7, §7.1)
 **Authors:** Scorched Earth Labs
 **Date:** 2026-10-20
 **Applies To:** [`SPEC.md`](./SPEC.md) 7.0.0
@@ -359,12 +359,12 @@ python3 -c "import hashlib,sys; print(hashlib.sha3_256(open(sys.argv[1],'rb').re
 
 | Protocol version | SHA3-256 digest of `SPEC.md` | Episode of Record |
 |---|---|---|
-| 7.0.0 | `@SPEC_DIGEST@` | `[FILL: Episode of Record ID]` ([`docs/RATIFICATION-7.0.0.md`](./docs/RATIFICATION-7.0.0.md)) |
+| 7.0.0 | `51d1584879142baaee123e732a76310d7f8ccb96f3790001755a79c7a23cb6ab` | `a2aa7ef2-8775-4ad7-964e-9678f712796b` ([`docs/RATIFICATION-7.0.0.md`](./docs/RATIFICATION-7.0.0.md)) |
 | 6.0.2 | `fc0a205ad4b7a0a04e1b5f2583ebc02184d3e33885915aef62bed1ec1d38e0cb` | `46490010-e8a7-4d79-8092-a1a82de3c93f` ([`docs/RATIFICATION-SPEC-6.0.2.md`](./docs/RATIFICATION-SPEC-6.0.2.md)); the 6.0.0 amendment: `80e5a2dd-3d9f-45d0-abfb-6489c8caf1b8` ([`docs/RATIFICATION-6.0.0.md`](./docs/RATIFICATION-6.0.0.md)) |
 | 5.0.0 | see [`docs/RATIFICATION-5.0.0.md`](./docs/RATIFICATION-5.0.0.md) | `ce3f569c-9cdc-4a3d-913a-b9d8573d9a28` |
 
 > **The 7.0.0 digest is a ratified digest.** Episode of Record
-> `[FILL: Episode of Record ID]` ratified `SPEC.md` 7.0.0 as a whole document by the
+> `a2aa7ef2-8775-4ad7-964e-9678f712796b` ratified `SPEC.md` 7.0.0 as a whole document by the
 > digest above, together with this document at 1.1.0 and `PATENTS.md` 1.1.0, and
 > none of the three was edited after the seal: for 7.0.0 the ratified digest,
 > the digest of the published file and the digest `PATENTS.md` §4.1 pledges
