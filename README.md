@@ -8,7 +8,7 @@ Bring your own cognitive architecture. ASTP handles the persistence, integrity v
 
 📖 **New to ASTP?** Start with the [Glossary](https://github.com/scorched-earth-labs/astp/blob/main/GLOSSARY.md) — every term used in the spec and code, defined once with explicit structural relationships (e.g. how `EpisodeNode` relates to `CognitiveNode` + `EpisodePayload`).
 
-**Current version:** the `**Version:**` field at the top of [`SPEC.md`](https://github.com/scorched-earth-labs/astp/blob/main/SPEC.md) is the protocol version (it is not restated here, so it can't drift). Versioning policy: [`VERSIONING.md`](https://github.com/scorched-earth-labs/astp/blob/main/VERSIONING.md). Change history: [`CHANGELOG.md`](https://github.com/scorched-earth-labs/astp/blob/main/CHANGELOG.md).
+**Current version:** the `**Version:**` field at the top of [`SPEC.md`](https://github.com/scorched-earth-labs/astp/blob/main/SPEC.md) is the protocol version. **Status** below summarizes the current release, and a test holds it to that field. Versioning policy: [`VERSIONING.md`](https://github.com/scorched-earth-labs/astp/blob/main/VERSIONING.md). Change history: [`CHANGELOG.md`](https://github.com/scorched-earth-labs/astp/blob/main/CHANGELOG.md).
 
 ---
 
@@ -67,12 +67,14 @@ Two invariants shape the tree. The **namespace firewall**: `astp.protocol.*` nev
 
 ### Episode
 
-A bounded unit of agent work. Episodes have a formal lifecycle:
+A bounded unit of agent work. An Episode is always in exactly one state from a closed set (`SPEC.md` §4.4.1):
 
 ```
-CREATED → ACTIVE → CLOSING → CLOSING_PENDING_SEAL → SEALED → ARCHIVED
-                 ↘ CRYSTALLIZATION_PENDING → CRYSTALLIZED ↗
+CREATED · ACTIVE · PENDING_HITL · CLOSING · CLOSING_PENDING_SEAL · CLOSED
+CRYSTALLIZATION_PENDING · CRYSTALLIZED · SEALING · SEALED · ARCHIVED
 ```
+
+Crystallization is a fact, not a state: an Episode is crystallized when a `CrystallizationDelta` exists for it, whatever its status reads. From `CLOSING_PENDING_SEAL` onward, G-1 refuses new content, and since 7.0.0 it refuses Layer 3 writes too.
 
 ### Segment
 
@@ -92,7 +94,7 @@ A three-phase coordination protocol for multi-store writes. Writes proceed in st
 
 ### Consultation
 
-A cross-agent exchange recorded as a first-class protocol node, not an application-level convention. Consultations form their own hash chain of `ExchangeEntry` nodes. The branch point is recorded before any exchange occurs (G-8). Resolution requires at least one entry (G-9).
+A cross-agent exchange recorded as a first-class protocol node, not an application-level convention. Consultations form their own hash chain of `ExchangeEntry` nodes. An exchange entry requires the consultation's initiation hash to be recorded first (G-8), and resolution requires at least one entry (G-9).
 
 ---
 
@@ -115,6 +117,8 @@ A conforming adapter must:
 3. Respect write ordering invariants across stores
 4. Support idempotent writes for WIL recovery
 5. Fail loudly on errors — never silently swallow writes
+
+If a coding agent is writing the adapter, point it at [`AGENTS.md`](https://github.com/scorched-earth-labs/astp/blob/main/AGENTS.md) and the ASTP Docs MCP server ([`astp-docs-server`](https://pypi.org/project/astp-docs-server/) on PyPI), which returns governance rules, conformance vectors, sections and hash preimages verbatim with citations, so the agent implements from the normative text instead of guessing.
 
 The operations layer — branch, fork, merge, aside, soliloquy, cross-episode linking, grouping, coherence, the audit chain — reads and writes through a second, synchronous contract, `StructuralStore` (also in `astp.adapters.base`), and names no store of its own. An implementation supplies one. `astp.adapters.memory.InMemoryStore` implements both contracts over plain dicts — the reference implementation, and the store the protocol's own tests run the operations against. The protocol names no storage provider: a graph database, a relational store or anything else is a deployment's choice behind these two contracts. See `SPEC.md` for the full conformance requirements.
 
@@ -160,9 +164,11 @@ import astp
 
 **7.0.0.** The protocol is ratified at 7.0.0 (Episode of Record `a2aa7ef2-8775-4ad7-964e-9678f712796b`, [`docs/RATIFICATION-7.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-7.0.0.md)): rule G-1, which already stopped Segments and Signals being written to a closed Episode, now governs Layer 3 as well. A workflow cannot be declared, nor its steps or skill invocations recorded, against an Episode that is frozen or sealed, checked on each write (§21 §9, L3-I6). Layer 3 is outside every hash the seal commits, so the seal could not catch such a write; the guard is the only enforcement. Nothing sealed under an earlier version changes. The reference deployment has enforced it since 2026-10-17; package 3.0.0 names the protocol version.
 
-**6.0.0.** The protocol is ratified at 6.0.0 (Episode of Record `80e5a2dd-3d9f-45d0-abfb-6489c8caf1b8`, [`docs/RATIFICATION-6.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-6.0.0.md)): a sealed Episode now proves what its agents were *given* — a context manifest as the sixth field of the Episode root under `spine_algorithm_version` 3 — and the seal proves history, not retention: content behind a sealed pointer can be lawfully erased with a witnessed tombstone and no sealed value moves. The reference package implements the constructions (`astp.core.context_v1`), the store contract and operations (`astp.core.context_operations`, package 2.1.0) and the proof of record's sixth field; the reference deployment writes context entries and has sealed under version 3 since 2026-09-23 ([`IMPLEMENTATION-CONTEXT.md`](https://github.com/scorched-earth-labs/astp/blob/main/IMPLEMENTATION-CONTEXT.md) §7).
+Earlier releases (each is in [`CHANGELOG.md`](https://github.com/scorched-earth-labs/astp/blob/main/CHANGELOG.md)):
 
-**5.1.0.** The protocol was ratified at 5.0.0 (Episode of Record `ce3f569c-9cdc-4a3d-913a-b9d8573d9a28`) and at 5.1.0 the reference deployment (Ignis OS, cutover 2026-09-19) seals under `spine_algorithm_version` 2 — `astp.core.seal_v2.compute_episode_seal_v2` over the adapter's `seal_inputs` reader — with no feature flag and nothing swallowed. A version 2 seal takes its identifiers from the `SealV2` result; `astp.core.schema.SPINE_ALGORITHM_VERSION_CURRENT` names the retained version 1 construction and reads `1` by design. Every construction has machine-readable vectors. The protocol specification is in `SPEC.md`.
+**6.0.0.** The protocol was ratified at 6.0.0 (Episode of Record `80e5a2dd-3d9f-45d0-abfb-6489c8caf1b8`, [`docs/RATIFICATION-6.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-6.0.0.md)): a sealed Episode now proves what its agents were *given* — a context manifest as the sixth field of the Episode root under `spine_algorithm_version` 3 — and the seal proves history, not retention: content behind a sealed pointer can be lawfully erased with a witnessed tombstone and no sealed value moves. The reference package implements the constructions (`astp.core.context_v1`), the store contract and operations (`astp.core.context_operations`, package 2.1.0) and the proof of record's sixth field; the reference deployment writes context entries and has sealed under version 3 since 2026-09-23 ([`IMPLEMENTATION-CONTEXT.md`](https://github.com/scorched-earth-labs/astp/blob/main/IMPLEMENTATION-CONTEXT.md) §7).
+
+**5.1.0.** The protocol was ratified at 5.0.0 (Episode of Record `ce3f569c-9cdc-4a3d-913a-b9d8573d9a28`) and at 5.1.0 the reference deployment (Ignis OS, cutover 2026-09-19) seals under `spine_algorithm_version` 2 — `astp.core.seal_v2.compute_episode_seal_v2` over the adapter's `seal_inputs` reader — with no feature flag and nothing swallowed. A version 2 seal takes its identifiers from the `SealV2` result; `astp.core.schema.SPINE_ALGORITHM_VERSION_CURRENT` names the retained version 1 construction and reads `1` by design. Every construction has machine-readable vectors.
 
 The first consumer of this protocol is Ignis OS, Scorched Earth Labs' agent runtime, and integration tests for the reference adapter run there rather than in this repository. The package is published on [PyPI](https://pypi.org/project/astp/); its version is separate from the protocol version, and each release is recorded in [`CHANGELOG.md`](https://github.com/scorched-earth-labs/astp/blob/main/CHANGELOG.md).
 
@@ -170,7 +176,21 @@ The first consumer of this protocol is Ignis OS, Scorched Earth Labs' agent runt
 
 ## Amendments
 
-Protocol amendments are ratified in a designated Episode of Record and reference the Episode's spine hash for provenance. The Episode of Record is the cryptographic anchor; the document is the human-readable artifact. The Episode of Record for 4.0.0 is `458fb62b-faee-4e42-9f92-c63187c1b59a`; its sealed root reproduces from its stored nodes. The Episode of Record for 5.0.0 is `ce3f569c-9cdc-4a3d-913a-b9d8573d9a28`, sealed 2026-09-18; it ratifies `SPEC.md` by content digest ([`docs/RATIFICATION-5.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-5.0.0.md)). The Episode of Record for 6.0.0 is `80e5a2dd-3d9f-45d0-abfb-6489c8caf1b8`, sealed 2026-09-22; it ratifies the context-commitment amendment and its vectors by content digest ([`docs/RATIFICATION-6.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-6.0.0.md)). The Episode of Record for `PROTOCOL-CONFORMANCE.md` 1.0.0 is `19d4390f-ac46-4840-bc9a-f419c6626fb4`, sealed 2026-10-01 under `spine_algorithm_version` 3; it ratifies the conformance definition by content digest and is itself a conforming record under it ([`docs/RATIFICATION-PROTOCOL-CONFORMANCE-1.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-PROTOCOL-CONFORMANCE-1.0.0.md)). The Episode of Record for `SPEC.md` 6.0.2 as a whole document is `46490010-e8a7-4d79-8092-a1a82de3c93f`, sealed 2026-10-01 under `spine_algorithm_version` 3; it ratifies the specification by the same digest `PATENTS.md` §4.1 pledges against, together with `PROTOCOL-CONFORMANCE.md` 1.0.1 ([`docs/RATIFICATION-SPEC-6.0.2.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-SPEC-6.0.2.md)). The Episode of Record for `PATENTS.md` 1.0.0, the first versioned text of the patent policy, is `df3434bd-6936-441c-a896-254149f2bd48`, sealed 2026-10-01 under `spine_algorithm_version` 3 ([`docs/RATIFICATION-PATENTS-1.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-PATENTS-1.0.0.md)). The Episode of Record for `SPEC.md` 7.0.0, ratified as a whole document, is `a2aa7ef2-8775-4ad7-964e-9678f712796b`, sealed 2026-10-20 under `spine_algorithm_version` 3; it ratifies the specification by the digest `PATENTS.md` §4.1 pledges against, together with `PROTOCOL-CONFORMANCE.md` 1.1.0 and `PATENTS.md` 1.1.0 ([`docs/RATIFICATION-7.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-7.0.0.md)). Exported proofs of record for all seven — files a third party verifies with this package alone (`python -m astp.core.proof_of_record verify <file>`) — are published under [`docs/proofs/`](https://github.com/scorched-earth-labs/astp/tree/main/docs/proofs/). As of the **v3.2.1 integration pass**, both prior amendments are folded into the SPEC body — the amendment documents are retained for provenance only and are no longer normative. Amendment documents retain their authoring numerals; the canonical SPEC version per [`VERSIONING.md`](https://github.com/scorched-earth-labs/astp/blob/main/VERSIONING.md) is shown alongside.
+Protocol amendments are ratified in a designated Episode of Record and reference the Episode's spine hash for provenance. The Episode of Record is the cryptographic anchor; the document is the human-readable artifact. Each ratifies its documents by content digest, and its sealed root reproduces from its stored nodes.
+
+| Ratifies | Episode of Record | Sealed (`spine_algorithm_version`) | Record |
+|----------|-------------------|------------------------------------|--------|
+| `SPEC.md` 4.0.0 | `458fb62b-faee-4e42-9f92-c63187c1b59a` | 2026-08-22 (1) | — |
+| `SPEC.md` 5.0.0 | `ce3f569c-9cdc-4a3d-913a-b9d8573d9a28` | 2026-09-18 (1) | [`RATIFICATION-5.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-5.0.0.md) |
+| `SPEC.md` 6.0.0 — context commitment, with its vectors | `80e5a2dd-3d9f-45d0-abfb-6489c8caf1b8` | 2026-09-22 (2) | [`RATIFICATION-6.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-6.0.0.md) |
+| `PROTOCOL-CONFORMANCE.md` 1.0.0 | `19d4390f-ac46-4840-bc9a-f419c6626fb4` | 2026-10-01 (3) | [`RATIFICATION-PROTOCOL-CONFORMANCE-1.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-PROTOCOL-CONFORMANCE-1.0.0.md) |
+| `SPEC.md` 6.0.2 as a whole document, with `PROTOCOL-CONFORMANCE.md` 1.0.1 | `46490010-e8a7-4d79-8092-a1a82de3c93f` | 2026-10-01 (3) | [`RATIFICATION-SPEC-6.0.2.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-SPEC-6.0.2.md) |
+| `PATENTS.md` 1.0.0 | `df3434bd-6936-441c-a896-254149f2bd48` | 2026-10-01 (3) | [`RATIFICATION-PATENTS-1.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-PATENTS-1.0.0.md) |
+| `SPEC.md` 7.0.0 as a whole document, with `PROTOCOL-CONFORMANCE.md` 1.1.0 and `PATENTS.md` 1.1.0 | `a2aa7ef2-8775-4ad7-964e-9678f712796b` | 2026-10-20 (3) | [`RATIFICATION-7.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-7.0.0.md) |
+
+The 6.0.2 and 7.0.0 records ratify `SPEC.md` by the digest `PATENTS.md` §4.1 pledges against. Exported proofs of record for all seven — files a third party verifies with this package alone (`python -m astp.core.proof_of_record verify <file>`) — are published under [`docs/proofs/`](https://github.com/scorched-earth-labs/astp/tree/main/docs/proofs/).
+
+Two earlier amendments predate this practice. As of the **v3.2.1 integration pass** both are folded into the SPEC body; their documents are retained for provenance only and are no longer normative. They keep their authoring numerals; the canonical SPEC version per [`VERSIONING.md`](https://github.com/scorched-earth-labs/astp/blob/main/VERSIONING.md) is shown alongside.
 
 | Amendment | SPEC version | Status | Now in SPEC | Document (historical) |
 |-----------|--------------|--------|-------------|-----------------------|
@@ -181,7 +201,7 @@ Protocol amendments are ratified in a designated Episode of Record and reference
 
 **SPEC v3.1.0 (Layer 3, MINOR)** formalizes the three-Merkle-layer model and codifies Layer 3 — `WorkflowDeclaration`, `ExecutionNode`, `SkillInvocation`. Layer 3 is cryptographically isolated from Spine integrity by construction (Layer 3 nodes reference Layers 1/2 by ID only; never participate in Spine hashing), so no future Layer-3 change can force a MAJOR bump on Spine grounds. Each Layer 3 node type has a designated Cognitive Implementation Authority (CIA) — sole-writer guarantee as a wire-tier conformance principle.
 
-Each feature surface (§19, §20, §21) has a companion implementation guide and conformance document, listed below. Ratification history: 4.0.0 (`458fb62b-faee-4e42-9f92-c63187c1b59a`), 5.0.0 (`ce3f569c-9cdc-4a3d-913a-b9d8573d9a28`, [`docs/RATIFICATION-5.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-5.0.0.md)), 6.0.0 (`80e5a2dd-3d9f-45d0-abfb-6489c8caf1b8`, [`docs/RATIFICATION-6.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-6.0.0.md)), 7.0.0 (`a2aa7ef2-8775-4ad7-964e-9678f712796b`, [`docs/RATIFICATION-7.0.0.md`](https://github.com/scorched-earth-labs/astp/blob/main/docs/RATIFICATION-7.0.0.md)).
+Each feature surface (§19, §20, §21) has a conformance document, listed below.
 
 ---
 
@@ -201,9 +221,9 @@ The protocol is one normative document (`SPEC.md`) plus, per feature surface, a 
 
 What a Conforming Implementation is — the profiles, the governance rules each carries, and how conformance is demonstrated and claimed: [`PROTOCOL-CONFORMANCE.md`](https://github.com/scorched-earth-labs/astp/blob/main/PROTOCOL-CONFORMANCE.md) 1.1.0, ratified in Episode of Record `a2aa7ef2-8775-4ad7-964e-9678f712796b`; 1.0.1 remains the conformance definition for 6.0.2.
 
-Supporting: [`VERSIONING.md`](https://github.com/scorched-earth-labs/astp/blob/main/VERSIONING.md) (canonical version policy), [`GLOSSARY.md`](https://github.com/scorched-earth-labs/astp/blob/main/GLOSSARY.md), [`CHANGELOG.md`](https://github.com/scorched-earth-labs/astp/blob/main/CHANGELOG.md).
+Supporting: [`VERSIONING.md`](https://github.com/scorched-earth-labs/astp/blob/main/VERSIONING.md) (canonical version policy), [`GLOSSARY.md`](https://github.com/scorched-earth-labs/astp/blob/main/GLOSSARY.md), [`CHANGELOG.md`](https://github.com/scorched-earth-labs/astp/blob/main/CHANGELOG.md), [`GOVERNANCE.md`](https://github.com/scorched-earth-labs/astp/blob/main/GOVERNANCE.md) (how the protocol is changed and ratified), [`SECURITY.md`](https://github.com/scorched-earth-labs/astp/blob/main/SECURITY.md) (reporting a vulnerability).
 
-Historical, retained for provenance only and not to be implemented from: [`docs/history/`](https://github.com/scorched-earth-labs/astp/tree/main/docs/history/) — prior major-version specifications (`SPEC-v1.md`, `SPEC-v3.md`, `SPEC-v4.md`, `SPEC-v5.md`), the two former amendment documents, the ratified amendment drafts from which 5.0.0 and 6.0.0 were folded, and the original architecture vision (`VISION.md`).
+Historical, retained for provenance only and not to be implemented from: [`docs/history/`](https://github.com/scorched-earth-labs/astp/tree/main/docs/history/) — prior major-version specifications (`SPEC-v1.md`, `SPEC-v3.md`, `SPEC-v4.md`, `SPEC-v5.md`, `SPEC-v6.md`), the two former amendment documents, the ratified amendment drafts from which 5.0.0 and 6.0.0 were folded, and the original architecture vision (`VISION.md`).
 
 ---
 
