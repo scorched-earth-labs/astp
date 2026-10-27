@@ -4,8 +4,6 @@
 
 *Developed internally as Project Ariadne.*
 
-When an agent system produces an output you have to answer for, can you establish afterwards what it had on record at that moment — and show that the record has not changed since? ASTP is a protocol for that question: a hash-chained cognitive record, governance rules a conforming implementation must enforce, and write ordering that survives interruption. It makes the evolution of recorded cognitive state inspectable. It does not make reasoning correct, and it does not expose a model's hidden chain of thought.
-
 Bring your own cognitive architecture. ASTP handles the persistence, integrity verification, and coordination of agent state transitions.
 
 📖 **New to ASTP?** Start with the [Glossary](https://github.com/scorched-earth-labs/astp/blob/main/GLOSSARY.md) — every term used in the spec and code, defined once with explicit structural relationships (e.g. how `EpisodeNode` relates to `CognitiveNode` + `EpisodePayload`).
